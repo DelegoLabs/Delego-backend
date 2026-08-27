@@ -92,7 +92,7 @@ export function registerRecoveryRoutes(): Route[] {
     route(
       "DELETE",
       "/recovery/guardians/:guardianId",
-      async (req, res, params) => {
+      async (_req, res, params) => {
         try {
           await removeGuardian(params.guardianId);
           json(res, 204, { data: null, error: null });
@@ -106,7 +106,7 @@ export function registerRecoveryRoutes(): Route[] {
     route(
       "GET",
       "/recovery/guardians/:walletAddress",
-      async (req, res, params) => {
+      async (_req, res, params) => {
         try {
           const guardians = await listGuardians(params.walletAddress);
           json(res, 200, { data: guardians, error: null });
@@ -130,7 +130,7 @@ export function registerRecoveryRoutes(): Route[] {
     }),
 
     // Get recovery request
-    route("GET", "/recovery/requests/:requestId", async (req, res, params) => {
+    route("GET", "/recovery/requests/:requestId", async (_req, res, params) => {
       try {
         const req_ = await getRecoveryRequest(params.requestId);
         json(res, 200, { data: req_, error: null });
