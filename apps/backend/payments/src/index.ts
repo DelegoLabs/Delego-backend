@@ -6,6 +6,7 @@ import { createLogger } from "@delegolabs/utils";
 import { startHttpServer } from "@delegolabs/utils";
 import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
+import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -17,11 +18,43 @@ export type {
   EscrowStatusResult,
   FundEscrowParams,
   FundEscrowResult,
+  PartialReleaseEscrowParams,
+  PartialReleaseResult,
+  PartialRefundEscrowParams,
+  PartialRefundResult,
   RefundEscrowParams,
   RefundResult,
   ReleaseEscrowParams,
   ReleaseResult,
+  RemainingBalance,
 } from "./escrowCoordinator/index.js";
+export { InsufficientEscrowBalanceError } from "./escrowCoordinator/index.js";
+
+// ─── #46 Partial Refunds & Dispute Mediation ───────────────────────────────
+
+export {
+  assignMediator,
+  autoAssignMediator,
+  executeDecision,
+  openDispute,
+  submitEvidence,
+  submitMediationDecision,
+} from "./disputes/mediation.js";
+export { executePartialRefund } from "./disputes/partialRefund.js";
+export { startSlaEscalationScheduler, findAndEscalateBreachedDisputes } from "./disputes/slaEscalation.js";
+export type {
+  Dispute,
+  DisputeEvidenceEntry,
+  DisputeStatus,
+  MediationDecision,
+  PartialRefundRequest,
+  ResolutionType,
+} from "./disputes/types.js";
+export {
+  DisputeNotFoundError,
+  DisputeAlreadyResolvedError,
+  InvalidStateTransitionError,
+} from "./disputes/types.js";
 
 const SERVICE_NAME = "payments";
 const DEFAULT_PORT = 3014;
@@ -49,6 +82,17 @@ if (process.env.ENABLE_SETTLEMENT_RECONCILIATION !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping reconciliation scheduler");
     stopScheduler();
+  });
+}
+
+// ─── #46 Dispute SLA Escalation ─────────────────────────────────────────────
+
+if (process.env.ENABLE_DISPUTE_SLA_ESCALATION !== "false") {
+  const stopSlaScheduler = startSlaEscalationScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping dispute SLA escalation scheduler");
+    stopSlaScheduler();
   });
 }
 

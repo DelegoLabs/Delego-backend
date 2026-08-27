@@ -14,6 +14,24 @@ import {
   validateReleaseRequest,
   type ValidationError,
 } from "./validation.js";
+import { InsufficientEscrowBalanceError } from "./escrowCoordinator/index.js";
+import { assignMediator, executeDecision, openDispute, submitEvidence, submitMediationDecision } from "./disputes/mediation.js";
+import { executePartialRefund, InvalidPartialRefundAmountError } from "./disputes/partialRefund.js";
+import { getDisputeStore } from "./disputes/disputeStore.js";
+import { listAuditLogForDispute } from "./disputes/auditLog.js";
+import {
+  DisputeAlreadyResolvedError,
+  DisputeNotFoundError,
+  InvalidResolutionAmountsError,
+  InvalidStateTransitionError,
+} from "./disputes/types.js";
+import {
+  validateAssignMediatorRequest,
+  validateMediationDecision,
+  validateOpenDisputeRequest,
+  validatePartialRefundRequest,
+  validateSubmitEvidenceRequest,
+} from "./disputes/validation.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -57,6 +75,45 @@ function isDuplicateKeyError(err: unknown): boolean {
     const code = (err as { code?: string }).code;
     const message = (err as { message?: string }).message ?? "";
     return code === "23505" || message.includes("duplicate key") || message.includes("unique constraint");
+  }
+  return false;
+}
+
+/**
+ * Maps the typed errors thrown by the disputes/partial-refund service layer
+ * to HTTP status codes. Returns `true` if `err` was handled (a response was
+ * sent), `false` otherwise so the caller can fall back to a generic 400/500.
+ */
+function sendDisputeError(res: ServerResponse, err: unknown): boolean {
+  if (err instanceof InsufficientEscrowBalanceError) {
+    json(res, 400, {
+      data: null,
+      error: {
+        code: "INSUFFICIENT_ESCROW_BALANCE",
+        message: err.message,
+        details: { escrowId: err.escrowId, remainingAmount: err.remainingAmount, requestedAmount: err.requestedAmount },
+      },
+    });
+    return true;
+  }
+  if (err instanceof InvalidPartialRefundAmountError || err instanceof InvalidResolutionAmountsError) {
+    json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+    return true;
+  }
+  if (err instanceof DisputeNotFoundError) {
+    json(res, 404, { data: null, error: { code: "DISPUTE_NOT_FOUND", message: err.message } });
+    return true;
+  }
+  if (err instanceof DisputeAlreadyResolvedError) {
+    json(res, 409, { data: null, error: { code: "DISPUTE_ALREADY_RESOLVED", message: err.message } });
+    return true;
+  }
+  if (err instanceof InvalidStateTransitionError) {
+    json(res, 409, {
+      data: null,
+      error: { code: "INVALID_STATE_TRANSITION", message: err.message, details: { from: err.from, to: err.to } },
+    });
+    return true;
   }
   return false;
 }
@@ -273,6 +330,138 @@ export function registerRoutes(): Route[] {
           return;
         }
         sendOperationError(res, "DELIVERY_WEBHOOK_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #46 — Partial Refunds & Dispute Mediation ────────────────────
+
+    route("POST", "/escrow/:escrowId/partial-refund", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validatePartialRefundRequest(body, params.escrowId);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+        if (!(await ensureContractConfig(res))) return;
+
+        const outcome = await executePartialRefund(validated.value);
+        json(res, outcome.success ? 200 : 502, { data: outcome, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "PARTIAL_REFUND_FAILED", err);
+      }
+    }),
+
+    route("POST", "/escrow/:escrowId/disputes", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateOpenDisputeRequest(body, params.escrowId);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const dispute = await openDispute(validated.value);
+        json(res, 201, { data: dispute, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "DISPUTE_OPEN_FAILED", err);
+      }
+    }),
+
+    route("GET", "/disputes/:disputeId", async (_req, res, params) => {
+      const dispute = await getDisputeStore().findById(params.disputeId);
+      if (!dispute) {
+        json(res, 404, { data: null, error: { code: "DISPUTE_NOT_FOUND", message: `Dispute ${params.disputeId} not found` } });
+        return;
+      }
+      const auditLog = await listAuditLogForDispute(params.disputeId);
+      json(res, 200, { data: { ...dispute, auditLog }, error: null });
+    }),
+
+    route("POST", "/disputes/:disputeId/evidence", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateSubmitEvidenceRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const dispute = await submitEvidence(params.disputeId, validated.value);
+        json(res, 200, { data: dispute, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "DISPUTE_EVIDENCE_FAILED", err);
+      }
+    }),
+
+    route("POST", "/disputes/:disputeId/mediator", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateAssignMediatorRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const dispute = await assignMediator(params.disputeId, validated.value.mediator, validated.value.assignedBy);
+        json(res, 200, { data: dispute, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "DISPUTE_MEDIATOR_ASSIGN_FAILED", err);
+      }
+    }),
+
+    route("POST", "/disputes/:disputeId/decision", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateMediationDecision(body, params.disputeId);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+        if (!(await ensureContractConfig(res))) return;
+
+        const dispute = await submitMediationDecision(validated.value);
+        json(res, 200, { data: dispute, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "DISPUTE_DECISION_FAILED", err);
+      }
+    }),
+
+    // Retries executing an already-recorded decision (e.g. after a transient
+    // Soroban failure left the dispute in "decided" rather than "resolved").
+    route("POST", "/disputes/:disputeId/decision/retry", async (_req, res, params) => {
+      try {
+        if (!(await ensureContractConfig(res))) return;
+        const dispute = await executeDecision(params.disputeId);
+        json(res, 200, { data: dispute, error: null });
+      } catch (err) {
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "DISPUTE_DECISION_RETRY_FAILED", err);
       }
     }),
   ];

@@ -35,6 +35,7 @@ The incremental migrations are:
 | `013_soroban_transaction_ledger.sql` | Idempotent Soroban transaction ledger for submission, confirmation, and failure states |
 | `014_payment_records_dispute.sql` | Dispute transactions on payment_records for the escrow coordinator |
 | `015_oauth_providers.sql` | OAuth2 provider account linking |
+| `016_disputes.sql` | Partial refund balance tracking plus dispute mediation, evidence, audit log, and reputation tables (Issue #46) |
 
 ## Naming rules
 
