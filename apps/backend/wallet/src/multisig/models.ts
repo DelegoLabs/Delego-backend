@@ -9,7 +9,6 @@ import type {
   ProposalTransaction,
   ProposalSignature,
   ProposalStatus,
-  SignerUpdateAction,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------

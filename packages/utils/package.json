@@ -24,6 +24,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@delegolabs/types": "workspace:*",
     "@stellar/stellar-sdk": "^15.1.0"
   },
   "devDependencies": {

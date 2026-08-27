@@ -67,7 +67,7 @@ export function registerMultiSigRoutes(): Route[] {
     }),
 
     // Get wallet
-    route("GET", "/multisig/wallets/:walletId", async (req, res, params) => {
+    route("GET", "/multisig/wallets/:walletId", async (_req, res, params) => {
       try {
         const wallet = await getWallet(params.walletId);
         json(res, 200, { data: wallet, error: null });
@@ -128,7 +128,7 @@ export function registerMultiSigRoutes(): Route[] {
     route(
       "GET",
       "/multisig/wallets/:walletId/proposals",
-      async (req, res, params) => {
+      async (_req, res, params) => {
         try {
           const proposals = await listProposals(params.walletId);
           json(res, 200, { data: proposals, error: null });
@@ -160,7 +160,7 @@ export function registerMultiSigRoutes(): Route[] {
     route(
       "GET",
       "/multisig/wallets/:walletId/proposals/:proposalId",
-      async (req, res, params) => {
+      async (_req, res, params) => {
         try {
           const proposal = await getProposal(
             params.walletId,

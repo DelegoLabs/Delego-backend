@@ -48,7 +48,7 @@ export function registerBatchingRoutes(): Route[] {
     }),
 
     // Get batch status / result
-    route("GET", "/transactions/batch/:batchId", async (req, res, params) => {
+    route("GET", "/transactions/batch/:batchId", async (_req, res, params) => {
       try {
         const result = await getBatchStatus(params.batchId);
         json(res, 200, { data: result, error: null });
