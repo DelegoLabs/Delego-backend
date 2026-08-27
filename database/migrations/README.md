@@ -36,6 +36,7 @@ The incremental migrations are:
 | `014_payment_records_dispute.sql` | Dispute transactions on payment_records for the escrow coordinator |
 | `015_oauth_providers.sql` | OAuth2 provider account linking |
 | `016_disputes.sql` | Partial refund balance tracking plus dispute mediation, evidence, audit log, and reputation tables (Issue #46) |
+| `017_subscriptions.sql` | Recurring payment subscription plans, subscriptions, and the per-period escrow charge ledger (Issue #47) |
 
 ## Naming rules
 

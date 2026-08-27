@@ -7,6 +7,7 @@ import { startHttpServer } from "@delegolabs/utils";
 import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
+import { startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -56,6 +57,35 @@ export {
   InvalidStateTransitionError,
 } from "./disputes/types.js";
 
+// ─── #47 Recurring Payment Subscriptions with Escrow ───────────────────────
+
+export {
+  cancelSubscription,
+  changeSubscriptionPlan,
+  createSubscription,
+  createSubscriptionPlan,
+  getSubscription,
+  getSubscriptionPlan,
+  pauseSubscription,
+  renewSubscription,
+  resumeSubscription,
+} from "./subscriptions/service.js";
+export { chargeSubscriptionPeriod } from "./subscriptions/billing.js";
+export { runBillingCycle, startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
+export type {
+  BillingInterval,
+  Subscription,
+  SubscriptionEvent,
+  SubscriptionPlan,
+  SubscriptionStatus,
+} from "./subscriptions/types.js";
+export {
+  SubscriptionNotActiveError,
+  SubscriptionNotFoundError,
+  SubscriptionPlanNotFoundError,
+  UnsupportedPaymentMethodError,
+} from "./subscriptions/types.js";
+
 const SERVICE_NAME = "payments";
 const DEFAULT_PORT = 3014;
 
@@ -93,6 +123,17 @@ if (process.env.ENABLE_DISPUTE_SLA_ESCALATION !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping dispute SLA escalation scheduler");
     stopSlaScheduler();
+  });
+}
+
+// ─── #47 Subscription Billing ───────────────────────────────────────────────
+
+if (process.env.ENABLE_SUBSCRIPTION_BILLING !== "false") {
+  const stopBillingScheduler = startSubscriptionBillingScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping subscription billing scheduler");
+    stopBillingScheduler();
   });
 }
 

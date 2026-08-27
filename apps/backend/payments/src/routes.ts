@@ -32,6 +32,30 @@ import {
   validatePartialRefundRequest,
   validateSubmitEvidenceRequest,
 } from "./disputes/validation.js";
+import {
+  cancelSubscription,
+  changeSubscriptionPlan,
+  createSubscription,
+  createSubscriptionPlan,
+  getSubscription,
+  getSubscriptionPlan,
+  pauseSubscription,
+  renewSubscription,
+  resumeSubscription,
+} from "./subscriptions/service.js";
+import {
+  SubscriptionNotActiveError,
+  SubscriptionNotFoundError,
+  SubscriptionPlanNotFoundError,
+  UnsupportedPaymentMethodError,
+} from "./subscriptions/types.js";
+import {
+  validateCancelSubscriptionRequest,
+  validateChangePlanRequest,
+  validateCreatePlanRequest,
+  validateCreateSubscriptionRequest,
+  validateRenewRequest,
+} from "./subscriptions/validation.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -113,6 +137,30 @@ function sendDisputeError(res: ServerResponse, err: unknown): boolean {
       data: null,
       error: { code: "INVALID_STATE_TRANSITION", message: err.message, details: { from: err.from, to: err.to } },
     });
+    return true;
+  }
+  return false;
+}
+
+/** Maps typed errors from the subscriptions service layer to HTTP status codes. */
+function sendSubscriptionError(res: ServerResponse, err: unknown): boolean {
+  if (err instanceof SubscriptionPlanNotFoundError) {
+    json(res, 404, { data: null, error: { code: "SUBSCRIPTION_PLAN_NOT_FOUND", message: err.message } });
+    return true;
+  }
+  if (err instanceof SubscriptionNotFoundError) {
+    json(res, 404, { data: null, error: { code: "SUBSCRIPTION_NOT_FOUND", message: err.message } });
+    return true;
+  }
+  if (err instanceof SubscriptionNotActiveError) {
+    json(res, 409, {
+      data: null,
+      error: { code: "SUBSCRIPTION_NOT_ACTIVE", message: err.message, details: { status: err.status } },
+    });
+    return true;
+  }
+  if (err instanceof UnsupportedPaymentMethodError) {
+    json(res, 400, { data: null, error: { code: "UNSUPPORTED_PAYMENT_METHOD", message: err.message } });
     return true;
   }
   return false;
@@ -462,6 +510,153 @@ export function registerRoutes(): Route[] {
       } catch (err) {
         if (sendDisputeError(res, err)) return;
         sendOperationError(res, "DISPUTE_DECISION_RETRY_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #47 — Recurring Payment Subscriptions with Escrow ────────────
+
+    route("POST", "/subscriptions/plans", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateCreatePlanRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const plan = await createSubscriptionPlan(validated.value);
+        json(res, 201, { data: plan, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "SUBSCRIPTION_PLAN_CREATE_FAILED", err);
+      }
+    }),
+
+    route("GET", "/subscriptions/plans/:planId", async (_req, res, params) => {
+      try {
+        const plan = await getSubscriptionPlan(params.planId);
+        json(res, 200, { data: plan, error: null });
+      } catch (err) {
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_PLAN_FETCH_FAILED", err);
+      }
+    }),
+
+    route("POST", "/subscriptions", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateCreateSubscriptionRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const subscription = await createSubscription(validated.value);
+        json(res, 201, { data: subscription, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_CREATE_FAILED", err);
+      }
+    }),
+
+    route("GET", "/subscriptions/:subscriptionId", async (_req, res, params) => {
+      try {
+        const subscription = await getSubscription(params.subscriptionId);
+        json(res, 200, { data: subscription, error: null });
+      } catch (err) {
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_FETCH_FAILED", err);
+      }
+    }),
+
+    route("POST", "/subscriptions/:subscriptionId/pause", async (_req, res, params) => {
+      try {
+        const subscription = await pauseSubscription(params.subscriptionId);
+        json(res, 200, { data: subscription, error: null });
+      } catch (err) {
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_PAUSE_FAILED", err);
+      }
+    }),
+
+    route("POST", "/subscriptions/:subscriptionId/resume", async (_req, res, params) => {
+      try {
+        const subscription = await resumeSubscription(params.subscriptionId);
+        json(res, 200, { data: subscription, error: null });
+      } catch (err) {
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_RESUME_FAILED", err);
+      }
+    }),
+
+    route("POST", "/subscriptions/:subscriptionId/cancel", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateCancelSubscriptionRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const subscription = await cancelSubscription(params.subscriptionId, validated.value);
+        json(res, 200, { data: subscription, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_CANCEL_FAILED", err);
+      }
+    }),
+
+    route("PATCH", "/subscriptions/:subscriptionId/plan", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateChangePlanRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const subscription = await changeSubscriptionPlan(params.subscriptionId, validated.value.planId);
+        json(res, 200, { data: subscription, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_PLAN_CHANGE_FAILED", err);
+      }
+    }),
+
+    // Manual/forced renewal — also what the billing scheduler calls internally.
+    route("POST", "/subscriptions/:subscriptionId/renew", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateRenewRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const subscription = await renewSubscription(params.subscriptionId, { ...validated.value, force: true });
+        json(res, 200, { data: subscription, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendSubscriptionError(res, err)) return;
+        sendOperationError(res, "SUBSCRIPTION_RENEW_FAILED", err);
       }
     }),
   ];
