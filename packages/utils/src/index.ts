@@ -201,3 +201,4 @@ export {
   type LogMetrics,
   type RetentionValidationResult,
 } from "./logAggregation.js";
+export * from "./softDelete/index.js";
