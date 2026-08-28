@@ -8,6 +8,7 @@ import { bodyLimitMiddleware } from "../routes/api-v1.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
 import { requestIdMiddleware } from "../middleware/requestId.js";
 import { compressionMiddleware } from "../middleware/compression.js";
+import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -29,6 +30,7 @@ startHttpServer({
     bodyLimitMiddleware(),
     rateLimitMiddleware(),
     compressionMiddleware(),
+    requestResponseLoggingMiddleware(),
   ],
   routes: registerRoutes(),
 });
