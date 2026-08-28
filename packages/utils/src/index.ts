@@ -202,3 +202,4 @@ export {
   type RetentionValidationResult,
 } from "./logAggregation.js";
 export * from "./softDelete/index.js";
+export * from "./audit/index.js";
