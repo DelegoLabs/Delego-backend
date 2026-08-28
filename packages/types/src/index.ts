@@ -14,3 +14,4 @@ export * from "./security.js";
 export * from "./coverage.js";
 export * from "./integration-testing.js";
 export * from "./e2e-testing.js";
+export * from "./certificate.js";
