@@ -4,11 +4,11 @@
   "private": true,
   "description": "Delego wallet service",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/wallet/src/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node dist/wallet/src/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'TODO: add eslint'",
     "test": "vitest run"
@@ -17,6 +17,7 @@
     "@aws-sdk/client-kms": "^3.750.0",
     "@delegolabs/types": "workspace:*",
     "@delegolabs/utils": "workspace:*",
+    "@delegolabs/payments": "workspace:*",
     "@stellar/stellar-sdk": "^15.1.0",
     "bullmq": "^5.78.1",
     "ioredis": "^5.11.1",

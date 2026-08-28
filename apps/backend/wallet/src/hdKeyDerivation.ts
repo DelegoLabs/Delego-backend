@@ -150,8 +150,6 @@ function derivePath(
 // BIP-39 mnemonic handling
 // ---------------------------------------------------------------------------
 
-const BIP39_WORDLIST_SIZE = 2048;
-
 /**
  * Validate a BIP-39 mnemonic (checksum check).
  * Returns true if the mnemonic is valid, false otherwise.
@@ -161,8 +159,6 @@ export function validateMnemonic(mnemonic: string): boolean {
   if (words.length % 3 !== 0 || words.length < 12 || words.length > 24) {
     return false;
   }
-  // Convert words to indices
-  const indices: number[] = [];
   for (const word of words) {
     // We do a simple length check since we can't include the full wordlist.
     // The checksum validation is done via the entropy encoding.
@@ -217,7 +213,7 @@ function mnemonicToEntropy(mnemonic: string): Buffer {
   // simplified derivation that produces a deterministic result from the
   // mnemonic words for validation purposes.
   const combined = Buffer.from(words.join(" "), "utf-8");
-  const derived = crypto.pbkdf2Sync("sha512", combined, salt, iterations, keyLen);
+  const derived = crypto.pbkdf2Sync(combined, salt, iterations, keyLen, "sha512");
 
   return derived.subarray(0, entropyBytes);
 }
@@ -309,7 +305,7 @@ export function deriveKeyHierarchy(
     publicKey: masterKey.toString("hex"),
     chainCode: masterChainHex,
     depth: 0,
-    parentFingerprint: 0,
+    parentFingerprint: masterFp,
     childNumber: 0,
     isHardened: false,
   };

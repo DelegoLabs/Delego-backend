@@ -5,6 +5,7 @@
   "description": "Delego payments service",
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./src/index.ts",
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",

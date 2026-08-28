@@ -10,6 +10,14 @@ import { startReconciliationScheduler } from "./reconciliation/settlementReconci
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 export type { SettlementDiscrepancy } from "./reconciliation/settlementReconciler.js";
+
+// ─── Fee estimator (consumed by the wallet service) ────────────────────────
+export {
+  estimateTransactionFee,
+  clearFeeCache,
+  getCachedFeeEstimate,
+} from "../escrow/feeEstimator.js";
+export type { FeeEstimate } from "../escrow/feeEstimator.js";
 export type {
   DisputeEscrowParams,
   DisputeResult,
