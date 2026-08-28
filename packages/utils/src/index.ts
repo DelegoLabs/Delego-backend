@@ -152,3 +152,23 @@ export {
   type FileUploadValidationInput,
   type ValidationErrorList,
 } from "./securityEventDetection.js";
+export {
+  generateApiKey,
+  verifyApiKey,
+  rotateApiKey,
+  computeRotationRevocationAt,
+  isExpired,
+  isIpAllowed,
+  hasScope,
+  authorizeApiKeyRequest,
+  checkForCompromise,
+  type ApiKeyStatus,
+  type ApiKey,
+  type ApiKeyConfig,
+  type ApiKeyUsage,
+  type GeneratedApiKey,
+  type ApiKeyAuthDenialReason,
+  type ApiKeyAuthResult,
+  type CompromiseCheckInput,
+  type CompromiseCheckResult,
+} from "./apiKeyManagement.js";
