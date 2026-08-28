@@ -14,3 +14,7 @@ export * from "./security.js";
 export * from "./coverage.js";
 export * from "./integration-testing.js";
 export * from "./e2e-testing.js";
+export * from "./request-logging.js";
+export * from "./api-key-scoping.js";
+export * from "./lua-script.js";
+export * from "./alert-routing.js";
