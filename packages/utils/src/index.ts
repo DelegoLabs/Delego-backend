@@ -73,3 +73,7 @@ export type {
   Serializer,
   SerializationFormat,
 } from "./redis/types.js";
+export * from "./database/queryPerformance.js";
+export * from "./database/tenantPoolManager.js";
+export * from "./redis/clusterClient.js";
+

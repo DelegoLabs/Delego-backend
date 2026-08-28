@@ -139,10 +139,9 @@ export class RedisPubSubManager {
       this.subscriber = new InMemoryRedisMock();
     } else {
       try {
-        const require = createRequire(import.meta.url);
-        const { Redis } = require("ioredis") as { Redis: new (url: string) => RedisClient };
-        this.publisher = new Redis(this.config.url);
-        this.subscriber = new Redis(this.config.url);
+        const ioredis = require("ioredis");
+        this.publisher = new ioredis.Redis(this.config.url);
+        this.subscriber = new ioredis.Redis(this.config.url);
       } catch {
         this.publisher = new InMemoryRedisMock();
         this.subscriber = new InMemoryRedisMock();
@@ -313,6 +312,7 @@ export class RedisPubSubManager {
     if (channelMetrics) {
       channelMetrics.messagesDelivered++;
       channelMetrics.lastDeliveredAt = new Date().toISOString();
+      channelMetrics.avgLatencyMs = Date.now() - startMs;
     }
   }
 
@@ -343,16 +343,60 @@ export class RedisPubSubManager {
       }
     }
 
-    this.addToDeadLetter(message, `Failed after ${subscription.maxRetries} attempts`, subscription.id);
+    // Dead letter handling
+    this.deadLetters.push({
+      message,
+      error: `Failed after ${subscription.maxRetries} attempts`,
+      attempts: subscription.maxRetries,
+      failedAt: new Date().toISOString(),
+      subscriptionId: subscription.id,
+    });
 
-    const channelMetrics = this.metrics.get(message.channel);
+    const channelMetrics = this.metrics.get(subscription.channel);
     if (channelMetrics) {
       channelMetrics.failedDeliveries++;
       channelMetrics.deadLettered++;
     }
+
+    log.error("Message moved to dead letter queue", {
+      subscriptionId: subscription.id,
+      messageId: message.id,
+    });
   }
 
-  // ─── Acknowledgment ───────────────────────────────────────────────────
+  // ─── Status & Metrics ───────────────────────────────────────────────────
+
+  getHealth(): PubSubHealth {
+    return {
+      connected: this.connected,
+      channels: this.channels.size,
+      subscribers: this.subscriptions.size,
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      lastError: undefined,
+      lastErrorAt: undefined,
+    };
+  }
+
+  getMetrics(channel?: string): PubSubMetrics | PubSubMetrics[] {
+    if (channel) {
+      return (
+        this.metrics.get(channel) ?? {
+          channel,
+          messagesPublished: 0,
+          messagesDelivered: 0,
+          activeSubscribers: 0,
+          avgLatencyMs: 0,
+          failedDeliveries: 0,
+          deadLettered: 0,
+        }
+      );
+    }
+    return [...this.metrics.values()];
+  }
+
+  getDeadLetterMessages(): DeadLetterMessage[] {
+    return [...this.deadLetters];
+  }
 
   acknowledgeMessage(messageId: string): void {
     const pending = this.pendingAcks.get(messageId);
@@ -362,70 +406,19 @@ export class RedisPubSubManager {
     }
   }
 
-  // ─── Dead Letter Queue ─────────────────────────────────────────────────
-
-  private addToDeadLetter(message: PubSubMessage, error: string, subscriptionId: string): void {
-    const entry: DeadLetterMessage = {
-      message,
-      error,
-      attempts: 0,
-      failedAt: new Date().toISOString(),
-      subscriptionId,
-    };
-    this.deadLetters.push(entry);
-
-    log.warn("Message added to dead letter queue", {
-      messageId: message.id,
-      channel: message.channel,
-      error,
-    });
-  }
-
-  getDeadLetters(channel?: string): DeadLetterMessage[] {
-    if (channel) return this.deadLetters.filter((d) => d.message.channel === channel);
-    return [...this.deadLetters];
-  }
-
-  clearDeadLetters(): void {
-    this.deadLetters.length = 0;
-  }
-
-  // ─── Metrics ──────────────────────────────────────────────────────────
-
-  getMetrics(channel?: string): PubSubMetrics[] {
-    if (channel) {
-      const m = this.metrics.get(channel);
-      return m ? [m] : [];
-    }
-    return [...this.metrics.values()];
-  }
-
-  // ─── Health Check ─────────────────────────────────────────────────────
-
-  getHealth(): PubSubHealth {
-    return {
-      connected: this.connected,
-      channels: this.channels.size,
-      subscribers: this.subscriptions.size,
-      uptime: Date.now() - this.startTime,
-    };
-  }
-
-  // ─── Lifecycle ────────────────────────────────────────────────────────
-
   async close(): Promise<void> {
-    this.connected = false;
-    for (const timer of this.pendingAcks.values()) {
-      clearTimeout(timer.timer);
+    for (const pending of this.pendingAcks.values()) {
+      clearTimeout(pending.timer);
     }
     this.pendingAcks.clear();
     await this.publisher.quit();
     await this.subscriber.quit();
-    log.info("Pub/Sub manager closed");
+    this.connected = false;
+    log.info("Redis Pub/Sub manager closed");
   }
 }
 
-// ─── Singleton ──────────────────────────────────────────────────────────────
+// ─── Module Singleton ───────────────────────────────────────────────────────
 
 let defaultManager: RedisPubSubManager | null = null;
 
@@ -440,10 +433,4 @@ export function getRedisPubSubManager(
 
 export function resetRedisPubSubManager(): void {
   defaultManager = null;
-}
-
-function createRequire(_importMetaUrl: string): NodeRequire {
-  return typeof require !== "undefined" ? require : (() => {
-    throw new Error("require is not available in ESM context");
-  }) as NodeRequire;
 }

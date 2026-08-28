@@ -80,6 +80,7 @@ export interface Serializer {
 
 // ─── Connection Types ───────────────────────────────────────────────────────
 
+export type PubSubConfig = RedisPubSubConfig;
 export interface RedisPubSubConfig {
   url: string;
   serializer: SerializationFormat;
