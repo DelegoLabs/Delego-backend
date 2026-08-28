@@ -172,3 +172,18 @@ export {
   type CompromiseCheckInput,
   type CompromiseCheckResult,
 } from "./apiKeyManagement.js";
+export {
+  sampleTrace,
+  buildSpanAttributes,
+  buildHttpSpanAttributes,
+  buildDbSpanAttributes,
+  buildErrorSpanAttributes,
+  computeTraceMetrics,
+  type SamplerType,
+  type TraceExporterType,
+  type Propagator,
+  type TraceConfig,
+  type SpanAttributes,
+  type TraceMetrics,
+  type SampleContext,
+} from "./tracing.js";
