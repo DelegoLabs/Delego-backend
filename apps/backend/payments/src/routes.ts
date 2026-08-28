@@ -316,9 +316,47 @@ export function registerRoutes(): Route[] {
     }),
 
     // Issue #363 — delivery-confirmation webhook auto-triggers escrow release.
+    //
+    // Issue #24/#445 — this endpoint accepted the webhook with no signature
+    // verification at all: anyone who could reach it could forge a delivery
+    // confirmation and trigger escrow release. Verified the same way as
+    // /escrow/:escrowId/delivery-confirmed (issue #45) — HMAC-SHA256 over the
+    // raw body, constant-time comparison, via hmac.ts — reusing that route's
+    // ESCROW_WEBHOOK_SECRET since both endpoints sit in the same trust
+    // domain (a delivery-confirmation webhook driving escrow release).
     route("POST", "/webhooks/delivery-confirmation", async (req, res) => {
       try {
-        const body = await readJsonBody(req);
+        const rawBody = await readRawBody(req);
+
+        const secret = getWebhookSecret();
+        if (!secret) {
+          json(res, 503, {
+            data: null,
+            error: { code: "CONFIG_ERROR", message: "ESCROW_WEBHOOK_SECRET is not configured" },
+          });
+          return;
+        }
+
+        const signatureHeaderRaw =
+          req.headers[WEBHOOK_SIGNATURE_HEADER] ?? req.headers["x-webhook-signature"] ?? req.headers["x-hub-signature-256"];
+        const signatureHeader = Array.isArray(signatureHeaderRaw) ? signatureHeaderRaw[0] : signatureHeaderRaw;
+
+        if (!verifyWebhookSignature(rawBody, signatureHeader, secret)) {
+          json(res, 401, {
+            data: null,
+            error: { code: "UNAUTHORIZED", message: "Invalid or missing webhook signature" },
+          });
+          return;
+        }
+
+        let body: Record<string, unknown>;
+        try {
+          body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
+        } catch {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+
         const { webhookId, orderId, escrowId, escrowContractId, callerAddress, confirmedAt } = body;
 
         if (
