@@ -187,3 +187,17 @@ export {
   type TraceMetrics,
   type SampleContext,
 } from "./tracing.js";
+export {
+  formatLogEntry,
+  serializeLogEntry,
+  matchesLogQuery,
+  validateRetentionPolicies,
+  isLogPipelineHealthy,
+  type LogLevel,
+  type LogEntry,
+  type LogQuery,
+  type StorageClass,
+  type LogRetentionPolicy,
+  type LogMetrics,
+  type RetentionValidationResult,
+} from "./logAggregation.js";
