@@ -100,3 +100,34 @@ export type {
   Serializer,
   SerializationFormat,
 } from "./redis/types.js";
+export {
+  TaggedCache,
+  type TaggedCacheEntry,
+  type TaggedCacheRedisClient,
+  type RedisPipeline,
+  type SetOptions as TaggedCacheSetOptions,
+  type InvalidationResult,
+} from "./cache/taggedCache.js";
+export {
+  SlidingWindowRateLimiter,
+  type RateLimitRedisClient,
+  type RateLimitRule,
+  type RateLimitTier,
+  type RateLimitCheck,
+  type RateLimitResult,
+} from "./rateLimit/slidingWindowRateLimiter.js";
+export {
+  RedisSessionStore,
+  type SessionRedisClient,
+  type Session,
+  type SessionConfig,
+  type CreateSessionInput,
+} from "./session/redisSessionStore.js";
+export {
+  ServiceMetricsRegistry,
+  type Counter,
+  type Gauge,
+  type Histogram,
+  type RedMetrics,
+  type AlertRule,
+} from "./metrics/serviceMetrics.js";
