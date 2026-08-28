@@ -131,3 +131,24 @@ export {
   type RedMetrics,
   type AlertRule,
 } from "./metrics/serviceMetrics.js";
+export {
+  escapeHtml,
+  isPathTraversalSafe,
+  validateSection,
+  validateRequest,
+  type FieldType,
+  type ValidationRule,
+  type ValidationSchema,
+  type ValidationError,
+  type ValidationResult,
+} from "./inputValidation.js";
+export {
+  detectSuspiciousPatterns,
+  buildSecurityEvents,
+  validateFileUpload,
+  type SecurityEventType,
+  type SecurityEventSeverity,
+  type SecurityEvent,
+  type FileUploadValidationInput,
+  type ValidationErrorList,
+} from "./securityEventDetection.js";
