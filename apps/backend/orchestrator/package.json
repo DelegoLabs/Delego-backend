@@ -23,7 +23,7 @@
     "sequelize": "^6.37.8"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.3.0",
     "@types/pg": "^8.20.0",
     "ioredis-mock": "^8.13.1",
     "tsx": "^4.19.0",
