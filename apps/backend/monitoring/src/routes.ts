@@ -6,7 +6,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { json } from "@delegolabs/utils";
 import { extractAuth, getAuthenticatedUserContext } from "../../gateway/middleware/auth.js";
-import { unauthorized, forbidden, badRequest, notFound, sendApiError } from "../../gateway/src/errors.js";
+import { unauthorized, forbidden, badRequest, notFound } from "../../gateway/src/errors.js";
 import {
   createSchedule,
   getSchedule,
@@ -14,48 +14,26 @@ import {
   updateSchedule,
   deleteSchedule,
   getCurrentOnCall,
-  getOnCallUsers,
-  addOverride,
-  removeOverride,
-  createHandoff,
-  acknowledgeHandoff,
-  getHandoffs,
   getTeamSchedules,
 } from "./schedule.js";
 import {
   createPolicy,
   getPolicy,
   listPolicies,
-  updatePolicy,
-  deletePolicy,
-  getActiveEscalation,
-  resolveEscalation,
-  getEscalationHistory,
 } from "./escalation.js";
 import {
   createRoute,
-  getRoute,
   listRoutes,
-  updateRoute,
-  deleteRoute,
   createAlert,
-  getAlert,
   listAlerts,
   acknowledgeAlert,
   resolveAlert,
-  silenceAlert,
-  removeSilence,
   getActiveSilences,
-  getAlertGroups,
 } from "./alertRouter.js";
 import {
   registerChannel,
-  getChannel,
   listChannels,
-  updateChannel,
-  deleteChannel,
   sendNotification,
-  getDeliveryLog,
 } from "./notifications.js";
 import type { OnCallSchedule, EscalationPolicy, AlertRoute, Alert, NotificationChannel } from "@delegolabs/types";
 

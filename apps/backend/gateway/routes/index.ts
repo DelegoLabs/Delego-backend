@@ -42,7 +42,7 @@ import {
   rollbackScriptHandler,
   getScriptMetricsHandler,
   deleteScriptHandler,
-} from "../lua-scripts/src/routes.js";
+} from "../../lua-scripts/src/routes.js";
 import {
   createScheduleHandler,
   listSchedulesHandler,
@@ -63,7 +63,7 @@ import {
   listChannelsHandler,
   sendNotificationHandler,
   monitoringDashboardHandler,
-} from "../monitoring/src/routes.js";
+} from "../../monitoring/src/routes.js";
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {

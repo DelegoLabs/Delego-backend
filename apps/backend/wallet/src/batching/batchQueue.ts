@@ -112,7 +112,7 @@ function calculateDynamicBatchSize(
   let accumulatedGas = 0n;
   let count = 0;
 
-  for (const item of items) {
+  for (const _item of items) {
     const opGas = BigInt(DEFAULT_OP_GAS_STROOPS);
     accumulatedGas += opGas;
     if (accumulatedGas > maxGas) break;
