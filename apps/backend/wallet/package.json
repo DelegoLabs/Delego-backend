@@ -17,7 +17,7 @@
     "@aws-sdk/client-kms": "^3.750.0",
     "@delegolabs/types": "workspace:*",
     "@delegolabs/utils": "workspace:*",
-    "@stellar/stellar-sdk": "^16.0.0",
+    "@stellar/stellar-sdk": "^17.0.0",
     "bullmq": "^5.78.1",
     "ioredis": "^5.11.1",
     "pg": "^8.21.0",
