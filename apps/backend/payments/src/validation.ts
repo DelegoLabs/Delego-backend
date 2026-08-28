@@ -505,7 +505,7 @@ const ACCEPTED_REFUND_REASON_CODES: OnChainRefundReasonCode[] = [
   'system_error',
 ];
 
-function validateRefundReasonCode(
+export function validateRefundReasonCode(
   body: Record<string, unknown>
 ): ValidationResult<OnChainRefundReasonCode> {
   const raw = body.refundReasonCode;

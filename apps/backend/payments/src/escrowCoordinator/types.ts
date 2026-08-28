@@ -111,3 +111,36 @@ export interface CreatePaymentRecordInput {
   tokenContractId: string;
   amountStroops: string;
 }
+
+// Issue #147 — Escrow funding lock optimization types
+
+export interface FundEscrowWithLockParams extends FundEscrowParams {
+  lockConfig?: {
+    lockType?: "pessimistic" | "optimistic" | "adaptive";
+    stripingFactor?: number;
+    lockTimeoutMs?: number;
+  };
+}
+
+export interface LockMetricsSummary {
+  escrowId: string;
+  lockType: string;
+  acquisitions: number;
+  waits: number;
+  avgWaitMs: number;
+  maxWaitMs: number;
+  contentions: number;
+  timeouts: number;
+  stolenLocks: number;
+}
+
+export interface LockOptimizationReport {
+  globalContentionRatio: number;
+  totalEscrowsTracked: number;
+  recommendations: Array<{
+    escrowId: string;
+    currentLockType: string;
+    recommendedLockType: string;
+    reason: string;
+  }>;
+}

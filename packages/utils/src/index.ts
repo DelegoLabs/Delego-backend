@@ -12,6 +12,9 @@ export {
   startHttpServer,
   route,
   json,
+  readBodyWithLimit,
+  PayloadTooLargeError,
+  DEFAULT_BODY_SIZE_LIMIT_BYTES,
   type Route,
   type RouteHandler,
   type HttpServerOptions,
@@ -50,9 +53,50 @@ export * from "./coverageGate.js";
 export * from "./integrationFixtures.js";
 export * from "./e2eRunner.js";
 export {
+  bucketFor,
+  evaluateFlag,
+  FeatureFlagStore,
+  type FeatureFlag,
+  type FlagValueType,
+  type TargetingRule,
+  type TargetingOperator,
+  type FlagEvaluation,
+  type EvaluationReason,
+  type FlagAuditEntry,
+} from "./featureFlags.js";
+export {
+  computeQueryDepth,
+  computeQueryCost,
+  checkQueryComplexity,
+  paginatedFieldCost,
+  DEFAULT_FIELD_COST,
+  type QueryNode,
+  type FieldCostEstimator,
+  type QueryComplexityConfig,
+  type QueryComplexityResult,
+} from "./graphqlComplexity.js";
+export { BatchLoader, type BatchFn } from "./batchLoader.js";
+export {
   corsMiddleware,
   securityHeadersMiddleware,
   type CorsOptions,
   type CorsRejectionLog,
   type SecurityHeadersOptions,
 } from "./security.js";
+export {
+  RedisPubSubManager,
+  getRedisPubSubManager,
+  resetRedisPubSubManager,
+} from "./redis/index.js";
+export type {
+  PubSubChannel,
+  PubSubMessage,
+  PubSubSubscription,
+  PubSubMetrics,
+  PubSubHealth,
+  PubSubConfig,
+  DeadLetterMessage,
+  MessageHandler,
+  Serializer,
+  SerializationFormat,
+} from "./redis/types.js";

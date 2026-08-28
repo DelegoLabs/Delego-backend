@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "NODE_ENV=test MOCK_REDIS=true node --test src/health-check.test.js src/database-migrations.test.js src/testcontainers-fixtures.test.js",
+    "test": "node --test src/health-check.test.js src/database-migrations.test.js src/testcontainers-fixtures.test.js src/saga-recovery.integration.test.js src/outbox-relay-dedupe.integration.test.js src/auth-roundtrip.integration.test.js src/ownership-rules.integration.test.js src/rate-limit.integration.test.js",
     "test:payments-escrow": "NODE_ENV=test MOCK_REDIS=true node --test src/payments-escrow.testnet.test.js",
     "typecheck": "echo 'N/A'"
   },
@@ -14,6 +14,7 @@
     "@stellar/stellar-sdk": "^16.0.0"
   },
   "devDependencies": {
-    "pg": "^8.21.0"
+    "pg": "^8.21.0",
+    "ioredis": "^5.11.1"
   }
 }

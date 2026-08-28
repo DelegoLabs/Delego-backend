@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { route, json, createHealthRoutes, type Route } from "@delegolabs/utils";
+import { route, json, createHealthRoutes, readBodyWithLimit, PayloadTooLargeError, type Route } from "@delegolabs/utils";
 import { escrowService } from "../escrow/index.js";
 import { getPaymentsHealth } from "../escrow/health.js";
 import { createPaymentsHealthRegistry } from "./health.js";
@@ -7,6 +7,8 @@ import { handleDeliveryConfirmationWebhook } from "../escrow/autoSettlement.js";
 import { getWebhookSecret, verifyWebhookSignature, WEBHOOK_SIGNATURE_HEADER } from "./autoRelease/hmac.js";
 import { handleDeliveryConfirmation } from "./autoRelease/service.js";
 import { EscrowDisputedError, EscrowNotReleasableError } from "./autoRelease/types.js";
+import { settleOrder, refundOrder } from "../settlement/index.js";
+import { getEscrowFundingLockManager } from "./escrowCoordinator/escrowFundingLock.js";
 import {
   acquireLock,
   releaseLock,
@@ -15,6 +17,7 @@ import {
   validateEscrowContractConfig,
   validateIdempotencyKey,
   validateInitializeRequest,
+  validateRefundReasonCode,
   validateRefundRequest,
   validateReleaseRequest,
   type ValidationError,
@@ -22,23 +25,15 @@ import {
 
 const paymentsHealthRegistry = createPaymentsHealthRegistry();
 
+// Body is capped at 1MB (see readBodyWithLimit) — an oversized body rejects
+// with PayloadTooLargeError, which callers handle by responding 413.
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk;
-    });
-    req.on("end", () => {
-      try {
-        resolve(body ? (JSON.parse(body) as Record<string, unknown>) : {});
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-    req.on("error", (err) => {
-      reject(err);
-    });
-  });
+  const body = await readBodyWithLimit(req);
+  try {
+    return body ? (JSON.parse(body) as Record<string, unknown>) : {};
+  } catch {
+    throw new Error("Invalid JSON body");
+  }
 }
 
 async function readRawBody(req: IncomingMessage): Promise<string> {
@@ -58,6 +53,13 @@ function validationStatusCode(code: string): number {
 
 function sendValidationError(res: ServerResponse, error: ValidationError): void {
   json(res, validationStatusCode(error.code), { data: null, error });
+}
+
+function sendPayloadTooLargeError(res: ServerResponse, err: PayloadTooLargeError): void {
+  json(res, 413, {
+    data: null,
+    error: { code: "PAYLOAD_TOO_LARGE", message: err.message },
+  });
 }
 
 function sendOperationError(res: ServerResponse, code: string, err: unknown): void {
@@ -114,6 +116,10 @@ export function registerRoutes(): Route[] {
         const result = await escrowService.initialize(validated.value);
         json(res, 200, { data: result, error: null });
       } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
         if (err instanceof Error && err.message === "Invalid JSON body") {
           sendValidationError(res, {
             code: "VALIDATION_ERROR",
@@ -160,6 +166,10 @@ export function registerRoutes(): Route[] {
         const result = await escrowService.deposit(validated.value);
         json(res, 200, { data: result, error: null });
       } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
         if (err instanceof Error && err.message === "Invalid JSON body") {
           sendValidationError(res, {
             code: "VALIDATION_ERROR",
@@ -205,6 +215,10 @@ export function registerRoutes(): Route[] {
         const result = await escrowService.release(validated.value);
         json(res, 200, { data: result, error: null });
       } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
         if (err instanceof Error && err.message === "Invalid JSON body") {
           sendValidationError(res, {
             code: "VALIDATION_ERROR",
@@ -241,6 +255,10 @@ export function registerRoutes(): Route[] {
         });
 
       } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
         if (err instanceof Error && err.message === "Invalid JSON body") {
           sendValidationError(res, {
             code: "VALIDATION_ERROR",
@@ -249,6 +267,51 @@ export function registerRoutes(): Route[] {
           return;
         }
         sendOperationError(res, "ESCROW_REFUND_FAILED", err);
+      }
+    }),
+
+    // Issue #35 — order-level escrow compensation, called by the orchestrator's
+    // saga compensation steps (which only know orderId, not escrowId). Both
+    // settleOrder/refundOrder are idempotent per orderId via payment_records.status,
+    // so a retried compensation call safely returns the previously recorded outcome
+    // instead of re-invoking the contract.
+    route("POST", "/api/v1/orders/:orderId/release", async (_req, res, params) => {
+      try {
+        const outcome = await settleOrder(params.orderId);
+        const status = outcome.status === "failed" ? 502 : 200;
+        json(res, status, {
+          data: outcome,
+          error: outcome.status === "failed" ? { code: "ORDER_RELEASE_FAILED", message: outcome.reason ?? "Release failed" } : null,
+        });
+      } catch (err) {
+        sendOperationError(res, "ORDER_RELEASE_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/orders/:orderId/refund", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const reasonValidation = validateRefundReasonCode(body);
+        if (!reasonValidation.ok) {
+          sendValidationError(res, reasonValidation.error);
+          return;
+        }
+
+        const outcome = await refundOrder(params.orderId, reasonValidation.value);
+        const status = outcome.status === "failed" ? 502 : 200;
+        json(res, status, {
+          data: outcome,
+          error: outcome.status === "failed" ? { code: "ORDER_REFUND_FAILED", message: outcome.reason ?? "Refund failed" } : null,
+        });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+          });
+          return;
+        }
+        sendOperationError(res, "ORDER_REFUND_FAILED", err);
       }
     }),
 
@@ -289,6 +352,10 @@ export function registerRoutes(): Route[] {
 
         json(res, result.status === "failed" ? 502 : 200, { data: result, error: null });
       } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
         if (err instanceof Error && err.message === "Invalid JSON body") {
           sendValidationError(res, {
             code: "VALIDATION_ERROR",
@@ -359,6 +426,26 @@ export function registerRoutes(): Route[] {
         }
         sendOperationError(res, "DELIVERY_CONFIRMED_WEBHOOK_FAILED", err);
       }
+    }),
+
+    // Issue #147 — Lock metrics and optimization endpoints
+    route("GET", "/escrow/lock/metrics", async (_req, res) => {
+      const lockManager = getEscrowFundingLockManager();
+      const metrics = lockManager.getMetrics("global");
+      const globalContention = lockManager.getGlobalContentionRatio();
+      json(res, 200, {
+        data: {
+          globalContentionRatio: globalContention,
+          metrics,
+        },
+        error: null,
+      });
+    }),
+
+    route("GET", "/escrow/lock/optimize", async (_req, res) => {
+      const lockManager = getEscrowFundingLockManager();
+      const optimization = lockManager.optimizeConfig();
+      json(res, 200, { data: optimization, error: null });
     }),
   ];
 }

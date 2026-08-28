@@ -125,12 +125,18 @@ importers:
       '@sendgrid/mail':
         specifier: ^8.1.4
         version: 8.1.6
+      cron-parser:
+        specifier: ^5.10.0
+        version: 5.10.0
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
+      luxon:
+        specifier: ^3.7.2
+        version: 3.7.2
       pg:
         specifier: ^8.11.0
         version: 8.23.0
@@ -375,6 +381,9 @@ importers:
         specifier: ^16.0.0
         version: 16.2.0
     devDependencies:
+      ioredis:
+        specifier: ^5.11.1
+        version: 5.11.1
       pg:
         specifier: ^8.21.0
         version: 8.23.0
@@ -1331,6 +1340,10 @@ packages:
     resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
     engines: {node: '>=12.0.0'}
     deprecated: v4 is no longer maintained, upgrade to v5
+
+  cron-parser@5.10.0:
+    resolution: {integrity: sha512-izNAxJyRWUP8ljBoDSub5WyrVOUlT4SLGShswE7eoRBpp6QUsSycYxLBMJlbshgPBMcPT/nrfgjNY2918ayv2A==}
+    engines: {node: '>=18'}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -2935,6 +2948,10 @@ snapshots:
       typescript: 5.9.3
 
   cron-parser@4.9.0:
+    dependencies:
+      luxon: 3.7.2
+
+  cron-parser@5.10.0:
     dependencies:
       luxon: 3.7.2
 
