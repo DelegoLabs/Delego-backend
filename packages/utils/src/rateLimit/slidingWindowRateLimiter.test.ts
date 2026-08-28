@@ -3,7 +3,7 @@ import {
   SlidingWindowRateLimiter,
   type RateLimitRedisClient,
   type RateLimitRule,
-} from "./slidingWindowRateLimiter";
+} from "./slidingWindowRateLimiter.js";
 
 /**
  * A minimal in-process reimplementation of the Lua script's sliding-window

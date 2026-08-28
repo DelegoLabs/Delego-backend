@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { RedisSessionStore, type SessionRedisClient } from "./redisSessionStore";
+import { RedisSessionStore, type SessionRedisClient } from "./redisSessionStore.js";
 
 class FakeRedis implements SessionRedisClient {
   private strings = new Map<string, string>();

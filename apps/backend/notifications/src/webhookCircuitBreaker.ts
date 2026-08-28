@@ -17,7 +17,6 @@
  */
 
 import { createLogger } from "@delegolabs/utils";
-import { randomUUID } from "crypto";
 
 const log = createLogger(
   "notifications:webhook-circuit-breaker",
@@ -242,7 +241,6 @@ export async function executeWithCircuitBreaker<T>(
     throw new CircuitBreakerOpenError(webhookId, breaker.config.timeoutMs);
   }
 
-  const start = Date.now();
   try {
     const result = await fn();
     await recordSuccess(store, webhookId);

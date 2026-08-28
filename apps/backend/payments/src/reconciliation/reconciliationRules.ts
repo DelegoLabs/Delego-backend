@@ -208,7 +208,8 @@ function evaluateCondition(condition: string, ctx: RuleEvaluationContext): boole
   if (normalized.startsWith("parseFloat(")) {
     const inner = normalized.slice("parseFloat(".length, -1);
     const val = resolveValue(inner, ctx);
-    return parseFloat(String(val));
+    const parsed = parseFloat(String(val));
+    return !Number.isNaN(parsed) && parsed !== 0;
   }
 
   log.debug("Unparseable condition, defaulting to false", { condition: normalized });
