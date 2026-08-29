@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import {
   negotiateVersion,
+  parseVersion,
   getDeprecationHeaders,
+  getCurrentVersion,
+  getSupportedVersions,
   type VersionNegotiationResult,
 } from "../versioning.js";
 
@@ -15,49 +18,53 @@ declare global {
 
 export function versioningMiddleware() {
   return (req: Request, res: Response, next: NextFunction) => {
-    // Check for version in different locations
+    const queryVersion = typeof req.query?.version === "string" ? req.query.version : null;
+    const acceptHeader = typeof req.headers.accept === "string" ? req.headers.accept : null;
+    const xApiVersionHeader = typeof req.headers["x-api-version"] === "string" ? req.headers["x-api-version"] : null;
+
     let requestedVersion: string | null = null;
 
-    // 1. Check Accept header for version (e.g., "application/vnd.delego.v1+json")
-    const acceptHeader = req.headers.accept;
-    if (acceptHeader) {
-      const versionMatch = acceptHeader.match(/application\/vnd\.delego\.v(\d+(\.\d+(\.\d+)?)?)\+json/);
-      if (versionMatch) {
-        requestedVersion = versionMatch[1];
+    for (const candidate of [acceptHeader, xApiVersionHeader, queryVersion, req.originalUrl ?? req.url]) {
+      const parsed = candidate ? parseVersion(candidate) : null;
+      if (parsed) {
+        requestedVersion = parsed;
+        break;
       }
     }
 
-    // 2. Check X-API-Version header
-    if (!requestedVersion && req.headers["x-api-version"]) {
-      requestedVersion = req.headers["x-api-version"] as string;
-    }
-
-    // 3. Check query parameter
-    if (!requestedVersion && req.query.version) {
-      requestedVersion = req.query.version as string;
-    }
-
-    // 4. Check URL path version (e.g., /api/v1/...)
     if (!requestedVersion) {
-      const pathMatch = req.path.match(/^\/api\/v(\d+(\.\d+(\.\d+)?)?)\//);
+      const pathMatch = (req.path ?? req.originalUrl ?? "/").match(/(?:^|\/)(?:api\/)?v(\d+)(?:\/|$)/i);
       if (pathMatch) {
-        requestedVersion = pathMatch[1];
+        requestedVersion = `v${pathMatch[1]}`;
       }
     }
 
-    // Negotiate version
     const negotiationResult = negotiateVersion(requestedVersion);
     req.apiVersion = negotiationResult;
 
-    // Set version headers
     const headers = getDeprecationHeaders(negotiationResult.version);
     for (const [key, value] of Object.entries(headers)) {
       res.setHeader(key, value);
     }
 
-    // Add deprecation warning if version is deprecated
-    if (negotiationResult.isDeprecated) {
-      res.setHeader("Warning", `299 - "API version ${requestedVersion} is deprecated"`);
+    if (negotiationResult.warningHeader) {
+      res.setHeader("Warning", negotiationResult.warningHeader);
+    }
+
+    if (negotiationResult.sunsetDate) {
+      const sunsetEpoch = new Date(negotiationResult.sunsetDate).getTime();
+      if (Number.isFinite(sunsetEpoch) && sunsetEpoch <= Date.now()) {
+        res.status(410);
+        res.setHeader("X-API-Version", negotiationResult.version);
+        res.json({
+          data: null,
+          error: {
+            code: "API_VERSION_SUNSET",
+            message: `API version ${negotiationResult.version} has reached its sunset date and is no longer supported.`,
+          },
+        });
+        return;
+      }
     }
 
     next();
@@ -66,15 +73,25 @@ export function versioningMiddleware() {
 
 export function versionDiscoveryEndpoint() {
   return (req: Request, res: Response) => {
-    const currentVersion = req.apiVersion?.version;
+    const currentVersion = req.apiVersion?.version ?? getCurrentVersion().version;
     res.json({
       data: {
-        currentVersion: currentVersion ? `${currentVersion.major}.${currentVersion.minor}.${currentVersion.patch}` : "1.0.0",
-        supportedVersions: ["1.0.0"],
-        deprecationInfo: req.apiVersion?.isDeprecated ? {
-          deprecationDate: req.apiVersion.deprecationDate,
-          sunsetDate: req.apiVersion.sunsetDate,
-        } : null,
+        currentVersion,
+        supportedVersions: getSupportedVersions().map((version) => ({
+          version: version.version,
+          status: version.status,
+          releasedAt: version.releasedAt,
+          deprecatedAt: version.deprecatedAt,
+          sunsetAt: version.sunsetAt,
+          compatibleWith: version.compatibleWith,
+        })),
+        deprecationInfo: req.apiVersion?.deprecated
+          ? {
+              version: req.apiVersion.version,
+              sunsetDate: req.apiVersion.sunsetDate,
+              warningHeader: req.apiVersion.warningHeader,
+            }
+          : null,
       },
       error: null,
       meta: {

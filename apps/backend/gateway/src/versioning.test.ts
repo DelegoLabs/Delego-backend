@@ -1,103 +1,93 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   parseVersion,
   formatVersion,
-  isVersionSupported,
-  isVersionDeprecated,
   negotiateVersion,
   getCurrentVersion,
   getSupportedVersions,
-  registerDeprecatedVersion,
   getDeprecationHeaders,
+  getVersionCompatibilityMatrix,
   type ApiVersion,
 } from "./versioning.js";
 
 describe("API Versioning", () => {
-  beforeEach(() => {
-    // Clear any registered deprecated versions
-    // Note: In a real implementation, we'd have a reset function
-  });
-
   describe("parseVersion", () => {
-    it("parses valid version string", () => {
-      const version = parseVersion("1.0.0");
-      expect(version).toEqual({ major: 1, minor: 0, patch: 0 });
+    it("parses a legacy semver string and a Delego v-prefix string", () => {
+      expect(parseVersion("1.0.0")).toBe("v1");
+      expect(parseVersion("v2")).toBe("v2");
+      expect(parseVersion("application/vnd.delego.v1+json")).toBe("v1");
+      expect(parseVersion("/api/v1/users")).toBe("v1");
     });
 
-    it("parses version with multiple digits", () => {
-      const version = parseVersion("12.34.56");
-      expect(version).toEqual({ major: 12, minor: 34, patch: 56 });
-    });
-
-    it("returns null for invalid version string", () => {
+    it("returns null for invalid version strings", () => {
       expect(parseVersion("invalid")).toBeNull();
-      expect(parseVersion("1.0")).toBeNull();
-      expect(parseVersion("v1.0.0")).toBeNull();
+      expect(parseVersion("v0")).toBeNull();
       expect(parseVersion("")).toBeNull();
     });
   });
 
   describe("formatVersion", () => {
-    it("formats version correctly", () => {
-      const version: ApiVersion = { major: 1, minor: 2, patch: 3 };
-      expect(formatVersion(version)).toBe("1.2.3");
-    });
-  });
-
-  describe("isVersionSupported", () => {
-    it("returns true for supported version", () => {
-      const version: ApiVersion = { major: 1, minor: 0, patch: 0 };
-      expect(isVersionSupported(version)).toBe(true);
-    });
-
-    it("returns false for unsupported version", () => {
-      const version: ApiVersion = { major: 2, minor: 0, patch: 0 };
-      expect(isVersionSupported(version)).toBe(false);
+    it("formats the version string correctly", () => {
+      const version: ApiVersion = {
+        version: "v2",
+        status: "active",
+        releasedAt: "2025-01-01T00:00:00.000Z",
+        compatibleWith: ["v1", "v2"],
+      };
+      expect(formatVersion(version)).toBe("v2");
     });
   });
 
   describe("negotiateVersion", () => {
-    it("returns current version when no version requested", () => {
+    it("defaults to the latest active version when no version is requested", () => {
       const result = negotiateVersion(null);
-      expect(result.version).toEqual({ major: 1, minor: 0, patch: 0 });
+      expect(result.version).toBe("v2");
+      expect(result.negotiated).toBe(false);
+      expect(result.deprecated).toBe(false);
     });
 
-    it("returns requested version when supported", () => {
-      const result = negotiateVersion("1.0.0");
-      expect(result.version).toEqual({ major: 1, minor: 0, patch: 0 });
+    it("accepts a supported version in the Accept header and a URL path", () => {
+      expect(negotiateVersion("application/vnd.delego.v1+json").version).toBe("v1");
+      expect(negotiateVersion("/api/v1/users").version).toBe("v1");
     });
 
-    it("returns current version when unsupported version requested", () => {
-      const result = negotiateVersion("2.0.0");
-      expect(result.version).toEqual({ major: 1, minor: 0, patch: 0 });
+    it("falls back to the latest active version when an unsupported version is requested", () => {
+      const result = negotiateVersion("v9");
+      expect(result.version).toBe("v2");
+      expect(result.negotiated).toBe(false);
     });
 
-    it("returns current version when invalid version requested", () => {
-      const result = negotiateVersion("invalid");
-      expect(result.version).toEqual({ major: 1, minor: 0, patch: 0 });
+    it("marks deprecated versions and returns a warning header", () => {
+      const result = negotiateVersion("v1");
+      expect(result.version).toBe("v1");
+      expect(result.deprecated).toBe(true);
+      expect(result.warningHeader).toContain("deprecated");
     });
   });
 
   describe("getCurrentVersion", () => {
-    it("returns current version", () => {
-      const version = getCurrentVersion();
-      expect(version).toEqual({ major: 1, minor: 0, patch: 0 });
+    it("returns the current version", () => {
+      expect(getCurrentVersion().version).toBe("v2");
     });
   });
 
   describe("getSupportedVersions", () => {
-    it("returns supported versions", () => {
+    it("returns active and deprecated entries in version order", () => {
       const versions = getSupportedVersions();
-      expect(versions).toEqual([{ major: 1, minor: 0, patch: 0 }]);
+      expect(versions.map((entry) => entry.version)).toEqual(["v1", "v2"]);
     });
   });
 
-  describe("getDeprecationHeaders", () => {
-    it("returns version headers", () => {
-      const version: ApiVersion = { major: 1, minor: 0, patch: 0 };
-      const headers = getDeprecationHeaders(version);
-      expect(headers["X-API-Version"]).toBe("1.0.0");
-      expect(headers["X-API-Current-Version"]).toBe("1.0.0");
+  describe("matrix and headers", () => {
+    it("exposes the compatibility matrix and deprecation headers", () => {
+      const matrix = getVersionCompatibilityMatrix();
+      expect(matrix).toHaveProperty("v1");
+      expect(matrix).toHaveProperty("v2");
+
+      const headers = getDeprecationHeaders("v1");
+      expect(headers["X-API-Version"]).toBe("v1");
+      expect(headers["X-API-Current-Version"]).toBe("v2");
+      expect(headers["Deprecation"]).toContain("2025");
     });
   });
 });
