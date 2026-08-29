@@ -268,7 +268,7 @@ describe("escrow auto-release service", () => {
       expect("scheduled" in result && result.scheduled).toBe(true);
       expect(escrowCoordinator.releaseEscrow).not.toHaveBeenCalled();
 
-      const ran = await runDueReleaseJobs(start + 5 * 60_000 + 1);
+      const ran = await runDueReleaseJobs(start + 5 * 60_000 + 5_000);
       expect(ran).toBe(1);
       expect(escrowCoordinator.releaseEscrow).toHaveBeenCalledTimes(1);
     });

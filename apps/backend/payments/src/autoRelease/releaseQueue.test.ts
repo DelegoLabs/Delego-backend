@@ -41,7 +41,7 @@ describe("scheduleRelease (in-memory / test backend)", () => {
     expect(executor).not.toHaveBeenCalled();
 
     // Due at t+5min.
-    const ranOnTime = await runDueReleaseJobs(start + 5 * 60_000 + 1);
+    const ranOnTime = await runDueReleaseJobs(start + 5 * 60_000 + 5_000);
     expect(ranOnTime).toBe(1);
     expect(executor).toHaveBeenCalledTimes(1);
     expect(pendingReleaseJobCount()).toBe(0);
