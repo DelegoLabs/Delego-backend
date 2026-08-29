@@ -111,7 +111,10 @@ jobs:
         run: pnpm --filter "./packages/*" --filter "./apps/backend/*" --filter "./agents" build
 
       - name: Run tests
-        run: pnpm test
+        # The integration suite (tests/integration) needs a migrated database and real
+        # services — it is exercised by the dedicated `migrations` and
+        # `test-integration` jobs, which apply migrations first.
+        run: pnpm -r --filter=!@delegolabs/tests-integration test
 
   migrations:
     name: Database Migrations
