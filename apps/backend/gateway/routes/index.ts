@@ -22,6 +22,7 @@ import {
 } from "./delegations.js";
 import { getWalletHandler } from "./wallets.js";
 import { rateLimitMetricsHandler, circuitBreakerStatusHandler } from "./admin.js";
+import { auditLogQueryHandler, auditLogVerifyHandler } from "./audit.js";
 import { swaggerHandler } from "../src/swagger.js";
 import { logSearchHandler, logStatsHandler, logClearHandler } from "../src/logging/routes.js";
 import {
@@ -132,6 +133,9 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/monitoring/channels", listChannelsHandler),
     route("POST", "/api/v1/monitoring/notifications/send", sendNotificationHandler),
     route("GET", "/api/v1/monitoring/dashboard", monitoringDashboardHandler),
+    // Admin — audit log query API (#66)
+    route("GET", "/api/v1/admin/audit-log", auditLogQueryHandler),
+    route("GET", "/api/v1/admin/audit-log/verify", auditLogVerifyHandler),
     // Swagger UI (#352)
     route("GET", "/api/docs", swaggerHandler),
     route("GET", "/api/docs/openapi.json", swaggerHandler),

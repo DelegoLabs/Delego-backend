@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS audit_retention_policies;
+DROP TRIGGER IF EXISTS trg_audit_log_no_delete ON audit_log;
+DROP TRIGGER IF EXISTS trg_audit_log_no_update ON audit_log;
+DROP FUNCTION IF EXISTS audit_log_prevent_mutation();
+DROP INDEX IF EXISTS idx_audit_log_operation;
+DROP INDEX IF EXISTS idx_audit_log_occurred_at;
+DROP INDEX IF EXISTS idx_audit_log_user_id;
+DROP INDEX IF EXISTS idx_audit_log_table_record;
+DROP INDEX IF EXISTS idx_audit_log_sequence_num;
+DROP TABLE IF EXISTS audit_log;

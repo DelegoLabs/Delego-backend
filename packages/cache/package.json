@@ -1,0 +1,37 @@
+{
+  "name": "@delegolabs/cache",
+  "version": "0.0.1",
+  "description": "Redis Cluster client config, cache-aside helpers, and tag-based invalidation for Delego services",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DelegoLabs/Delego-backend.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'TODO: add eslint'",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@delegolabs/types": "workspace:*",
+    "@delegolabs/utils": "workspace:*",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ioredis-mock": "^8.13.1",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  }
+}
