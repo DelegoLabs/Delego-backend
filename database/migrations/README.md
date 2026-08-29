@@ -45,6 +45,7 @@ The incremental migrations are:
 | `020_transaction_dlq_and_monitoring.sql` | Transaction dead letter queue and monitoring (#143) |
 | `021_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
 | `022_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
+| `023_notification_preference_center.sql` | Notification preference center: org defaults, JSONB preference documents, and migration history (Issue #115) |
 
 ## Naming rules
 
