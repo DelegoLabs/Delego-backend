@@ -45,6 +45,16 @@ The incremental migrations are:
 | `023_transaction_dlq_and_monitoring.sql` | Transaction DLQ and monitoring tables (#143) |
 | `024_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
 | `025_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
+| `017_escrow_lock_metrics.sql` | Lock metrics tracking for escrow funding lock optimization (#147) |
+| `017_scheduled_notifications.sql` | Durable storage for scheduled/recurring notifications, so the scheduler survives restarts (Issue #59) |
+| `017_service_event_outbox_relay.sql` | Retry/claim columns on `service_event_outbox` for the OutboxRelay worker (Issue #33) |
+| `018_workflow_compensation_outcomes.sql` | Escrow compensation outcome per workflow record (Issue #35) |
+| `018_workflow_timeout_analytics.sql` | Workflow timeout analytics |
+| `019_redis_pubsub_dead_letters.sql` | Dead letter queue for Redis Pub/Sub failed deliveries (#123) |
+| `020_transaction_dlq_and_monitoring.sql` | Transaction dead letter queue and monitoring (#143) |
+| `021_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
+| `022_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
+| `023_notification_preference_center.sql` | Notification preference center: org defaults, JSONB preference documents, and migration history (Issue #115) |
 
 ## Naming rules
 

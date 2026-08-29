@@ -1,7 +1,7 @@
 /**
  * @delegolabs/notifications — Entry point
  */
-import { createLogger, startHttpServer, route, json, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
+import { createLogger, startHttpServer, route, json, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
 import { readBody } from "./readBody.js";
 import { broadcastNotificationToUser, getWebSocketMetrics, initWebSocketServer } from "./websocket.js";
 import { sequelize } from "./db.js";
@@ -34,6 +34,21 @@ import {
   type ScheduledNotificationStatus,
 } from "./scheduler/index.js";
 import { PostgresScheduledNotificationStore } from "./scheduler/store.js";
+import {
+  applyPreferenceUpdate,
+  getDefaultNotificationPreference,
+  validatePreferenceUpdate,
+  type PreferenceUpdate,
+} from "./preferenceCenter.js";
+import {
+  getEffectivePreference,
+  getOrgDefaultPreference,
+  listMigrationRecords,
+  updateStoredPreference,
+  upsertOrgDefaultPreference,
+  upsertStoredPreference,
+} from "./preferenceCenterStore.js";
+import { runPreferenceMigration } from "./preferenceMigration.js";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
 
 const SERVICE_NAME = "notifications";
@@ -113,7 +128,7 @@ if (rpcUrl && escrowContractId) {
 const server: Server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [corsMiddleware(), securityHeadersMiddleware()],
+  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth({ publicPaths: ["/health", "/vapid-public-key"] })],
   routes: [
     route("GET", "/vapid-public-key", (_req: IncomingMessage, res: ServerResponse) => {
       const key = getVapidPublicKey();
@@ -347,8 +362,153 @@ const server: Server = startHttpServer({
         json(res, 200, { data: record, error: null });
       }
     ),
+
+    // Issue #115 — notification preference center management API.
+    //
+    // GET /preferences/:userId returns the effective preference (org defaults
+    // inherited where the user has not made an explicit choice). Pass
+    // ?orgId=<id> to inherit org-level defaults.
+    route(
+      "GET",
+      "/preferences/:userId",
+      async (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => {
+        const url = new URL(req.url ?? "", "http://localhost");
+        const orgId = url.searchParams.get("orgId") ?? undefined;
+        try {
+          const preferences = await getEffectivePreference(notificationDb, params.userId, orgId);
+          json(res, 200, { data: preferences, error: null });
+        } catch (err) {
+          json(res, 500, {
+            data: null,
+            error: { code: "PREFERENCES_READ_FAILED", message: err instanceof Error ? err.message : "Failed to read preferences" },
+          });
+        }
+      }
+    ),
+
+    // PUT replaces the user's stored preference document wholesale: the body is
+    // applied on top of built-in defaults, so any field the caller omits
+    // resets to its default.
+    route(
+      "PUT",
+      "/preferences/:userId",
+      async (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => {
+        const body = (await readBody(req)) as Record<string, unknown>;
+        const update = sanitizePreferenceUpdate(body);
+        const errors = validatePreferenceUpdate(update);
+        if (errors.length > 0) {
+          json(res, 400, {
+            data: null,
+            error: { code: "INVALID_PREFERENCES", message: errors.join("; ") },
+          });
+          return;
+        }
+        const base = getDefaultNotificationPreference(params.userId);
+        const preferences = applyPreferenceUpdate(base, update);
+        await upsertStoredPreference(notificationDb, params.userId, preferences, update.orgId ?? null);
+        json(res, 200, { data: preferences, error: null });
+      }
+    ),
+
+    // PATCH applies a partial update (per-channel toggles, category settings,
+    // quiet hours, global unsubscribe) and persists the merged result.
+    route(
+      "PATCH",
+      "/preferences/:userId",
+      async (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => {
+        const body = (await readBody(req)) as Record<string, unknown>;
+        const update = sanitizePreferenceUpdate(body);
+        const errors = validatePreferenceUpdate(update);
+        if (errors.length > 0) {
+          json(res, 400, {
+            data: null,
+            error: { code: "INVALID_PREFERENCES", message: errors.join("; ") },
+          });
+          return;
+        }
+        const preferences = await updateStoredPreference(notificationDb, params.userId, update);
+        json(res, 200, { data: preferences, error: null });
+      }
+    ),
+
+    // Org-level defaults for org -> user preference inheritance.
+    route(
+      "GET",
+      "/preferences/org/:orgId",
+      async (_req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => {
+        const preferences = await getOrgDefaultPreference(notificationDb, params.orgId);
+        if (!preferences) {
+          json(res, 404, {
+            data: null,
+            error: { code: "NOT_FOUND", message: "Org defaults not found" },
+          });
+          return;
+        }
+        json(res, 200, { data: preferences, error: null });
+      }
+    ),
+
+    route(
+      "PUT",
+      "/preferences/org/:orgId",
+      async (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => {
+        const body = (await readBody(req)) as Record<string, unknown>;
+        const update = sanitizePreferenceUpdate(body);
+        const errors = validatePreferenceUpdate(update);
+        if (errors.length > 0) {
+          json(res, 400, {
+            data: null,
+            error: { code: "INVALID_PREFERENCES", message: errors.join("; ") },
+          });
+          return;
+        }
+        const base = getDefaultNotificationPreference(`org:${params.orgId}`, params.orgId);
+        const preferences = applyPreferenceUpdate(base, update);
+        await upsertOrgDefaultPreference(notificationDb, params.orgId, preferences);
+        json(res, 200, { data: preferences, error: null });
+      }
+    ),
+
+    // Preference migration tool — converts legacy boolean-only rows (version 1)
+    // into the JSONB preference center model (version 2). Safe to re-run.
+    route("POST", "/preferences/migrate", async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const result = await runPreferenceMigration(notificationDb);
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        json(res, 500, {
+          data: null,
+          error: { code: "PREFERENCE_MIGRATION_FAILED", message: err instanceof Error ? err.message : "Failed to run preference migration" },
+        });
+      }
+    }),
+
+    route("GET", "/preferences/migrations", async (_req: IncomingMessage, res: ServerResponse) => {
+      const records = await listMigrationRecords(notificationDb);
+      json(res, 200, { data: records, error: null });
+    }),
   ],
 });
+
+// Issue #115 — coerce an untrusted preference body into a PreferenceUpdate by
+// dropping fields outside the known shape (silently ignoring extra keys).
+function sanitizePreferenceUpdate(body: Record<string, unknown>): PreferenceUpdate {
+  const update: PreferenceUpdate = {};
+  if (body.orgId !== undefined && typeof body.orgId === "string") update.orgId = body.orgId;
+  if (body.globalUnsubscribe !== undefined && typeof body.globalUnsubscribe === "boolean") {
+    update.globalUnsubscribe = body.globalUnsubscribe;
+  }
+  if (body.channels !== undefined && typeof body.channels === "object" && body.channels !== null) {
+    update.channels = body.channels as PreferenceUpdate["channels"];
+  }
+  if (body.categories !== undefined && typeof body.categories === "object" && body.categories !== null) {
+    update.categories = body.categories as PreferenceUpdate["categories"];
+  }
+  if (body.quietHours !== undefined && typeof body.quietHours === "object" && body.quietHours !== null) {
+    update.quietHours = body.quietHours as PreferenceUpdate["quietHours"];
+  }
+  return update;
+}
 
 initWebSocketServer(server);
 
