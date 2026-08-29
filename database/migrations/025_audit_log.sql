@@ -1,4 +1,4 @@
--- Migration: 022_audit_log
+-- Migration: 025_audit_log
 -- Description: Append-only, tamper-evident audit log for data modifications
 -- across all tables, with hash chaining and DB-level immutability (Issue #66).
 --

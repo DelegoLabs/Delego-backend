@@ -9,7 +9,7 @@
  * GET  /admin/simulation/cache/config          – get cache config
  * POST /admin/simulation/cache/config          – update cache config
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
 import { route, json, type Route } from "@delegolabs/utils";
 import {
   getSimulationCacheMetrics,
@@ -18,8 +18,6 @@ import {
   setContractVersion,
   getContractVersion,
   warmupCache,
-  initSimulationCache,
-  type SimulationCacheConfig,
 } from "../simulationCache.js";
 import { createLogger } from "@delegolabs/utils";
 

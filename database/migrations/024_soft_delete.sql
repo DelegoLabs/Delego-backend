@@ -1,4 +1,4 @@
--- Migration: 021_soft_delete
+-- Migration: 024_soft_delete
 -- Description: Add soft-delete columns (deleted_at, deleted_by, delete_reason)
 -- to core entity tables, plus a table registry + metrics view (Issue #67).
 --

@@ -1,4 +1,4 @@
--- Migration: Transaction Dead Letter Queue
+-- Migration: 023_transaction_dlq_and_monitoring
 -- Issue #143
 
 CREATE TABLE IF NOT EXISTS transaction_dead_letter_queue (

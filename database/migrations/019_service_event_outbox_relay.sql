@@ -1,4 +1,4 @@
--- Migration: 017_service_event_outbox_relay
+-- Migration: 019_service_event_outbox_relay
 -- Description: Adds retry/claim bookkeeping to service_event_outbox so the
 -- OutboxRelay worker can drain it safely from multiple orchestrator instances
 -- (Issue #33). 005_service_event_outbox.sql created the table with no relay —

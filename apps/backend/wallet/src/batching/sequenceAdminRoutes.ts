@@ -12,7 +12,7 @@
  * POST /admin/sequence/high-throughput        – mark/unmark high-throughput account
  * GET  /admin/sequence/lock/:account          – lock monitoring status
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
 import { route, json, type Route } from "@delegolabs/utils";
 import { getRedisConnection } from "../queue/txQueue.js";
 import {
@@ -26,7 +26,6 @@ import {
   markHighThroughputAccount,
   unmarkHighThroughputAccount,
   detectAndCleanupLeakedReservations,
-  type SequenceGap,
 } from "../queue/sequenceMonitoring.js";
 import { reserveSequenceBlock } from "../queue/txQueue.js";
 import { createLogger } from "@delegolabs/utils";

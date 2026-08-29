@@ -1,5 +1,5 @@
 import { createLogger } from "@delegolabs/utils";
-import type { HSMKeySignerAdapter, HsmKeySignerError } from "./hsmSigner.js";
+import type { HSMKeySignerAdapter } from "./hsmSigner.js";
 
 const log = createLogger("wallet:hsm-health", process.env.LOG_LEVEL ?? "info");
 

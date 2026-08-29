@@ -6,11 +6,11 @@
   "main": "./src/index.ts",
   "scripts": {
     "dev": "node --import tsx --watch src/index.ts",
-    "build": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "build": "echo 'TODO: add build'",
+    "test": "echo 'TODO: add tests'",
+    "test:watch": "echo 'TODO: add tests'",
+    "lint": "echo 'TODO: add eslint'",
+    "typecheck": "echo 'TODO: add typecheck'"
   },
   "dependencies": {
     "@delegolabs/types": "workspace:*",

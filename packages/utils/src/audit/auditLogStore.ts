@@ -8,7 +8,7 @@
  * cross-cutting infra concern (see `paymentRecordStore.ts`).
  *
  * The `audit_log` table itself is append-only at the DB level (see
- * `database/migrations/022_audit_log.sql`'s triggers) — this module never
+ * `database/migrations/025_audit_log.sql`'s triggers) — this module never
  * issues an UPDATE or DELETE against it.
  */
 import type {

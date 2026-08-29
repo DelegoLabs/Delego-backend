@@ -73,7 +73,6 @@ export interface LockMonitoringInfo {
 // ---------------------------------------------------------------------------
 
 const AUDIT_KEY_PREFIX = "seq:audit:";
-const METRICS_KEY_PREFIX = "seq:metrics:";
 const GAP_KEY_PREFIX = "seq:gaps:";
 const LOCK_MONITOR_KEY_PREFIX = "seq:lock_monitor:";
 const CONTENTION_KEY_PREFIX = "seq:contention:";

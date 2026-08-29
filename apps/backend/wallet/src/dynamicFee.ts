@@ -1,4 +1,4 @@
-import { estimateTransactionFee, type FeeEstimate } from "../../payments/escrow/feeEstimator.js";
+import { estimateTransactionFee, type FeeEstimate } from "@delegolabs/payments/fee-estimator";
 import { createLogger } from "@delegolabs/utils";
 
 const log = createLogger("wallet:dynamic-fee", process.env.LOG_LEVEL ?? "info");

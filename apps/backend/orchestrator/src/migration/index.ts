@@ -19,7 +19,6 @@ import type {
   MigrationInstance,
   MigrationPlan,
   MigrationResult,
-  MigrationStatus,
   SafetyCheckReport,
   SafetyCheckResult,
   StateMapping,
@@ -134,14 +133,6 @@ export function runSafetyChecks(
         : `${instancesInRemovedStates.length} instances still in removed states: ${instancesInRemovedStates.map((i) => i.state).join(", ")}`,
     severity: instancesInRemovedStates.length === 0 ? "info" : "error",
   });
-
-  const requiredFields = plan.contextTransforms
-    .filter((t) => t.operation === "add" && t.value !== null)
-    .map((t) => t.path);
-
-  const instancesWithMissingFields = activeInstances.filter((i) =>
-    requiredFields.some((f) => !(f in i.context))
-  );
 
   results.push({
     check: "context_transforms_preserve_required_fields",

@@ -1,4 +1,4 @@
--- Migration: 017_scheduled_notifications
+-- Migration: 018_scheduled_notifications
 -- Description: Durable storage for scheduled/recurring notifications (Issue #59),
 --   so the scheduler survives restarts instead of losing all pending work from the
 --   in-memory store (apps/backend/notifications/src/scheduler/store.ts).

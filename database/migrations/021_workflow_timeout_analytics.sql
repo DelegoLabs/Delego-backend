@@ -1,4 +1,4 @@
--- Migration: 018_workflow_timeout_analytics
+-- Migration: 021_workflow_timeout_analytics
 -- Description: Timeout analytics and escalation tracking (#145)
 
 CREATE TABLE IF NOT EXISTS workflow_timeout_events (

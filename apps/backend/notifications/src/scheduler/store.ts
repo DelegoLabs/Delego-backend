@@ -344,7 +344,7 @@ function rowToRecord(row: ScheduledNotificationRow): ScheduledNotification {
  * integration.test.js and Issue #36) — so multiple scheduler instances can poll the
  * same table concurrently without ever dispatching the same notification twice.
  *
- * Backed by `scheduled_notifications` (database/migrations/017_scheduled_notifications.sql).
+ * Backed by `scheduled_notifications` (database/migrations/018_scheduled_notifications.sql).
  */
 export class PostgresScheduledNotificationStore implements ScheduledNotificationStore {
   async create(input: CreateScheduledNotificationInput): Promise<ScheduledNotification> {

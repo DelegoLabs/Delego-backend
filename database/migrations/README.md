@@ -36,6 +36,15 @@ The incremental migrations are:
 | `014_payment_records_dispute.sql` | Dispute transactions on payment_records for the escrow coordinator |
 | `015_oauth_providers.sql` | OAuth2 provider account linking |
 | `016_in_app_notifications.sql` | Durable in-app notifications and indexes (Issues #58/#60) |
+| `017_escrow_lock_metrics.sql` | Metrics tracking for escrow funding locks |
+| `018_scheduled_notifications.sql` | Durable storage for scheduled/recurring notifications (Issue #59) |
+| `019_service_event_outbox_relay.sql` | Retry/claim columns on `service_event_outbox` for the OutboxRelay worker (Issue #33) |
+| `020_workflow_compensation_outcomes.sql` | Escrow compensation outcome per workflow record (Issue #35) |
+| `021_workflow_timeout_analytics.sql` | Timeout analytics and escalation tracking (#145) |
+| `022_redis_pubsub_dead_letters.sql` | Dead letter queue for Redis Pub/Sub failed deliveries (#123) |
+| `023_transaction_dlq_and_monitoring.sql` | Transaction DLQ and monitoring tables (#143) |
+| `024_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
+| `025_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
 | `017_escrow_lock_metrics.sql` | Lock metrics tracking for escrow funding lock optimization (#147) |
 | `017_scheduled_notifications.sql` | Durable storage for scheduled/recurring notifications, so the scheduler survives restarts (Issue #59) |
 | `017_service_event_outbox_relay.sql` | Retry/claim columns on `service_event_outbox` for the OutboxRelay worker (Issue #33) |
