@@ -3,7 +3,7 @@
  * TODO: Implement service logic
  */
 import { createLogger } from "@delegolabs/utils";
-import { startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
+import { startHttpServer, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
 import {
   SorobanTransactionSimulator,
   readSorobanRpcConfig,
@@ -38,7 +38,7 @@ import { getRedisConnection } from "./queue/txQueue.js";
 const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [corsMiddleware(), securityHeadersMiddleware()],
+  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth()],
   routes: registerRoutes(),
 });
 
