@@ -1,4 +1,4 @@
--- Migration: 019_redis_pubsub_dead_letters
+-- Migration: 022_redis_pubsub_dead_letters
 -- Description: Dead letter queue for Redis Pub/Sub failed deliveries (#123)
 
 CREATE TABLE IF NOT EXISTS pubsub_dead_letters (

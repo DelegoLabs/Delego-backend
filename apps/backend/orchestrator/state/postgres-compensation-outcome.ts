@@ -1,6 +1,6 @@
 /**
  * Postgres-backed CompensationOutcomeStore (Issue #35)
- * Backs `workflow_compensation_outcomes` (database/migrations/018_workflow_compensation_outcomes.sql).
+ * Backs `workflow_compensation_outcomes` (database/migrations/020_workflow_compensation_outcomes.sql).
  */
 import type { Pool } from "pg";
 import type {

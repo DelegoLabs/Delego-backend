@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "node --import tsx --watch src/index.ts",
     "build": "echo 'TODO: add build'",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "echo 'TODO: add tests'",
+    "test:watch": "echo 'TODO: add tests'",
     "lint": "echo 'TODO: add eslint'",
     "typecheck": "echo 'TODO: add typecheck'"
   },

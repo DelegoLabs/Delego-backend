@@ -1,4 +1,4 @@
--- Migration: 018_workflow_compensation_outcomes
+-- Migration: 020_workflow_compensation_outcomes
 -- Description: Persists the final outcome of a purchase workflow's escrow
 -- compensation run on the workflow record itself (Issue #35), distinct from
 -- the per-step audit trail in workflow_transition_audit (008). One row per

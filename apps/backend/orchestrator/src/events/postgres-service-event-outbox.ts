@@ -2,7 +2,7 @@
  * Postgres-backed ServiceEventOutboxStore (Issue #33)
  *
  * Backs `service_event_outbox` (database/migrations/005_service_event_outbox.sql,
- * extended with retry/claim columns by 017_service_event_outbox_relay.sql).
+ * extended with retry/claim columns by 019_service_event_outbox_relay.sql).
  *
  * `claimPendingBatch` uses `SELECT ... FOR UPDATE SKIP LOCKED` inside a single
  * transaction so that multiple orchestrator instances can run OutboxRelay
