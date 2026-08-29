@@ -24,7 +24,7 @@
     "@delegolabs/types": "workspace:*",
     "@delegolabs/utils": "workspace:*",
     "pg": "^8.21.0",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "bullmq": "^5.78.1",
     "@stellar/stellar-sdk": "^16.0.0"
   },
