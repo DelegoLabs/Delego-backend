@@ -334,6 +334,7 @@ Rust/Soroban contracts are developed in the separate [DelegoLabs/Delego-contract
 - `types/src/` - Shared TypeScript types
 - `utils/src/` - Utility functions
 - `sdk/src/` - API client SDK
+- `cache/src/` - Redis Cluster client config, cache-aside helpers, tag-based invalidation
 
 ## 🧪 Testing Guidelines
 

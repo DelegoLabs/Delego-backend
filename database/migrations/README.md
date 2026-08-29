@@ -43,6 +43,8 @@ The incremental migrations are:
 | `021_workflow_timeout_analytics.sql` | Timeout analytics and escalation tracking (#145) |
 | `022_redis_pubsub_dead_letters.sql` | Dead letter queue for Redis Pub/Sub failed deliveries (#123) |
 | `023_transaction_dlq_and_monitoring.sql` | Transaction DLQ and monitoring tables (#143) |
+| `024_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
+| `025_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
 
 ## Naming rules
 
