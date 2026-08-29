@@ -23,6 +23,8 @@ export interface HealthRouteOptions {
   registry: HealthRegistry;
   serviceName: string;
   version?: string;
+  /** Extra Prometheus text appended to GET /health/metrics (lock/business metrics). */
+  extraMetrics?: () => string;
 }
 
 function aggregateToLegacy(status: HealthStatus): "ok" | "degraded" | "down" {
@@ -44,13 +46,15 @@ async function sendMetrics(
   serviceName: string,
   version: string,
   registry: HealthRegistry,
+  extraMetrics?: () => string,
 ): Promise<void> {
   const health = await registry.getServiceHealth(serviceName, version);
   res.writeHead(200, {
     "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
     "Cache-Control": "no-store",
   });
-  res.end(renderMetrics(health, registry.getMetrics()));
+  const extra = extraMetrics?.() ?? "";
+  res.end(renderMetrics(health, registry.getMetrics()) + extra);
 }
 
 /**
@@ -58,7 +62,7 @@ async function sendMetrics(
  * Injected fetch/health functions keep the routes unit-testable.
  */
 export function createHealthRoutes(options: HealthRouteOptions): Route[] {
-  const { registry, serviceName, version = "0.0.1" } = options;
+  const { registry, serviceName, version = "0.0.1", extraMetrics } = options;
 
   return [
     route("GET", "/health/live", (_req: IncomingMessage, res: ServerResponse) => {
@@ -109,7 +113,7 @@ export function createHealthRoutes(options: HealthRouteOptions): Route[] {
     }),
 
     route("GET", "/health/metrics", async (_req: IncomingMessage, res: ServerResponse) => {
-      await sendMetrics(res, serviceName, version, registry);
+      await sendMetrics(res, serviceName, version, registry, extraMetrics);
     }),
   ];
 }

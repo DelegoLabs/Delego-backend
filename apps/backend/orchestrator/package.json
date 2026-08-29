@@ -16,6 +16,7 @@
   "dependencies": {
     "@delegolabs/types": "workspace:*",
     "@delegolabs/utils": "workspace:*",
+    "@delegolabs/cache": "workspace:*",
     "bullmq": "^5.78.1",
     "ioredis": "^5.11.1",
     "pg": "^8.21.0",

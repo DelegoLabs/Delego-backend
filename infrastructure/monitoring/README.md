@@ -22,7 +22,7 @@ framework:
 | Service     | Dependencies (critical in bold)                                       |
 | ----------- | --------------------------------------------------------------------- |
 | gateway     | **postgresql**, **redis**, orchestrator, wallet, payments              |
-| orchestrator| **postgres**, redis                                                     |
+| orchestrator| **postgres**, **redis** (when distributed locks enabled) |
 | wallet      | **database**, **redis**, sorobanRpc                                    |
 | payments    | **database**, walletService, sorobanRpc                                |
 
@@ -58,6 +58,10 @@ delego_health_check_latency_ms{service="gateway",check="postgresql"} 3
 ```
 
 Scrape them with Prometheus and visualize in Grafana.
+
+Orchestrator lock metrics (`orchestrator_lock_*`) are appended on
+`GET /health/metrics`. Alert rule snippets live in
+[`orchestrator-lock-alerts.yml`](./orchestrator-lock-alerts.yml).
 
 Planned:
 - Structured JSON logging (see `@delegolabs/utils` logger)

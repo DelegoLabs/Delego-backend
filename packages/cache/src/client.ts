@@ -24,6 +24,7 @@ const log = createLogger("cache:client", process.env.LOG_LEVEL ?? "info");
 export interface CacheRedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, mode: "EX", ttlSeconds: number): Promise<"OK" | null>;
+  set(key: string, value: string, mode: "PX", ttlMs: number, nx: "NX"): Promise<"OK" | null>;
   set(key: string, value: string): Promise<"OK" | null>;
   del(...keys: string[]): Promise<number>;
   keys(pattern: string): Promise<string[]>;
@@ -32,6 +33,9 @@ export interface CacheRedisClient {
   srem(key: string, ...members: string[]): Promise<number>;
   incr(key: string): Promise<number>;
   expire(key: string, ttlSeconds: number): Promise<number>;
+  pttl(key: string): Promise<number>;
+  scan(cursor: string | number, ...args: string[]): Promise<[string, string[]]>;
+  eval(script: string, numKeys: number, ...args: (string | number)[]): Promise<unknown>;
   ping(): Promise<string>;
   quit(): Promise<"OK" | void>;
 }

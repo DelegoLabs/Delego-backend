@@ -122,6 +122,18 @@ describe("createHealthRoutes", () => {
     expect(text).toContain("test_svc_health_check_status");
   });
 
+  it("appends extraMetrics to /health/metrics", async () => {
+    const { baseUrl } = await listen(
+      createHealthRoutes({
+        registry: makeRegistry(),
+        serviceName: "test-svc",
+        extraMetrics: () => "# TYPE orchestrator_lock_held gauge\norchestrator_lock_held 2\n",
+      }),
+    );
+    const text = await (await fetch(`${baseUrl}/health/metrics`)).text();
+    expect(text).toContain("orchestrator_lock_held 2");
+  });
+
   it("serves /health/dashboard as HTML", async () => {
     const { baseUrl } = await listen(createHealthRoutes({ registry: makeRegistry(), serviceName: "test-svc" }));
     const res = await fetch(`${baseUrl}/health/dashboard`);

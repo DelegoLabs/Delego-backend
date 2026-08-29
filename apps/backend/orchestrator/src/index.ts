@@ -14,6 +14,7 @@ import {
 } from "@delegolabs/utils";
 import { Pool } from "pg";
 import { Redis } from "ioredis";
+import { getCacheClient } from "@delegolabs/cache";
 import { createOrchestratorHealthRegistry } from "./health.js";
 import {
   createWorkflow,
@@ -30,6 +31,14 @@ import { connectSagaDb, PostgresSagaStore } from "./saga/index.js";
 import { startOutboxRelay, type OutboxRelayHandle } from "./events/outboxRelay.js";
 import { PostgresServiceEventOutboxStore } from "./events/postgres-service-event-outbox.js";
 import { setServiceEventOutboxStore } from "./events/service-event-outbox.js";
+import {
+  DistributedLockManager,
+  createLockRoutes,
+  distributedLocksEnabled,
+  resolveOrchestratorInstanceId,
+} from "./locks/index.js";
+import type { SagaCoordinator } from "./saga/index.js";
+import type { CheckoutContext } from "../workflows/checkout/index.js";
 
 const SERVICE_NAME = "orchestrator";
 const DEFAULT_PORT = 3010;
@@ -40,7 +49,8 @@ const log = createLogger(SERVICE_NAME, logLevel);
 const port = Number(process.env.ORCHESTRATOR_PORT ?? DEFAULT_PORT);
 
 const sagaStore = new PostgresSagaStore();
-const checkoutSagaCoordinator = createCheckoutSagaCoordinator(sagaStore);
+let lockManager: DistributedLockManager | null = null;
+let checkoutSagaCoordinator: SagaCoordinator<CheckoutContext> = createCheckoutSagaCoordinator(sagaStore);
 const orchestratorHealthRegistry = createOrchestratorHealthRegistry();
 
 // ─── #33 Transactional Outbox Relay ──────────────────────────────────────────
@@ -380,6 +390,16 @@ function readJsonBody(req: import("node:http").IncomingMessage): Promise<Record<
 }
 
 async function main(): Promise<void> {
+  if (distributedLocksEnabled()) {
+    lockManager = new DistributedLockManager({
+      client: getCacheClient(),
+      owner: resolveOrchestratorInstanceId(),
+      log: createLogger("orchestrator:locks", logLevel),
+    });
+    checkoutSagaCoordinator = createCheckoutSagaCoordinator(sagaStore, lockManager);
+    log.info("Distributed locks enabled", { owner: lockManager.owner });
+  }
+
   // Connect and recover before accepting traffic so checkout requests never race startup
   // recovery — and fail fast (rather than just logging) if durable saga storage isn't ready.
   await connectSagaDb();
@@ -410,7 +430,9 @@ async function main(): Promise<void> {
         registry: orchestratorHealthRegistry,
         serviceName: SERVICE_NAME,
         version: "0.0.1",
+        extraMetrics: () => lockManager?.metrics.toPrometheusText() ?? "",
       }),
+      ...(lockManager ? createLockRoutes(lockManager) : []),
 
       route("POST", "/checkout", async (req, res) => {
         let body: Record<string, unknown>;
@@ -590,6 +612,14 @@ main().catch((err) => {
 
 async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
   log.info("Received shutdown signal", { signal });
+
+  if (lockManager) {
+    try {
+      await lockManager.releaseAll();
+    } catch (err) {
+      log.error("Error releasing distributed locks", { error: (err as Error).message });
+    }
+  }
 
   if (outboxRelay) {
     try {

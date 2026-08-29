@@ -16,9 +16,21 @@
  * configs have a typed contract to target once built.
  */
 
+export interface MetricSeries {
+  labels: Record<string, string>;
+  value: number;
+}
+
+export interface HistogramSeries {
+  labels: Record<string, string>;
+  count: number;
+  sum: number;
+}
+
 export interface Counter {
   inc(value?: number, labels?: Record<string, string>): void;
   value(labels?: Record<string, string>): number;
+  entries(): MetricSeries[];
 }
 
 export interface Gauge {
@@ -26,6 +38,7 @@ export interface Gauge {
   inc(value?: number, labels?: Record<string, string>): void;
   dec(value?: number, labels?: Record<string, string>): void;
   value(labels?: Record<string, string>): number;
+  entries(): MetricSeries[];
 }
 
 export interface Histogram {
@@ -34,6 +47,7 @@ export interface Histogram {
   count(labels?: Record<string, string>): number;
   /** Sum of all observed values, for computing an average alongside count. */
   sum(labels?: Record<string, string>): number;
+  entries(): HistogramSeries[];
 }
 
 function labelKey(labels?: Record<string, string>): string {
@@ -42,6 +56,27 @@ function labelKey(labels?: Record<string, string>): string {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
     .join(",");
+}
+
+function parseLabelKey(key: string): Record<string, string> {
+  if (!key) return {};
+  const labels: Record<string, string> = {};
+  for (const part of key.split(",")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    labels[part.slice(0, eq)] = part.slice(eq + 1);
+  }
+  return labels;
+}
+
+function escapePromLabel(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
+}
+
+function formatPromLabels(labels: Record<string, string>): string {
+  const entries = Object.entries(labels);
+  if (entries.length === 0) return "";
+  return `{${entries.map(([k, v]) => `${k}="${escapePromLabel(v)}"`).join(",")}}`;
 }
 
 class SimpleCounter implements Counter {
@@ -54,6 +89,13 @@ class SimpleCounter implements Counter {
 
   value(labels?: Record<string, string>): number {
     return this.values.get(labelKey(labels)) ?? 0;
+  }
+
+  entries(): MetricSeries[] {
+    return [...this.values.entries()].map(([key, value]) => ({
+      labels: parseLabelKey(key),
+      value,
+    }));
   }
 }
 
@@ -73,6 +115,13 @@ class SimpleGauge implements Gauge {
   value(labels?: Record<string, string>): number {
     return this.values.get(labelKey(labels)) ?? 0;
   }
+
+  entries(): MetricSeries[] {
+    return [...this.values.entries()].map(([key, value]) => ({
+      labels: parseLabelKey(key),
+      value,
+    }));
+  }
 }
 
 class SimpleHistogram implements Histogram {
@@ -89,6 +138,15 @@ class SimpleHistogram implements Histogram {
   }
   sum(labels?: Record<string, string>): number {
     return this.sums.get(labelKey(labels)) ?? 0;
+  }
+
+  entries(): HistogramSeries[] {
+    const keys = new Set([...this.counts.keys(), ...this.sums.keys()]);
+    return [...keys].map((key) => ({
+      labels: parseLabelKey(key),
+      count: this.counts.get(key) ?? 0,
+      sum: this.sums.get(key) ?? 0,
+    }));
   }
 }
 
@@ -180,16 +238,39 @@ export class ServiceMetricsRegistry {
     const lines: string[] = [];
     for (const [name, counter] of this.counters) {
       lines.push(`# TYPE ${name} counter`);
-      lines.push(`${name} ${counter.value()}`);
+      const series = counter.entries();
+      if (series.length === 0) {
+        lines.push(`${name} 0`);
+      } else {
+        for (const point of series) {
+          lines.push(`${name}${formatPromLabels(point.labels)} ${point.value}`);
+        }
+      }
     }
     for (const [name, gauge] of this.gauges) {
       lines.push(`# TYPE ${name} gauge`);
-      lines.push(`${name} ${gauge.value()}`);
+      const series = gauge.entries();
+      if (series.length === 0) {
+        lines.push(`${name} 0`);
+      } else {
+        for (const point of series) {
+          lines.push(`${name}${formatPromLabels(point.labels)} ${point.value}`);
+        }
+      }
     }
     for (const [name, hist] of this.histograms) {
       lines.push(`# TYPE ${name} histogram`);
-      lines.push(`${name}_count ${hist.count()}`);
-      lines.push(`${name}_sum ${hist.sum()}`);
+      const series = hist.entries();
+      if (series.length === 0) {
+        lines.push(`${name}_count 0`);
+        lines.push(`${name}_sum 0`);
+      } else {
+        for (const point of series) {
+          const labels = formatPromLabels(point.labels);
+          lines.push(`${name}_count${labels} ${point.count}`);
+          lines.push(`${name}_sum${labels} ${point.sum}`);
+        }
+      }
     }
     return lines.join("\n") + "\n";
   }

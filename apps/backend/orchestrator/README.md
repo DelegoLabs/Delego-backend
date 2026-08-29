@@ -27,6 +27,11 @@ executed steps across services when a downstream step fails:
   complete. Compensation steps must themselves be idempotent, since a crash can interrupt
   compensation after a downstream side effect has already been applied but before the
   saga record is updated.
+- Multi-instance coordination uses Redis distributed locks (`src/locks/`) around the
+  workflow and each step, in addition to the Postgres `claimExpiresAt` lease. A process
+  crash drops the lock when its TTL expires (auto-renewal keeps it alive while the owner
+  is running). Acquire under no contention targeting under 10ms against
+  local Redis; CI uses `ioredis-mock` (sub-millisecond).
 - `workflows/checkout/index.ts` wires this into checkout: `deposit-escrow` calls the
   payments service's `POST /escrow/deposit` and compensates via `POST
   /escrow/:escrowId/refund` if a later step fails. `confirm-checkout` is currently a
@@ -40,6 +45,9 @@ executed steps across services when a downstream step fails:
 | `DATABASE_URL` | `postgresql://delego:delego@localhost:5432/delego` | Postgres connection for `saga_executions` |
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | `2` / `10` | Sequelize pool sizing |
 | `PAYMENTS_URL` | `http://localhost:3014` | Payments service base URL used by the checkout saga's escrow steps |
+| `REDIS_URL` / `REDIS_CLUSTER_NODES` | `redis://localhost:6379` | Redis for outbox, queues, and distributed locks |
+| `ORCHESTRATOR_INSTANCE_ID` | `{HOSTNAME}:{pid}:{uuid}` | Lock owner identity; set to the pod name in Kubernetes |
+| `ENABLE_DISTRIBUTED_LOCKS` | `true` | Set `false` to skip Redis locks (single-instance without Redis) |
 
 ### HTTP endpoints
 
@@ -48,6 +56,12 @@ executed steps across services when a downstream step fails:
 - `GET /sagas/:sagaId` — current saga status and completed steps.
 - `POST /sagas/:sagaId/resume` — manually resume a saga stuck in `running` or
   `compensating` (e.g. after a downstream outage is fixed).
+- `GET /locks` — JWT. This instance's held locks plus a `SCAN` sample (`?prefix=&limit=`).
+- `GET /locks/:key` — JWT. Inspect one Redis lock (URL-encode the key) and remaining PTTL.
+- `GET /locks/metrics` — JWT. JSON contention snapshot and alert rule definitions.
+- `GET /health/metrics` — Prometheus text including `orchestrator_lock_*` when locks are enabled. `/health*` is unauthenticated so scrapers and probes work.
+
+Lock alert rules: [`infrastructure/monitoring/orchestrator-lock-alerts.yml`](../../../infrastructure/monitoring/orchestrator-lock-alerts.yml).
 
 ## Reliable event publishing (Issue #216)
 

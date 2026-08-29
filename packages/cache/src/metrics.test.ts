@@ -27,6 +27,9 @@ describe("collectClusterMetrics", () => {
       srem: async () => 0,
       incr: async () => 0,
       expire: async () => 0,
+      pttl: async () => -2,
+      scan: async () => ["0", []],
+      eval: async () => null,
       ping: async () => "PONG",
       quit: async () => "OK",
     };

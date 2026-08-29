@@ -128,6 +128,8 @@ export {
   type Counter,
   type Gauge,
   type Histogram,
+  type MetricSeries,
+  type HistogramSeries,
   type RedMetrics,
   type AlertRule,
 } from "./metrics/serviceMetrics.js";

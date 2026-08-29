@@ -40,6 +40,10 @@ spec:
                 secretKeyRef:
                   name: delego-redis
                   key: url
+            - name: ORCHESTRATOR_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: WALLET_SERVICE_URL
               value: http://delego-wallet:3012
           livenessProbe:
