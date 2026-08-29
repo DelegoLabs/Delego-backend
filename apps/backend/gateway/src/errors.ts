@@ -114,3 +114,28 @@ export function internalError(
 ): void {
   sendApiError(res, 500, "INTERNAL_ERROR", message, req);
 }
+
+export function success(
+  res: ServerResponse,
+  data: unknown,
+  req?: IncomingMessage,
+): void {
+  const body = {
+    data,
+    error: null,
+    meta: {
+      requestId: resolveRequestId(req),
+      timestamp: new Date().toISOString(),
+    },
+  };
+  json(res, 200, body);
+}
+
+export function validationError(
+  res: ServerResponse,
+  message: string,
+  req?: IncomingMessage,
+  details?: unknown,
+): void {
+  sendApiError(res, 400, "VALIDATION_ERROR", message, req, { details });
+}

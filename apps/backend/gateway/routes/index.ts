@@ -64,6 +64,9 @@ import {
   sendNotificationHandler,
   monitoringDashboardHandler,
 } from "../monitoring/src/routes.js";
+import { registerPaymentRoutes } from "./payment.js";
+import { registerRecoveryRoutes } from "./recovery.js";
+import { registerMultiCurrencyRoutes } from "./multi-currency.js";
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
@@ -87,9 +90,15 @@ export function registerRoutes(): Route[] {
     route("PATCH", "/api/v1/delegations/:id", updateDelegationHandler),
     route("DELETE", "/api/v1/delegations/:id", revokeDelegationHandler),
     route("GET", "/api/v1/wallets/:walletId", getWalletHandler),
-    // Admin — rate-limit dashboard (#340)
+    // Payment method vault routes
+    ...registerPaymentRoutes(),
+    // Account recovery routes
+    ...registerRecoveryRoutes(),
+    // Multi-currency routes
+    ...registerMultiCurrencyRoutes(),
+    // Admin â€" rate-limit dashboard (#340)
     route("GET", "/api/v1/admin/rate-limit/metrics", rateLimitMetricsHandler),
-    // Admin — circuit breaker status (#364)
+    // Admin â€" circuit breaker status (#364)
     route("GET", "/api/v1/admin/circuit-breakers", circuitBreakerStatusHandler),
     // Request/response logging (#151)
     route("GET", "/api/v1/admin/logs", logSearchHandler),

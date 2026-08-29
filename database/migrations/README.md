@@ -8,7 +8,6 @@ Deterministic, checksum-validated SQL migrations for Delego.
 - `database/migrations/` contains **incremental changes** applied after the baseline.
 - Baseline files always run before incremental files.
 - Within each directory, files run in ascending numeric-prefix order; the filename is the tie-breaker.
-
 The current baseline is:
 
 | Baseline | Description |
@@ -38,6 +37,9 @@ The incremental migrations are:
 | `016_in_app_notifications.sql` | Durable in-app notifications and indexes (Issues #58/#60) |
 | `017_service_event_outbox_relay.sql` | Retry/claim columns on `service_event_outbox` for the OutboxRelay worker (Issue #33) |
 | `018_workflow_compensation_outcomes.sql` | Escrow compensation outcome per workflow record (Issue #35) |
+| `021_payment_method_vault.sql` | PCI DSS SAQ A-EP compliant payment method vault with network tokenization |
+| `022_account_recovery.sql` | Social recovery with guardians, emergency contacts, and time-delayed recovery |
+| `023_multi_currency.sql` | Multi-currency support with path payments, FX rates, and exposure tracking |
 
 ## Naming rules
 
