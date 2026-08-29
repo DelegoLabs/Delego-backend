@@ -384,7 +384,13 @@ importers:
       '@stellar/stellar-sdk':
         specifier: ^16.0.0
         version: 16.2.0
+      bcryptjs:
+        specifier: ^3.0.3
+        version: 3.0.3
     devDependencies:
+      '@types/bcryptjs':
+        specifier: ^3.0.0
+        version: 3.0.0
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
