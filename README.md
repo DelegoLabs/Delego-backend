@@ -56,6 +56,7 @@ Each service is independently deployable and exposes `GET /health`.
 | `@delegolabs/types` | Shared domain types and interfaces | Yes — GitHub Packages |
 | `@delegolabs/utils` | Shared utilities | Yes — GitHub Packages |
 | `@delegolabs/sdk` | TypeScript client SDK for the Delego API | Yes — GitHub Packages |
+| `@delegolabs/cache` | Redis Cluster client config, cache-aside helpers, tag-based invalidation | Yes — GitHub Packages |
 
 These packages are built and published to **GitHub Packages** (`npm.pkg.github.com`) under the `@delegolabs` scope (matching the DelegoLabs org), so the frontend repository can consume them without a monorepo dependency.
 

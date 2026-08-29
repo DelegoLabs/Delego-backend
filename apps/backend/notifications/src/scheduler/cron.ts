@@ -4,7 +4,14 @@
  * Supports the standard `minute hour day-of-month month day-of-week` format
  * with `*`, single values, comma lists, ranges (`a-b`), and step values
  * (star-slash-n, `a-b/n`). No external dependency required.
+ *
+ * This evaluator is UTC-only by design (see getNextCronOccurrence below) —
+ * for timezone-aware / DST-aware scheduling (Issue #59), see
+ * getNextCronOccurrenceInTimezone, which delegates to the `cron-parser` +
+ * `luxon` libraries instead of extending this hand-rolled evaluator with
+ * IANA timezone/DST rules, which are not something to reimplement.
  */
+import { CronExpressionParser } from "cron-parser";
 
 export interface CronField {
   values: Set<number>;
@@ -126,4 +133,52 @@ export function getNextCronOccurrence(expression: string, from: Date = new Date(
   }
 
   throw new Error(`Could not find next occurrence for cron expression "${expression}" within 2 years`);
+}
+
+/**
+ * Validates a cron expression using the same parser getNextCronOccurrenceInTimezone
+ * uses (`cron-parser`), so a timezone-aware caller's validation and evaluation always
+ * agree — the hand-rolled isValidCronExpression() above accepts the same 5-field
+ * syntax but is intentionally not reused here to avoid a false "valid" from one parser
+ * and a throw from the other on an edge case where their grammars diverge.
+ */
+export function isValidCronExpressionStrict(expression: string): boolean {
+  try {
+    CronExpressionParser.parse(expression, { currentDate: new Date() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns the next occurrence of a cron expression evaluated in an IANA timezone
+ * (e.g. "America/New_York"), correctly accounting for DST transitions (Issue #59).
+ *
+ * Delegates to `cron-parser`, which uses `luxon` internally for timezone-aware
+ * field matching — "0 9 * * *" in "America/New_York" always means 9:00 local time,
+ * whether that's UTC-05:00 (EST) or UTC-04:00 (EDT) on a given date.
+ *
+ * @param expression 5-field cron expression (same grammar as parseCronExpression).
+ * @param timezone IANA timezone identifier. Defaults to UTC.
+ * @param from Reference time to compute the next occurrence strictly after. Defaults to now.
+ */
+export function getNextCronOccurrenceInTimezone(
+  expression: string,
+  timezone: string = "UTC",
+  from: Date = new Date()
+): Date {
+  try {
+    const interval = CronExpressionParser.parse(expression, {
+      currentDate: from,
+      tz: timezone,
+    });
+    return interval.next().toDate();
+  } catch (err) {
+    throw new Error(
+      `Could not compute next occurrence for cron expression "${expression}" in timezone "${timezone}": ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
 }

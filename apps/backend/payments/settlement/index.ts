@@ -2,6 +2,12 @@ import { createLogger } from "@delegolabs/utils";
 import { escrowService } from "../escrow/index.js";
 import { getTransactionFeeEstimate } from "../escrow/wallet-client.js";
 import { publishPaymentEvent } from "../events/index.js";
+import {
+  findPaymentRecordByOrderId,
+  updatePaymentRecord,
+} from "../src/escrowCoordinator/paymentRecordStore.js";
+import type { PaymentRecord } from "../src/escrowCoordinator/types.js";
+import type { RefundReasonCode } from "../escrow/types.js";
 
 const log = createLogger("payments:settlement", process.env.LOG_LEVEL ?? "info");
 
@@ -109,8 +115,278 @@ export async function dryRunSettlement(
   }
 }
 
-export async function settleOrder(_orderId: string): Promise<void> {
-  throw new Error("Not implemented — TODO: settlement flow");
+// ─── #35 Order-level escrow compensation (release / refund) ────────────────
+//
+// These wrap escrowService (the same Soroban escrow client coordinateSettlement
+// already uses below) behind an order-id keyed, idempotent API — the shape the
+// orchestrator's compensation module needs, since a saga only knows the orderId,
+// not the escrowId. Idempotency comes from payment_records.status: if a prior
+// call already drove the record to "released"/"refunded", a retry (e.g. from
+// the orchestrator's bounded compensation retry loop) returns the recorded
+// outcome instead of re-invoking the contract, so a retried compensation step
+// can never double-release or double-refund the same escrow.
+
+export type SettlementOutcomeStatus = "released" | "refunded" | "failed" | "no_escrow";
+
+export interface SettlementOutcome {
+  orderId: string;
+  escrowId: string | null;
+  status: SettlementOutcomeStatus;
+  txHash: string | null;
+  /** True when this call found the escrow already in the target terminal state. */
+  alreadySettled: boolean;
+  reason?: string;
+}
+
+async function loadPaymentRecordForCompensation(orderId: string): Promise<PaymentRecord | null> {
+  try {
+    return await findPaymentRecordByOrderId(orderId);
+  } catch (err) {
+    log.error("Failed to load payment record for compensation", {
+      orderId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+}
+
+/**
+ * Releases escrow funds to the seller for a completed order. Idempotent per
+ * orderId: a payment_records row already in status "released" short-circuits
+ * to the previously recorded outcome without calling the contract again.
+ *
+ * Used both by the normal settlement path (delivery confirmed → release) and,
+ * with the same idempotency guarantee, by the orchestrator's escrow
+ * compensation flow (#35) when a saga step downstream of ESCROW_FUNDED needs
+ * to retry a release after a partial failure.
+ */
+export async function settleOrder(orderId: string): Promise<SettlementOutcome> {
+  const trimmedOrderId = orderId?.trim();
+  if (!trimmedOrderId) {
+    throw new Error("orderId is required");
+  }
+
+  const record = await loadPaymentRecordForCompensation(trimmedOrderId);
+  if (!record || !record.escrowId) {
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record?.escrowId ?? null,
+      status: "no_escrow",
+      txHash: null,
+      alreadySettled: false,
+      reason: "No funded escrow found for order",
+    };
+  }
+
+  if (record.status === "released") {
+    log.info("settleOrder: already released, returning recorded outcome", {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+    });
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "released",
+      txHash: record.releaseTxHash,
+      alreadySettled: true,
+    };
+  }
+
+  if (record.status === "refunded") {
+    // Terminal in the other direction — refuse rather than silently no-op, since
+    // releasing after a refund would double-pay the seller from an empty escrow.
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "failed",
+      txHash: null,
+      alreadySettled: false,
+      reason: `Cannot release order ${trimmedOrderId}: escrow was already refunded`,
+    };
+  }
+
+  const sourceAddress = process.env.SETTLEMENT_SOURCE_ADDRESS;
+  if (!sourceAddress) {
+    throw new Error("SETTLEMENT_SOURCE_ADDRESS environment variable is not configured");
+  }
+
+  try {
+    const result = await escrowService.release({ sourceAddress, escrowId: record.escrowId });
+
+    if (!result.success) {
+      await updatePaymentRecord(record.id, {
+        status: "failed",
+        failureReason: "Release transaction failed on-chain",
+      });
+      return {
+        orderId: trimmedOrderId,
+        escrowId: record.escrowId,
+        status: "failed",
+        txHash: result.txHash,
+        alreadySettled: false,
+        reason: "Release transaction failed on-chain",
+      };
+    }
+
+    await updatePaymentRecord(record.id, {
+      status: "released",
+      releaseTxHash: result.txHash,
+      failureReason: null,
+    });
+
+    await publishPaymentEvent({
+      type: "escrow_released",
+      orderId: trimmedOrderId,
+      payload: { escrowId: record.escrowId, txHash: result.txHash },
+      occurredAt: new Date().toISOString(),
+    }).catch((err) =>
+      log.error("settleOrder: event publish failed (non-fatal)", {
+        orderId: trimmedOrderId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "released",
+      txHash: result.txHash,
+      alreadySettled: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown release error";
+    log.error("settleOrder: release failed", { orderId: trimmedOrderId, error: message });
+    await updatePaymentRecord(record.id, { status: "failed", failureReason: message }).catch(() => {});
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "failed",
+      txHash: null,
+      alreadySettled: false,
+      reason: message,
+    };
+  }
+}
+
+/**
+ * Refunds escrow funds to the buyer for a cancelled/failed order. Idempotent per
+ * orderId in the same way as settleOrder: a record already "refunded" returns
+ * the recorded outcome instead of resubmitting the refund transaction.
+ *
+ * This is the release-side counterpart the orchestrator's compensation module
+ * calls to reverse a purchase saga after ESCROW_FUNDED (#35).
+ */
+export async function refundOrder(
+  orderId: string,
+  reasonCode: RefundReasonCode = "system_error"
+): Promise<SettlementOutcome> {
+  const trimmedOrderId = orderId?.trim();
+  if (!trimmedOrderId) {
+    throw new Error("orderId is required");
+  }
+
+  const record = await loadPaymentRecordForCompensation(trimmedOrderId);
+  if (!record || !record.escrowId) {
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record?.escrowId ?? null,
+      status: "no_escrow",
+      txHash: null,
+      alreadySettled: false,
+      reason: "No funded escrow found for order",
+    };
+  }
+
+  if (record.status === "refunded") {
+    log.info("refundOrder: already refunded, returning recorded outcome", {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+    });
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "refunded",
+      txHash: record.refundTxHash,
+      alreadySettled: true,
+    };
+  }
+
+  if (record.status === "released") {
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "failed",
+      txHash: null,
+      alreadySettled: false,
+      reason: `Cannot refund order ${trimmedOrderId}: escrow was already released`,
+    };
+  }
+
+  const sourceAddress = process.env.SETTLEMENT_SOURCE_ADDRESS;
+  if (!sourceAddress) {
+    throw new Error("SETTLEMENT_SOURCE_ADDRESS environment variable is not configured");
+  }
+
+  try {
+    const result = await escrowService.refund({
+      sourceAddress,
+      escrowId: record.escrowId,
+      refundReasonCode: reasonCode,
+    });
+
+    if (!result.success) {
+      await updatePaymentRecord(record.id, {
+        status: "failed",
+        failureReason: "Refund transaction failed on-chain",
+      });
+      return {
+        orderId: trimmedOrderId,
+        escrowId: record.escrowId,
+        status: "failed",
+        txHash: result.txHash,
+        alreadySettled: false,
+        reason: "Refund transaction failed on-chain",
+      };
+    }
+
+    await updatePaymentRecord(record.id, {
+      status: "refunded",
+      refundTxHash: result.txHash,
+      failureReason: null,
+    });
+
+    await publishPaymentEvent({
+      type: "escrow_refunded",
+      orderId: trimmedOrderId,
+      payload: { escrowId: record.escrowId, txHash: result.txHash, reasonCode },
+      occurredAt: new Date().toISOString(),
+    }).catch((err) =>
+      log.error("refundOrder: event publish failed (non-fatal)", {
+        orderId: trimmedOrderId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "refunded",
+      txHash: result.txHash,
+      alreadySettled: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown refund error";
+    log.error("refundOrder: refund failed", { orderId: trimmedOrderId, error: message });
+    await updatePaymentRecord(record.id, { status: "failed", failureReason: message }).catch(() => {});
+    return {
+      orderId: trimmedOrderId,
+      escrowId: record.escrowId,
+      status: "failed",
+      txHash: null,
+      alreadySettled: false,
+      reason: message,
+    };
+  }
 }
 
 export async function coordinateSettlement(orderId: string): Promise<void> {

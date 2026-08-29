@@ -49,3 +49,8 @@ jobs:
         run: pnpm --filter @delegolabs/sdk publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish @delegolabs/cache
+        run: pnpm --filter @delegolabs/cache publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

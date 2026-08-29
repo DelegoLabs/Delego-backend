@@ -505,7 +505,7 @@ const ACCEPTED_REFUND_REASON_CODES: OnChainRefundReasonCode[] = [
   'system_error',
 ];
 
-function validateRefundReasonCode(
+export function validateRefundReasonCode(
   body: Record<string, unknown>
 ): ValidationResult<OnChainRefundReasonCode> {
   const raw = body.refundReasonCode;
@@ -797,6 +797,94 @@ export function _setLockRedisClientForTesting(client: LockRedisClient): void {
   _lockRedisClient = client;
   activeFundingLocks.clear();
   inMemoryLockStore.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Issue #45 – Delivery Confirmation Webhook Request Schema
+// ---------------------------------------------------------------------------
+
+import type { DeliveryConfirmation, DeliveryProof } from "./autoRelease/types.js";
+
+function validateDeliveryProof(body: Record<string, unknown>): ValidationResult<DeliveryProof> {
+  const raw = body.deliveryProof;
+  if (raw === undefined || raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: missingField("deliveryProof") };
+  }
+
+  const proof = raw as Record<string, unknown>;
+  const deliveredAt = proof.deliveredAt;
+  if (typeof deliveredAt !== "string" || deliveredAt.trim() === "") {
+    return {
+      ok: false,
+      error: invalidField("deliveryProof.deliveredAt", "deliveryProof.deliveredAt must be a non-empty string"),
+    };
+  }
+
+  const result: DeliveryProof = { deliveredAt };
+  if (proof.trackingNumber !== undefined) result.trackingNumber = String(proof.trackingNumber);
+  if (proof.carrier !== undefined) result.carrier = String(proof.carrier);
+  if (proof.recipientSignature !== undefined) result.recipientSignature = String(proof.recipientSignature);
+  if (Array.isArray(proof.photos)) result.photos = proof.photos.map(String);
+  if (proof.gpsCoordinates && typeof proof.gpsCoordinates === "object") {
+    const gps = proof.gpsCoordinates as Record<string, unknown>;
+    if (typeof gps.lat === "number" && typeof gps.lng === "number") {
+      result.gpsCoordinates = { lat: gps.lat, lng: gps.lng };
+    }
+  }
+
+  return { ok: true, value: result };
+}
+
+/**
+ * Validate a `POST /escrow/:escrowId/delivery-confirmed` webhook payload.
+ *
+ * The `escrowId` path parameter is the source of truth; if the body also
+ * carries an `escrowId` it must match, guarding against a caller pointing
+ * the confirmation at a different escrow than the URL implies.
+ */
+export function validateDeliveryConfirmation(
+  body: Record<string, unknown>,
+  escrowIdParam?: string
+): ValidationResult<DeliveryConfirmation> {
+  if (!escrowIdParam || escrowIdParam.trim() === "") {
+    return { ok: false, error: missingField("escrowId") };
+  }
+  const escrowId = escrowIdParam.trim();
+
+  if (
+    body.escrowId !== undefined &&
+    body.escrowId !== null &&
+    String(body.escrowId).trim() !== "" &&
+    String(body.escrowId).trim() !== escrowId
+  ) {
+    return {
+      ok: false,
+      error: invalidField("escrowId", "escrowId in the request body does not match the URL path parameter"),
+    };
+  }
+
+  const orderId = requireString(body, "orderId");
+  if (!orderId.ok) return orderId;
+
+  const deliveryProof = validateDeliveryProof(body);
+  if (!deliveryProof.ok) return deliveryProof;
+
+  const confirmedBy = requireString(body, "confirmedBy");
+  if (!confirmedBy.ok) return confirmedBy;
+
+  const timestamp = requireString(body, "timestamp");
+  if (!timestamp.ok) return timestamp;
+
+  return {
+    ok: true,
+    value: {
+      escrowId,
+      orderId: orderId.value,
+      deliveryProof: deliveryProof.value,
+      confirmedBy: confirmedBy.value,
+      timestamp: timestamp.value,
+    },
+  };
 }
 
 export function _resetLockRedisClient(): void {

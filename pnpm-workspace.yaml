@@ -4,3 +4,23 @@ packages:
   - "packages/*"
   - "tests/*"
 
+# #82 — Note for future dependency overrides: package.json's old
+# "pnpm.overrides" field (axios: ">=1.16.0") was never actually applied —
+# pnpm 9+ reads overrides from *this* file's top-level "overrides:" key
+# instead, confirmed via the "pnpm field ... no longer read" warning it
+# printed on every install. That field has been removed from package.json
+# since it did nothing.
+#
+# The axios vulnerability itself (GHSA-pjwm-pj3p-43mv, axios <1.16.0,
+# pulled in transitively via @stellar/stellar-sdk@15.1.0) was fixed by
+# bumping @stellar/stellar-sdk to ^16.0.0 everywhere it's declared
+# (root, packages/utils, apps/backend/payments, apps/backend/wallet,
+# tests/unit, tests/integration) rather than via an override — an
+# `overrides:` entry added to this file for both axios and fast-uri was
+# tried first, but did not take effect even after a from-scratch `rm -rf
+# node_modules pnpm-lock.yaml && pnpm install` (more invalidation than
+# `--force` alone provides). If you need a workspace override in the
+# future and it doesn't seem to apply, verify with `pnpm why <pkg>`
+# before trusting it — an override that looks correct on paper is not
+# guaranteed to take effect in this workspace based on this experience.
+

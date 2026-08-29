@@ -46,3 +46,10 @@ docker-data/
 # Misc
 *.tsbuildinfo
 .turbo/
+
+issue.md
+pr.md
+
+# MiMoCode
+.mimocode/
+.mimo/

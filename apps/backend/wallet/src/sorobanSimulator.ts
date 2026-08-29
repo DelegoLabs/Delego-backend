@@ -4,6 +4,11 @@ import {
   xdr,
   rpc as SorobanRpc,
 } from "@stellar/stellar-sdk";
+import {
+  getCachedSimulation,
+  setCachedSimulation,
+  setInFlightSimulation,
+} from "./simulationCache.js";
 
 type SimulateTransactionResponse = SorobanRpc.Api.SimulateTransactionResponse;
 
@@ -86,6 +91,49 @@ export class SorobanTransactionSimulator {
   }
 
   public async simulateTransaction(
+    transaction: Transaction
+  ): Promise<SimulateTransactionResponse> {
+    // Extract contract/method info from transaction for cache key
+    const ops = transaction.operations;
+    let contractId = "";
+    let method = "";
+    let args: unknown[] = [];
+
+    if (ops.length > 0 && "function" in ops[0]) {
+      const op = ops[0] as any;
+      contractId = op.contract ?? "";
+      method = op.function ?? op.name ?? "";
+      args = op.args ?? [];
+    }
+
+    // Check cache first (unless bypassed)
+    if (process.env.SIM_CACHE_BYPASS !== "true") {
+      const cached = await getCachedSimulation(contractId, method, args);
+      if (cached) {
+        return cached.result as SimulateTransactionResponse;
+      }
+    }
+
+    // Set up deduplication for concurrent identical requests
+    const simulatePromise = this.doSimulateWithRetry(transaction);
+
+    if (process.env.SIM_CACHE_BYPASS !== "true" && contractId && method) {
+      setInFlightSimulation(contractId, method, args, simulatePromise);
+    }
+
+    const result = await simulatePromise;
+
+    // Cache successful results
+    if (process.env.SIM_CACHE_BYPASS !== "true" && contractId && method) {
+      if (SorobanRpc.Api.isSimulationSuccess(result)) {
+        setCachedSimulation(contractId, method, args, result).catch(() => {});
+      }
+    }
+
+    return result;
+  }
+
+  private async doSimulateWithRetry(
     transaction: Transaction
   ): Promise<SimulateTransactionResponse> {
     let lastError: unknown;

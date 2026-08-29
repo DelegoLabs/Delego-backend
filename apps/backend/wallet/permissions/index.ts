@@ -26,6 +26,7 @@ import {
   type KeySigner,
 } from "../src/vault.js";
 import { checkSpendLimit } from "../src/spendLimits.js";
+import { getTransactionFee } from "../src/dynamicFee.js";
 
 const log = createLogger("wallet:permissions", process.env.LOG_LEVEL ?? "info");
 
@@ -440,7 +441,7 @@ export function createPermissionsService(
       });
 
       let tx = new TransactionBuilder(account, {
-        fee: "100",
+        fee: await getTransactionFee(config.horizonUrl),
         networkPassphrase: config.networkPassphrase,
       })
         .addOperation(op)
@@ -536,7 +537,7 @@ export function createPermissionsService(
       });
 
       let tx = new TransactionBuilder(account, {
-        fee: "100",
+        fee: await getTransactionFee(config.horizonUrl),
         networkPassphrase: config.networkPassphrase,
       })
         .addOperation(op)
@@ -604,7 +605,7 @@ export function createPermissionsService(
 
       const account = new Account(owner, "0");
       const tx = new TransactionBuilder(account, {
-        fee: "100",
+        fee: await getTransactionFee(config.horizonUrl),
         networkPassphrase: config.networkPassphrase,
       })
         .addOperation(
@@ -665,7 +666,7 @@ export function createPermissionsService(
 
       const account = new Account(owner, "0");
       const tx = new TransactionBuilder(account, {
-        fee: "100",
+        fee: await getTransactionFee(config.horizonUrl),
         networkPassphrase: config.networkPassphrase,
       })
         .addOperation(

@@ -7,6 +7,16 @@ export interface WalletAccount {
   network: StellarNetwork;
 }
 
+export interface Wallet {
+  id: string;
+  userId: string;
+  address: string;
+  publicKey?: string;
+  network?: StellarNetwork;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 export interface TransactionRequest {
   sourceAddress: string;
   contractId: string;
