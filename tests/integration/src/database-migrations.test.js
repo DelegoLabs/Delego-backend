@@ -163,6 +163,7 @@ suite("database migration runner", () => {
       "soroban_transaction_ledger",
       "oauth_accounts",
       "in_app_notifications",
+      "scheduled_notifications",
     ]) {
       assert.ok(tables.has(table), `expected table ${table} to exist`);
     }

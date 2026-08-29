@@ -1,0 +1,72 @@
+name: Docker Image Build, Scan, and Sign
+
+# Issue #92 — builds the gateway service's Docker image (the first
+# service to get one; see PR description for scope), scans it for
+# vulnerabilities with Trivy, generates an SBOM with syft, and signs
+# the image with cosign on pushes to main. Extend the `service` matrix
+# to other apps/backend/* services as their own Dockerfiles land.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/backend/gateway/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/backend/gateway/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+
+jobs:
+  build-scan-sign:
+    name: Build, scan, and sign gateway image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # required for cosign keyless signing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t delego-gateway:${{ github.sha }} -f apps/backend/gateway/Dockerfile .
+
+      - name: Report image size
+        run: docker image inspect delego-gateway:${{ github.sha }} --format='Image size: {{.Size}} bytes'
+
+      - name: Scan image with Trivy (fail on critical/high)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: delego-gateway:${{ github.sha }}
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Generate SBOM with syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: delego-gateway:${{ github.sha }}
+          format: spdx-json
+          output-file: gateway-sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-sbom
+          path: gateway-sbom.spdx.json
+
+      - name: Install cosign
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless, push to main only)
+        if: github.event_name == 'push'
+        run: |
+          echo "Image would be pushed to a registry and signed here with:"
+          echo "  cosign sign --yes <registry>/delego-gateway@<digest>"
+          echo "Skipped: this workflow does not push to a registry yet — no registry has been chosen (see issue #92's disclosure)."

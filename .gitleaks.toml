@@ -1,0 +1,40 @@
+# Gitleaks configuration for #81 — secret scanning.
+#
+# Extends gitleaks' default rule set (600+ patterns covering AWS, GitHub,
+# Stripe, generic high-entropy strings, private keys, etc.) rather than
+# replacing it — [extend] with no other [[rules]] means "keep every default
+# rule, add these allowlist entries on top."
+#
+# Run locally:
+#   gitleaks detect --config .gitleaks.toml --source . -v
+title = "Delego-backend secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe patterns: placeholder env values, generated fixtures, and docs examples"
+
+paths = [
+  # Documentation and templates intentionally show the *shape* of a
+  # secret, never a real one.
+  '''\.env\.example$''',
+  '''ARCHITECTURE\.md$''',
+  '''DEPLOYMENT_EMAIL_RETRY_DLQ\.md$''',
+  '''OPERATIONAL_RUNBOOK_DLQ\.md$''',
+  '''docs/.*\.md$''',
+  # Test fixtures use fake keys/tokens by construction — see
+  # tests/unit and each service's *.test.ts files, which generate
+  # random or hardcoded-but-fake credentials for assertions.
+  '''\.test\.ts$''',
+  '''\.test\.js$''',
+  '''tests/.*''',
+]
+
+regexes = [
+  # Explicit non-secret placeholder conventions already used in this repo
+  # (.env.example's JWT_SECRET=change-me-in-production and similar).
+  '''change-me''',
+  '''your-.*-here''',
+  '''<[A-Z_]+>''',
+]

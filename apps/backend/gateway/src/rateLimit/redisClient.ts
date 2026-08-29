@@ -7,8 +7,7 @@
  */
 
 import { Redis } from "ioredis";
-// @ts-ignore
-import MockRedis from "ioredis-mock";
+import { createRequire } from "node:module";
 import { createLogger } from "@delegolabs/utils";
 
 const log = createLogger("gateway:redis", process.env.LOG_LEVEL ?? "info");
@@ -36,7 +35,11 @@ export function getRedisClient(): Redis {
 
     if (useMock) {
       log.info("Using mock Redis connection for rate limiting");
-      const MockRedisConstructor = MockRedis as any;
+      // ioredis-mock is a devDependency, imported lazily so a `--prod`
+      // install (e.g. this service's Docker image, see #92) never needs
+      // to resolve it — this branch only runs under test/CI anyway.
+      const require = createRequire(import.meta.url);
+      const MockRedisConstructor = require("ioredis-mock");
       redis = new MockRedisConstructor();
     } else {
       log.info("Connecting to real Redis for rate limiting", { url: REDIS_URL });

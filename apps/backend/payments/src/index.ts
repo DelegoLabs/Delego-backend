@@ -3,7 +3,7 @@
  * #68 Dispute Resolution Arbiter Multi-Sig
  */
 import { createLogger } from "@delegolabs/utils";
-import { startHttpServer } from "@delegolabs/utils";
+import { startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
 import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 
@@ -62,6 +62,7 @@ log.info("Starting service", { port, nodeEnv });
 const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
+  middleware: [corsMiddleware(), securityHeadersMiddleware()],
   routes: registerRoutes(),
 });
 

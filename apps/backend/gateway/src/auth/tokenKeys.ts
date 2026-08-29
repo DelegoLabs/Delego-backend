@@ -21,6 +21,57 @@ import type { JWKSKey, SigningAlgorithm } from "./tokenTypes.js";
 
 const DEFAULT_ROTATION_DAYS = 2;
 
+/**
+ * #32 — HS256 tokens fall back to this well-known secret. If JWT_SECRET is left unset
+ * (or explicitly set to this value) in production, anyone can forge a valid token for
+ * any userId, since the "secret" is public (checked into source control).
+ */
+export const DEFAULT_JWT_SECRET = "change-me-in-production";
+
+let cachedJwtSecret: string | null = null;
+
+/**
+ * Resolves the effective HS256 JWT secret, refusing to start in production on the
+ * well-known default. Mirrors the guard in apps/backend/notifications/src/websocket.ts
+ * (#30) and apps/backend/wallet/src/vault.ts (#31) for the same class of risk: a public
+ * fallback secret protecting real user data.
+ *
+ * - Production + unset/default → throws (fail closed; refuses to start).
+ * - Non-production + unset/default → warns once and falls back to the default (local/dev ergonomics).
+ * - Any environment with a real secret configured → returns it unchanged.
+ *
+ * Cached after the first call so a misconfigured production process fails fast on its
+ * first HS256 use and does not spam warnings in development on every call.
+ */
+export function resolveJwtSecret(
+  rawValue: string | undefined = process.env.JWT_SECRET,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): string {
+  const isDefault = !rawValue || rawValue === DEFAULT_JWT_SECRET;
+
+  if (isDefault) {
+    if (nodeEnv === "production") {
+      throw new Error(
+        "JWT_SECRET must be set in production and must not equal the default development value",
+      );
+    }
+    if (cachedJwtSecret === null) {
+      // eslint-disable-next-line no-console
+      console.warn("WARNING: Using default JWT_SECRET — set JWT_SECRET before deploying to production");
+    }
+    cachedJwtSecret = DEFAULT_JWT_SECRET;
+    return DEFAULT_JWT_SECRET;
+  }
+
+  cachedJwtSecret = rawValue;
+  return rawValue;
+}
+
+/** Resets the memoized secret/warning state (used in tests). */
+export function resetJwtSecretCache(): void {
+  cachedJwtSecret = null;
+}
+
 export interface SigningKeyMaterial {
   kid: string;
   alg: SigningAlgorithm;
@@ -89,7 +140,7 @@ function generateKid(alg: SigningAlgorithm): string {
 
 function loadOrCreateKey(alg: SigningAlgorithm, kid: string): SigningKeyMaterial {
   if (alg === "HS256") {
-    const secret = process.env.JWT_SECRET ?? "change-me-in-production";
+    const secret = resolveJwtSecret();
     return {
       kid,
       alg,
@@ -229,11 +280,11 @@ export class SigningKeyStore {
     for (const key of this.activeKeys()) {
       if (key.alg !== alg) continue;
       if (kid && key.kid !== kid) continue;
-      if (alg === "HS256") return key.secret ?? process.env.JWT_SECRET ?? "change-me-in-production";
+      if (alg === "HS256") return key.secret ?? resolveJwtSecret();
       return key.publicKey;
     }
     // Fall back to the current key when no kid match (covers rotated-in HS256).
-    if (alg === "HS256") return process.env.JWT_SECRET ?? "change-me-in-production";
+    if (alg === "HS256") return resolveJwtSecret();
     const current = this.current;
     if (current.alg === alg && current.publicKey) return current.publicKey;
     return null;
@@ -275,4 +326,5 @@ export function getSigningKeyStore(): SigningKeyStore {
 /** Resets the singleton (used in tests). */
 export function resetSigningKeyStore(): void {
   store = null;
+  resetJwtSecretCache();
 }

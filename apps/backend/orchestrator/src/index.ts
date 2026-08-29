@@ -2,8 +2,17 @@
  * @delegolabs/orchestrator — Workflow coordination
  * #64 Purchase Recovery Engine — reconcileWorkflows compares DB state with on-chain escrow.
  */
-import { createLogger, json, route, startHttpServer, createHealthRoutes } from "@delegolabs/utils";
+import {
+  createLogger,
+  json,
+  route,
+  startHttpServer,
+  createHealthRoutes,
+  corsMiddleware,
+  securityHeadersMiddleware,
+} from "@delegolabs/utils";
 import { Pool } from "pg";
+import { Redis } from "ioredis";
 import { createOrchestratorHealthRegistry } from "./health.js";
 import {
   createWorkflow,
@@ -17,6 +26,9 @@ import {
   type CheckoutWorkflowInput,
 } from "../workflows/checkout/index.js";
 import { connectSagaDb, PostgresSagaStore } from "./saga/index.js";
+import { startOutboxRelay, type OutboxRelayHandle } from "./events/outboxRelay.js";
+import { PostgresServiceEventOutboxStore } from "./events/postgres-service-event-outbox.js";
+import { setServiceEventOutboxStore } from "./events/service-event-outbox.js";
 
 const SERVICE_NAME = "orchestrator";
 const DEFAULT_PORT = 3010;
@@ -29,6 +41,15 @@ const port = Number(process.env.ORCHESTRATOR_PORT ?? DEFAULT_PORT);
 const sagaStore = new PostgresSagaStore();
 const checkoutSagaCoordinator = createCheckoutSagaCoordinator(sagaStore);
 const orchestratorHealthRegistry = createOrchestratorHealthRegistry();
+
+// ─── #33 Transactional Outbox Relay ──────────────────────────────────────────
+// Backs service_event_outbox writes (see workflows/purchase/index.ts transitionWorkflow)
+// with an actual Redis publisher, so events survive an orchestrator crash between the
+// DB commit and the publish. Disable with ENABLE_OUTBOX_RELAY=false (e.g. for a
+// single-purpose worker deployment that doesn't own delivery).
+const outboxPool = new Pool({ connectionString: process.env.DATABASE_URL });
+setServiceEventOutboxStore(new PostgresServiceEventOutboxStore(outboxPool));
+let outboxRelay: OutboxRelayHandle | null = null;
 
 // ─── #64 Reconciliation Engine ───────────────────────────────────────────────
 
@@ -370,10 +391,19 @@ async function main(): Promise<void> {
     log.warn("Failed to recover unfinished purchase workflows during startup", { error: (err as Error).message });
   }
 
+  if (process.env.ENABLE_OUTBOX_RELAY !== "false") {
+    const redisClient = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+      lazyConnect: true,
+      maxRetriesPerRequest: 3,
+    });
+    outboxRelay = startOutboxRelay({ redisClient, log });
+  }
+
   log.info("Starting orchestrator", { port });
   startHttpServer({
     port,
     serviceName: SERVICE_NAME,
+    middleware: [corsMiddleware(), securityHeadersMiddleware()],
     routes: [
       ...createHealthRoutes({
         registry: orchestratorHealthRegistry,
@@ -480,6 +510,67 @@ async function main(): Promise<void> {
           });
         }
       }),
+
+      // Issue #146 — Workflow state migration endpoints
+      route("POST", "/migrations", async (req, res) => {
+        let body: Record<string, unknown>;
+        try {
+          body = await readJsonBody(req);
+        } catch {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "Invalid JSON body" } });
+          return;
+        }
+        const { plan, instances, dryRun } = body as {
+          plan?: { workflowType: string; fromVersion: string; toVersion: string; stateMappings: unknown[]; contextTransforms: unknown[]; safetyChecks: string[]; estimatedDurationMs: number };
+          instances?: Array<{ instanceId: string; state: string; context: Record<string, unknown> }>;
+          dryRun?: boolean;
+        };
+        if (!plan || !instances) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "plan and instances are required" } });
+          return;
+        }
+        try {
+          const { createMigration } = await import("./migration/index.js");
+          const migration = await createMigration(plan as any, instances, dryRun ?? false);
+          json(res, 201, { data: migration, error: null });
+        } catch (err) {
+          json(res, 500, { data: null, error: { code: "MIGRATION_FAILED", message: (err as Error).message } });
+        }
+      }),
+
+      route("GET", "/migrations/:migrationId", async (_req, res, params) => {
+        const { getMigration, getMigrationProgress } = await import("./migration/index.js");
+        const migration = getMigration(params.migrationId);
+        if (!migration) {
+          json(res, 404, { data: null, error: { code: "NOT_FOUND", message: "Migration not found" } });
+          return;
+        }
+        const progress = getMigrationProgress(params.migrationId);
+        json(res, 200, { data: { ...migration, progress }, error: null });
+      }),
+
+      route("GET", "/migrations", async (_req, res) => {
+        const { listMigrations } = await import("./migration/index.js");
+        const migrations = listMigrations();
+        json(res, 200, { data: migrations, error: null });
+      }),
+
+      // Issue #145 — Timeout escalation endpoints
+      route("GET", "/timeout/analytics/:workflowType", async (_req, res, params) => {
+        const { getWorkflowTimeoutHandler } = await import("./timeout/escalation.js");
+        const handler = getWorkflowTimeoutHandler();
+        const analytics = handler.getAnalytics(params.workflowType);
+        json(res, 200, { data: analytics, error: null });
+      }),
+
+      route("GET", "/timeout/events", async (req, res) => {
+        const url = new URL(req.url ?? "/", `http://localhost`);
+        const workflowType = url.searchParams.get("workflowType") ?? undefined;
+        const { getWorkflowTimeoutHandler } = await import("./timeout/escalation.js");
+        const handler = getWorkflowTimeoutHandler();
+        const events = handler.getTimeoutEvents(workflowType);
+        json(res, 200, { data: events, error: null });
+      }),
     ],
   });
 }
@@ -490,6 +581,31 @@ main().catch((err) => {
   });
   process.exitCode = 1;
 });
+
+// ─── Graceful Shutdown ─────────────────────────────────────────────────────
+// Stops the OutboxRelay's poll loop and awaits its in-flight batch before the
+// process exits, so a deploy/restart never abandons a claimed-but-not-yet-published
+// batch — see events/outboxRelay.ts's stop() for the drain semantics.
+
+async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
+  log.info("Received shutdown signal", { signal });
+
+  if (outboxRelay) {
+    try {
+      await outboxRelay.stop();
+    } catch (err) {
+      log.error("Error stopping outbox relay", { error: (err as Error).message });
+    }
+  }
+
+  process.exit(0);
+}
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void gracefulShutdown(signal);
+  });
+}
 
 // Export workflows and state machine for internal use (issue #7 & #54)
 export { RedisPublisher } from "./pubsub/index.js";

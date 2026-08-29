@@ -14,6 +14,7 @@ import {
   updatePaymentRecord,
 } from "./paymentRecordStore.js";
 import { publishPaymentStatusEvent } from "./redisEvents.js";
+import { getEscrowFundingLockManager } from "./escrowFundingLock.js";
 import type {
   DisputeEscrowParams,
   DisputeResult,
@@ -113,6 +114,17 @@ export const escrowCoordinator: EscrowCoordinator = {
       return toFundResult(existing);
     }
 
+    // Issue #147 — Use adaptive locking for escrow funding
+    const lockManager = getEscrowFundingLockManager();
+    const lockHolderId = `fund:${params.orderId}`;
+    const acquisition = await lockManager.acquireLock(params.orderId, lockHolderId);
+
+    if (!acquisition) {
+      log.warn("Could not acquire funding lock, proceeding without lock", {
+        orderId: params.orderId,
+      });
+    }
+
     let record = await createPaymentRecord({
       orderId: params.orderId,
       escrowContractId: params.escrowContractId,
@@ -162,6 +174,8 @@ export const escrowCoordinator: EscrowCoordinator = {
       });
       await emitStatusEvent("payment:funded", record, tx.hash);
 
+      if (acquisition) lockManager.releaseLock(acquisition, lockHolderId);
+
       return {
         escrowId,
         txHash: tx.hash,
@@ -176,6 +190,9 @@ export const escrowCoordinator: EscrowCoordinator = {
         failureReason: message,
       });
       await emitStatusEvent("payment:failed", record, undefined, message);
+
+      if (acquisition) lockManager.releaseLock(acquisition, lockHolderId);
+
       return {
         escrowId: record.escrowId ?? "",
         txHash: record.fundTxHash ?? "",
