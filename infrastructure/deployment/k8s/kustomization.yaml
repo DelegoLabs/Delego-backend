@@ -1,0 +1,16 @@
+# Delego backend Kubernetes manifests (Issue #76)
+#
+# Apply everything:
+#   kubectl apply -k infrastructure/deployment/k8s
+#
+# Expected Secrets (create before applying):
+#   delego-db      → database-url
+#   delego-redis   → url
+#   delego-stellar → soroban-rpc-url
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gateway.yaml
+  - orchestrator.yaml
+  - wallet.yaml
+  - payments.yaml

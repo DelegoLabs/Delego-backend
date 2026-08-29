@@ -4,8 +4,7 @@
  */
 import { createLogger } from "@delegolabs/utils";
 import { generateId } from "@delegolabs/utils";
-import { Redis } from "ioredis";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 
 const log = createLogger("orchestrator:purchase", process.env.LOG_LEVEL ?? "info");
 
@@ -137,24 +136,36 @@ function applyEvent(state: PurchaseState, event: PurchaseEvent, ctx: PurchaseCon
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 
-function getRedis(): Redis {
-  const url = process.env.REDIS_URL ?? "redis://localhost:6379";
-  return new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 3 });
-}
-
 function getPool(): Pool {
   return new Pool({ connectionString: process.env.DATABASE_URL });
 }
 
-const redis = getRedis();
 const pool = getPool();
 
-async function persistWorkflow(snapshot: WorkflowSnapshot): Promise<void> {
-  await pool.query(
+async function persistWorkflow(snapshot: WorkflowSnapshot, client: Pick<Pool, "query"> = pool): Promise<void> {
+  await client.query(
     `INSERT INTO purchase_workflows (order_id, user_id, state, context, updated_at)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (order_id) DO UPDATE SET state = $3, context = $4, updated_at = $5`,
     [snapshot.orderId, snapshot.context.userId, snapshot.state, JSON.stringify(snapshot.context), snapshot.updatedAt]
+  );
+}
+
+/**
+ * Issue #33 — Inserts a `service_event_outbox` row inside the *same* transaction that
+ * persists the workflow's new state, so a crash right after commit can never lose the
+ * event the way a direct `redis.publish()` call could. The OutboxRelay worker
+ * (../../src/events/outboxRelay.ts) drains this table and does the actual Redis publish
+ * asynchronously — so this insert is the only durability-critical step here.
+ */
+async function insertWorkflowEventOutboxRow(
+  client: Pick<PoolClient, "query">,
+  evt: WorkflowEvent
+): Promise<void> {
+  await client.query(
+    `INSERT INTO service_event_outbox (topic, payload, status)
+     VALUES ($1, $2::jsonb, 'pending')`,
+    ["workflow:state_changed", JSON.stringify(evt)]
   );
 }
 
@@ -170,14 +181,6 @@ async function loadWorkflow(orderId: string): Promise<WorkflowSnapshot | null> {
     context: rows[0].context as PurchaseContext,
     updatedAt: rows[0].updated_at,
   };
-}
-
-async function publishEvent(evt: WorkflowEvent): Promise<void> {
-  try {
-    await redis.publish("workflow:state_changed", JSON.stringify(evt));
-  } catch (err) {
-    log.warn("Redis publish failed", { error: (err as Error).message });
-  }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -257,15 +260,33 @@ export async function transitionWorkflow(
   const updatedAt = new Date();
   const next: WorkflowSnapshot = { orderId, state, context, updatedAt };
 
-  await persistWorkflow(next);
-  await publishEvent({
+  const workflowEvent: WorkflowEvent = {
     orderId,
     userId: context.userId,
     previousState,
     currentState: state,
     event: event.type,
     timestamp: updatedAt.toISOString(),
-  });
+  };
+
+  // Issue #33 — persist the new state and enqueue its notification event in one
+  // transaction. Previously this called publishEvent() (a direct redis.publish())
+  // right after persistWorkflow() succeeded — a crash in that window silently
+  // dropped the event with no record it ever should have been sent. Writing to the
+  // outbox here instead means the event is durable the moment this transaction
+  // commits; OutboxRelay is responsible for actually delivering it to Redis.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await persistWorkflow(next, client);
+    await insertWorkflowEventOutboxRow(client, workflowEvent);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
   log.info("Workflow transitioned", { orderId, from: previousState, to: state, event: event.type });
   return next;

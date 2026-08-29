@@ -8,7 +8,43 @@ import { createLogger } from "@delegolabs/utils";
 
 const SERVICE_NAME = "notifications";
 const log = createLogger(SERVICE_NAME, process.env.LOG_LEVEL ?? "info");
-const JWT_SECRET = process.env.JWT_SECRET ?? "change-me-in-production";
+
+/**
+ * #30 — This service verifies WebSocket auth tokens with JWT_SECRET. If the env var is
+ * left unset in production, falling back to this well-known string lets anyone forge a
+ * valid token for any userId, since the "secret" is public (checked into source control).
+ */
+export const DEFAULT_NOTIFICATIONS_JWT_SECRET = "change-me-in-production";
+
+/**
+ * Resolves the effective JWT secret, refusing to start in production on the well-known
+ * default. Mirrors the guard in apps/backend/wallet/src/vault.ts (#31) for the same class
+ * of risk: a public fallback secret protecting real user data.
+ *
+ * - Production + unset/default → throws (fail closed; refuses to start).
+ * - Non-production + unset/default → warns and falls back to the default (local/dev ergonomics).
+ * - Any environment with a real secret configured → returns it unchanged.
+ */
+export function resolveJwtSecret(
+  rawValue: string | undefined = process.env.JWT_SECRET,
+  nodeEnv: string | undefined = process.env.NODE_ENV
+): string {
+  const isDefault = !rawValue || rawValue === DEFAULT_NOTIFICATIONS_JWT_SECRET;
+
+  if (isDefault) {
+    if (nodeEnv === "production") {
+      throw new Error(
+        "JWT_SECRET must be set in production and must not equal the default development value"
+      );
+    }
+    log.warn("Using default notifications JWT_SECRET — set JWT_SECRET before deploying to production");
+    return DEFAULT_NOTIFICATIONS_JWT_SECRET;
+  }
+
+  return rawValue;
+}
+
+const JWT_SECRET = resolveJwtSecret();
 const HEARTBEAT_TIMEOUT = 60_000; // 60 seconds
 
 export interface PushConnection {
@@ -27,6 +63,17 @@ export interface PushNotificationEvent {
   payload: Record<string, unknown>;
   publishedAt: string;
 }
+
+export interface WebSocketMetrics {
+  totalConnections: number;
+  authenticatedConnections: number;
+  messagesSent: number;
+  messagesReceived: number;
+  connectionsByUser: Record<string, number>;
+}
+
+let messagesSent = 0;
+let messagesReceived = 0;
 
 const connections = new Map<string, PushConnection>();
 const redisSubscriber = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", { lazyConnect: true });
@@ -64,6 +111,7 @@ function verifyJwt(token: string): { userId: string } | null {
 
 function sendMessage(ws: WebSocket, message: unknown) {
   ws.send(JSON.stringify(message));
+  messagesSent += 1;
 }
 
 function broadcastToTopic(topic: string, event: PushNotificationEvent) {
@@ -72,6 +120,39 @@ function broadcastToTopic(topic: string, event: PushNotificationEvent) {
       sendMessage(conn.ws, event);
     }
   }
+}
+
+export function broadcastNotificationToUser(
+  userId: string,
+  event: Omit<PushNotificationEvent, "topic" | "publishedAt"> & Partial<Pick<PushNotificationEvent, "publishedAt">>
+): void {
+  const notification: PushNotificationEvent = {
+    ...event,
+    topic: `user:${userId}`,
+    publishedAt: event.publishedAt ?? new Date().toISOString(),
+  };
+  broadcastToTopic(notification.topic, notification);
+}
+
+export function getWebSocketMetrics(): WebSocketMetrics {
+  const connectionsByUser: Record<string, number> = {};
+  for (const connection of connections.values()) {
+    connectionsByUser[connection.userId] = (connectionsByUser[connection.userId] ?? 0) + 1;
+  }
+  return {
+    totalConnections: connections.size,
+    authenticatedConnections: connections.size,
+    messagesSent,
+    messagesReceived,
+    connectionsByUser,
+  };
+}
+
+function broadcastPresence(userId: string, online: boolean): void {
+  broadcastNotificationToUser(userId, {
+    type: "presence",
+    payload: { userId, online },
+  });
 }
 
 function handleConnection(ws: WebSocket, req: IncomingMessage) {
@@ -103,6 +184,7 @@ function handleConnection(ws: WebSocket, req: IncomingMessage) {
   };
 
   connections.set(connectionId, connection);
+  broadcastPresence(decoded.userId, true);
 
   log.info("New WebSocket connection established", {
     connectionId,
@@ -129,6 +211,7 @@ function handleConnection(ws: WebSocket, req: IncomingMessage) {
   resetHeartbeat();
 
   ws.on("message", (data: import("ws").RawData) => {
+    messagesReceived += 1;
     try {
       const message = JSON.parse(data.toString());
 
@@ -136,10 +219,39 @@ function handleConnection(ws: WebSocket, req: IncomingMessage) {
         sendMessage(ws, { type: "pong" });
         resetHeartbeat();
       } else if (message.type === "subscribe") {
-        const topics = message.topics || [];
-        connection.subscribedTopics = [
-          ...new Set([...connection.subscribedTopics, ...topics]),
-        ];
+        const topics: string[] = message.topics || [];
+        const ownTopic = `user:${decoded.userId}`;
+
+        // Only allow subscribing to own user topic
+        const allowed: string[] = [];
+        const rejected: string[] = [];
+        for (const topic of topics) {
+          if (topic === ownTopic) {
+            allowed.push(topic);
+          } else {
+            rejected.push(topic);
+          }
+        }
+
+        if (rejected.length > 0) {
+          log.warn("Rejected unauthorized topic subscription", {
+            connectionId,
+            userId: decoded.userId,
+            rejected,
+          });
+          sendMessage(ws, {
+            type: "error",
+            message: "Cannot subscribe to other users' topics",
+            rejected,
+          });
+        }
+
+        if (allowed.length > 0) {
+          connection.subscribedTopics = [
+            ...new Set([...connection.subscribedTopics, ...allowed]),
+          ];
+        }
+
         sendMessage(ws, {
           type: "subscribed",
           topics: connection.subscribedTopics,
@@ -171,6 +283,9 @@ function handleConnection(ws: WebSocket, req: IncomingMessage) {
       clearTimeout(connection.heartbeatTimeout);
     }
     connections.delete(connectionId);
+    if (![...connections.values()].some((item) => item.userId === decoded.userId)) {
+      broadcastPresence(decoded.userId, false);
+    }
   });
 
   ws.on("error", (err: Error) => {

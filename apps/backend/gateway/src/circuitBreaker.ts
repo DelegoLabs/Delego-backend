@@ -234,3 +234,138 @@ export function getAllCircuitBreakerStats(): Record<DownstreamService, CircuitBr
   }
   return stats;
 }
+
+// ---------------------------------------------------------------------------
+// Bulkhead pattern — resource isolation per downstream service
+// ---------------------------------------------------------------------------
+
+export interface BulkheadConfig {
+  maxConcurrent: number;
+  maxQueued: number;
+}
+
+export class BulkheadFullError extends Error {
+  constructor(service: string) {
+    super(`Bulkhead for "${service}" is full — too many concurrent/queued requests`);
+    this.name = "BulkheadFullError";
+  }
+}
+
+export class Bulkhead {
+  private running = 0;
+  private queue: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
+  private readonly config: BulkheadConfig;
+
+  constructor(
+    private readonly serviceName: string,
+    config?: Partial<BulkheadConfig>,
+  ) {
+    this.config = {
+      maxConcurrent: config?.maxConcurrent ?? 10,
+      maxQueued: config?.maxQueued ?? 20,
+    };
+  }
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    if (this.running < this.config.maxConcurrent) {
+      this.running++;
+      return Promise.resolve();
+    }
+
+    if (this.queue.length >= this.config.maxQueued) {
+      return Promise.reject(new BulkheadFullError(this.serviceName));
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      this.queue.push({ resolve, reject });
+    });
+  }
+
+  private release(): void {
+    const next = this.queue.shift();
+    if (next) {
+      next.resolve();
+    } else {
+      this.running--;
+    }
+  }
+
+  getStats(): { running: number; queued: number; maxConcurrent: number; maxQueued: number } {
+    return {
+      running: this.running,
+      queued: this.queue.length,
+      maxConcurrent: this.config.maxConcurrent,
+      maxQueued: this.config.maxQueued,
+    };
+  }
+}
+
+const bulkheads = new Map<DownstreamService, Bulkhead>();
+
+export function getBulkhead(service: DownstreamService): Bulkhead {
+  let bulkhead = bulkheads.get(service);
+  if (!bulkhead) {
+    const prefix = service.toUpperCase();
+    bulkhead = new Bulkhead(service, {
+      maxConcurrent: parseInt(process.env[`BULKHEAD_${prefix}_MAX_CONCURRENT`] ?? "10", 10),
+      maxQueued: parseInt(process.env[`BULKHEAD_${prefix}_MAX_QUEUED`] ?? "20", 10),
+    });
+    bulkheads.set(service, bulkhead);
+  }
+  return bulkhead;
+}
+
+// ---------------------------------------------------------------------------
+// Automatic recovery with health checks
+// ---------------------------------------------------------------------------
+
+export interface HealthCheckResult {
+  service: DownstreamService;
+  healthy: boolean;
+  latencyMs: number;
+  error?: string;
+}
+
+export async function healthCheckService(service: DownstreamService): Promise<HealthCheckResult> {
+  const breaker = getCircuitBreaker(service);
+  const start = Date.now();
+
+  try {
+    await breaker.execute(async () => {
+      const url = getServiceHealthUrl(service);
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) throw new Error(`Health check returned ${res.status}`);
+    });
+    return { service, healthy: true, latencyMs: Date.now() - start };
+  } catch (err) {
+    return {
+      service,
+      healthy: false,
+      latencyMs: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function getServiceHealthUrl(service: DownstreamService): string {
+  const urls: Record<DownstreamService, string> = {
+    orchestrator: process.env.ORCHESTRATOR_SERVICE_URL ?? "http://localhost:3013",
+    wallet: process.env.WALLET_SERVICE_URL ?? "http://localhost:3012",
+    payments: process.env.PAYMENTS_SERVICE_URL ?? "http://localhost:3014",
+  };
+  return `${urls[service]}/health`;
+}
+
+export async function healthCheckAll(): Promise<HealthCheckResult[]> {
+  const services: DownstreamService[] = ["orchestrator", "wallet", "payments"];
+  return Promise.all(services.map(healthCheckService));
+}

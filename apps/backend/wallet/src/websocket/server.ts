@@ -113,6 +113,9 @@ function decodeFrame(buffer: Buffer): {
   const maskingKey = masked ? buffer.slice(offset, offset + 4) : null;
   if (masked) offset += 4;
 
+  if (masked && (!maskingKey || maskingKey.length !== 4)) return null;
+  if (buffer.length < offset + payloadLength) return null;
+
   const payloadBuffer = buffer.slice(offset, offset + payloadLength);
 
   if (masked && maskingKey) {

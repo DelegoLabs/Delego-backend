@@ -147,6 +147,11 @@ jobs:
       - name: Check migration status
         run: pnpm db:migrate:status
 
+      - name: Validate migration dry-run
+        run: |
+          pnpm db:migrate -- --dry-run --direction up | tee /tmp/migrate-dry-run.log
+          grep -q "nothing to do" /tmp/migrate-dry-run.log
+
       - name: Verify second migration run is a no-op
         run: |
           pnpm db:migrate | tee /tmp/migrate-second-run.log
@@ -181,6 +186,74 @@ jobs:
       - name: Build project
         run: pnpm build
 
+  test-integration:
+    name: Integration Tests (real Postgres + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build]
+
+    # Issue #36 — the `test` job above runs entirely against MOCK_REDIS and never
+    # touches a live database, so SQL bugs, transaction/locking races, and real
+    # Redis command behavior ship untested. This job runs the same
+    # `pnpm test:integration` command the `migrations` job already uses, but adds
+    # a Redis service and a build step so the full suite (saga crash recovery,
+    # outbox relay + consumer dedupe, auth register/login/refresh round-trip,
+    # delegation/wallet ownership rules, rate limiting) runs against real
+    # infrastructure instead of skipping. The `test` job stays mocked and fast —
+    # this job is additive, not a replacement.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: delego
+          POSTGRES_PASSWORD: delego
+          POSTGRES_DB: delego
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U delego -d delego"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://delego:delego@localhost:5432/delego
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages and services
+        run: pnpm --filter "./packages/*" --filter "./apps/backend/*" --filter "./agents" build
+
+      - name: Apply migrations to the live database
+        run: pnpm db:migrate
+
+      - name: Run integration tests against real Postgres + Redis
+        run: pnpm test:integration
+
   docker:
     name: Docker Compose
     runs-on: ubuntu-latest
@@ -213,6 +286,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # #82 — was `continue-on-error: true` (advisory only, never actually
+      # gated). Now blocking: confirmed passing as of this PR after fixing
+      # the 3 real high-severity findings that existed (GHSA-v2hh-gcrm-f6hx,
+      # GHSA-7p8r-x3mc-p8w7, GHSA-4c8g-83qw-93j6 via ajv's fast-uri
+      # transitive dependency; GHSA-pjwm-pj3p-43mv via
+      # @stellar/stellar-sdk's axios transitive dependency — see
+      # pnpm-workspace.yaml's comment for why the fix is a direct
+      # @stellar/stellar-sdk version bump rather than a pnpm override).
       - name: Run audit
         run: pnpm audit --prod --audit-level=high
-        continue-on-error: true
+
+      - name: Generate SBOM (CycloneDX)
+        run: npx --yes @cyclonedx/cdxgen -t js -o sbom.json
+        # cyclonedx-npm (the more commonly used generator) shells out to
+        # `npm ls` internally, which errors on this repo's pnpm-managed
+        # node_modules tree (peer/dev dependency layout mismatch) — cdxgen
+        # has native pnpm support and was verified to work against this
+        # workspace.
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+          retention-days: 90

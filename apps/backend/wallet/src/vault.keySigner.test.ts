@@ -29,6 +29,8 @@ describe("LocalFileKeySigner", () => {
 
   afterEach(async () => {
     delete process.env.VAULT_FILE_PATH;
+    delete process.env.WALLET_ACTIVE_KEY_VERSION;
+    delete process.env.WALLET_MASTER_SECRET_V2;
     await fs.rm(vaultPath, { force: true });
     setKeySigner(null);
   });
@@ -73,6 +75,19 @@ describe("LocalFileKeySigner", () => {
     await expect(signer.sign(Buffer.from("payload"), "GMISSING")).rejects.toMatchObject({
       code: "KEY_SIGNER_KEY_NOT_FOUND",
     });
+  });
+
+  it("rotates encrypted keys by version and remains readable", async () => {
+    process.env.WALLET_ACTIVE_KEY_VERSION = "v1";
+    process.env.WALLET_MASTER_SECRET_V2 = "rotation-secret-v2";
+    const keypair = Keypair.random();
+    await vault.storeKey(keypair.publicKey(), keypair.secret());
+
+    await expect(vault.rotateKeys("v2")).resolves.toMatchObject({ rotated: 1, remaining: 0 });
+    await expect(vault.getKey(keypair.publicKey())).resolves.toBe(keypair.secret());
+
+    delete process.env.WALLET_ACTIVE_KEY_VERSION;
+    delete process.env.WALLET_MASTER_SECRET_V2;
   });
 });
 

@@ -1,61 +1,32 @@
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { randomUUID } from "node:crypto";
+import { RefreshToken } from "../models/RefreshToken.js";
 import { User } from "../models/User.js";
-import { RefreshToken } from "../models/index.js";
-import { Op } from "sequelize";
+import {
+  getJwks,
+  getTokenConfig,
+  getJwtValidationConfig,
+  introspectToken,
+  issueAccessToken,
+  issueTokenPair,
+  revokeTokens,
+  rotateRefreshToken,
+  verifyAccessToken,
+  verifyWithStore,
+  type JwtValidationConfig,
+} from "./tokenManager.js";
+import type { TokenBinding, TokenPair } from "./tokenTypes.js";
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "change-me-in-production";
-const ACCESS_TOKEN_EXPIRES_IN = "15m";
-const REFRESH_TOKEN_EXPIRES_IN = "7d";
-
-/**
- * Configuration contract used when validating JWTs across distributed services.
- * `clockToleranceSeconds` is applied to the `nbf` and `exp` claims so that
- * minor clock drift between issuing and verifying services does not cause
- * spurious authentication failures.
- */
-export interface JwtValidationConfig {
-  issuer: string;
-  audience: string;
-  clockToleranceSeconds: number;
-}
-
-const DEFAULT_CLOCK_TOLERANCE_SECONDS = 5;
-const MAX_CLOCK_TOLERANCE_SECONDS = 300; // 5 minutes hard ceiling
-
-/**
- * Safely parse a numeric environment variable. Returns the provided fallback
- * when the value is missing, not a finite number, negative, or beyond a
- * sensible upper bound. Keeping this strict prevents an operator from
- * accidentally disabling expiry enforcement (e.g. JWT_CLOCK_TOLERANCE=9999999).
- */
-function parseToleranceSeconds(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw === "") return fallback;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return Math.min(Math.floor(parsed), MAX_CLOCK_TOLERANCE_SECONDS);
-}
-
-/**
- * Resolve the active JWT validation config from environment variables.
- * Exported so middleware and tests can introspect the values in use.
- *
- * Environment variables:
- *   JWT_ISSUER                   (default: "delego-gateway")
- *   JWT_AUDIENCE                 (default: "delego-clients")
- *   JWT_CLOCK_TOLERANCE_SECONDS  (default: 5, max: 300)
- */
-export function getJwtValidationConfig(): JwtValidationConfig {
-  return {
-    issuer: process.env.JWT_ISSUER ?? "delego-gateway",
-    audience: process.env.JWT_AUDIENCE ?? "delego-clients",
-    clockToleranceSeconds: parseToleranceSeconds(
-      process.env.JWT_CLOCK_TOLERANCE_SECONDS,
-      DEFAULT_CLOCK_TOLERANCE_SECONDS
-    ),
-  };
-}
+export {
+  getJwks,
+  getTokenConfig,
+  getJwtValidationConfig,
+  introspectToken,
+  issueTokenPair,
+  revokeTokens,
+  verifyAccessToken,
+  type JwtValidationConfig,
+  type TokenPair,
+};
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
@@ -65,149 +36,60 @@ export async function comparePassword(password: string, hash: string): Promise<b
   return bcrypt.compare(password, hash);
 }
 
-export interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
+export function generateAccessToken(
+  userId: string,
+  email: string,
+  roles: string[] = ["user"],
+  binding?: TokenBinding,
+  scope = "openid",
+): string {
+  return issueAccessToken(userId, email, { roles, binding, scope });
 }
 
-interface RefreshTokenPayload {
-  tokenId: string;
-  familyId: string;
-  userId: string;
-  secret: string;
-}
-
-function generateAccessToken(userId: string, email: string, roles: string[] = ["user"]): string {
-  const { issuer, audience } = getJwtValidationConfig();
-  return jwt.sign({ userId, email, roles }, JWT_SECRET, {
-    expiresIn: ACCESS_TOKEN_EXPIRES_IN,
-    issuer,
-    audience,
-  });
-}
-
-async function generateRefreshToken(userId: string, familyId?: string): Promise<{ refreshToken: string; familyId: string; tokenId: string }> {
-  const tokenId = randomUUID();
-  const family = familyId ?? randomUUID();
-  const expiresInMs = 7 * 24 * 60 * 60 * 1000; // 7 days
-  const expiresAt = new Date(Date.now() + expiresInMs);
-  const secret = randomUUID();
-  const tokenHash = await bcrypt.hash(secret, 10);
-
-  await RefreshToken.create({
-    id: tokenId,
-    userId,
-    tokenHash,
-    familyId: family,
-    expiresAt,
-  });
-
-  const { issuer, audience } = getJwtValidationConfig();
-  const refreshToken = jwt.sign(
-    { tokenId, familyId: family, userId, secret },
-    JWT_SECRET,
-    { expiresIn: REFRESH_TOKEN_EXPIRES_IN, issuer, audience }
-  );
-
-  return { refreshToken, familyId: family, tokenId };
-}
-
-export async function generateTokens(userId: string, email: string, familyId?: string): Promise<TokenPair> {
-  const accessToken = generateAccessToken(userId, email);
-  const { refreshToken } = await generateRefreshToken(userId, familyId);
-  const expiresIn = 15 * 60; // 15 minutes in seconds
-  return { accessToken, refreshToken, expiresIn };
+export async function generateTokens(
+  userId: string,
+  email: string,
+  familyId?: string,
+  binding?: TokenBinding,
+): Promise<TokenPair> {
+  return issueTokenPair(userId, email, { familyId, binding });
 }
 
 /**
  * Verify an access token. Applies the configured `clockToleranceSeconds`
- * to the `nbf` and `exp` claims so small clock drift between distributed
- * services does not reject otherwise-valid tokens. Also enforces the
- * configured `issuer` and `audience` claims so a token minted by another
- * party cannot be replayed against the gateway.
+ * to the `nbf` and `exp` claims and enforces issuer/audience. Supports both
+ * asymmetric (RS256/ES256) and symmetric (HS256) tokens so previously-issued
+ * tokens keep validating.
  */
 export function verifyToken(
   token: string,
-  config: JwtValidationConfig = getJwtValidationConfig()
-): { userId: string; email?: string; roles?: string[] } {
-  const decoded = jwt.verify(token, JWT_SECRET, {
+  config: JwtValidationConfig = getJwtValidationConfig(),
+): { userId: string; email?: string; roles?: string[]; jti?: string } {
+  const decoded = verifyWithStore(token, {
     clockTolerance: config.clockToleranceSeconds,
     issuer: config.issuer,
     audience: config.audience,
   });
   if (typeof decoded === "object" && decoded !== null && "userId" in decoded) {
-    return decoded as { userId: string; email?: string; roles?: string[] };
+    return {
+      userId: decoded.userId as string,
+      email: typeof decoded.email === "string" ? decoded.email : undefined,
+      roles: Array.isArray(decoded.roles) ? (decoded.roles as string[]) : undefined,
+      jti: typeof decoded.jti === "string" ? decoded.jti : undefined,
+    };
   }
   throw new Error("Invalid token structure");
 }
 
-function verifyRefreshToken(
-  token: string,
-  config: JwtValidationConfig = getJwtValidationConfig()
-): RefreshTokenPayload {
-  const decoded = jwt.verify(token, JWT_SECRET, {
-    clockTolerance: config.clockToleranceSeconds,
-    issuer: config.issuer,
-    audience: config.audience,
-  });
-  if (
-    typeof decoded === "object" &&
-    decoded !== null &&
-    "tokenId" in decoded &&
-    "familyId" in decoded &&
-    "userId" in decoded &&
-    "secret" in decoded
-  ) {
-    return decoded as RefreshTokenPayload;
-  }
-  throw new Error("Invalid refresh token structure");
-}
-
 export async function revokeTokenFamily(familyId: string): Promise<void> {
-  await RefreshToken.update(
-    { revokedAt: new Date() },
-    { where: { familyId } }
-  );
+  await RefreshToken.update({ revokedAt: new Date() }, { where: { familyId } });
 }
 
-export async function refreshAccessToken(rawRefreshToken: string): Promise<TokenPair> {
-  const decoded = verifyRefreshToken(rawRefreshToken);
-
-  const tokenRecord = await RefreshToken.findByPk(decoded.tokenId);
-  if (!tokenRecord) {
-    throw new Error("Invalid refresh token");
-  }
-
-  const isSecretValid = await bcrypt.compare(decoded.secret, tokenRecord.tokenHash);
-  if (!isSecretValid) {
-    throw new Error("Invalid refresh token");
-  }
-
-  if (tokenRecord.expiresAt < new Date()) {
-    throw new Error("Refresh token expired");
-  }
-
-  // Token reuse detected - revoke entire family
-  if (tokenRecord.revokedAt) {
-    await revokeTokenFamily(tokenRecord.familyId);
-    throw new Error("Token reuse detected");
-  }
-
-  // Revoke the used refresh token atomically
-  const [affectedCount] = await RefreshToken.update(
-    { revokedAt: new Date() },
-    { where: { id: decoded.tokenId, revokedAt: { [Op.is]: null } } }
-  );
-
-  if (affectedCount === 0) {
-    await revokeTokenFamily(tokenRecord.familyId);
-    throw new Error("Token reuse detected");
-  }
-
-  // Generate new token pair
-  const user = await User.findByPk(tokenRecord.userId);
-  return generateTokens(tokenRecord.userId, user?.email ?? "", tokenRecord.familyId);
+export async function refreshAccessToken(
+  rawRefreshToken: string,
+  binding?: TokenBinding,
+): Promise<TokenPair> {
+  return rotateRefreshToken(rawRefreshToken, binding);
 }
 
 export function generateToken(userId: string, email: string = ""): string {
@@ -223,10 +105,18 @@ export interface RegisterResult {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+  refreshExpiresIn: number;
+  tokenType: "Bearer";
+  scope: string;
   token: string; // Backward compatibility
 }
 
-export async function registerUser(email: string, password: string, displayName?: string): Promise<RegisterResult> {
+export async function registerUser(
+  email: string,
+  password: string,
+  displayName?: string,
+  binding?: TokenBinding,
+): Promise<RegisterResult> {
   if (!email || !password) {
     throw new Error("Email and password are required");
   }
@@ -243,7 +133,7 @@ export async function registerUser(email: string, password: string, displayName?
     displayName: displayName ?? null,
   });
 
-  const { accessToken, refreshToken, expiresIn } = await generateTokens(user.id, user.email);
+  const tokens = await issueTokenPair(user.id, user.email, { binding });
 
   return {
     user: {
@@ -251,10 +141,13 @@ export async function registerUser(email: string, password: string, displayName?
       email: user.email,
       displayName: user.displayName,
     },
-    accessToken,
-    refreshToken,
-    expiresIn,
-    token: accessToken, // Backward compatibility
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiresIn: tokens.expiresIn,
+    refreshExpiresIn: tokens.refreshExpiresIn,
+    tokenType: tokens.tokenType,
+    scope: tokens.scope,
+    token: tokens.accessToken, // Backward compatibility
   };
 }
 
@@ -268,6 +161,9 @@ export interface LoginResult {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+  refreshExpiresIn: number;
+  tokenType: "Bearer";
+  scope: string;
   token: string; // Backward compatibility
 }
 
@@ -275,16 +171,18 @@ export async function logoutUser(refreshToken?: string): Promise<void> {
   if (!refreshToken) {
     return;
   }
-
   try {
-    const decoded = verifyRefreshToken(refreshToken);
-    await revokeTokenFamily(decoded.familyId);
+    await revokeTokens({ refreshToken, reason: "logout" });
   } catch {
     // Ignore invalid refresh tokens during logout.
   }
 }
 
-export async function loginUser(email: string, password: string): Promise<LoginResult> {
+export async function loginUser(
+  email: string,
+  password: string,
+  binding?: TokenBinding,
+): Promise<LoginResult> {
   if (!email || !password) {
     throw new Error("Email and password are required");
   }
@@ -299,7 +197,7 @@ export async function loginUser(email: string, password: string): Promise<LoginR
     throw new Error("Invalid email or password");
   }
 
-  const { accessToken, refreshToken, expiresIn } = await generateTokens(user.id, user.email);
+  const tokens = await issueTokenPair(user.id, user.email, { binding });
 
   return {
     user: {
@@ -308,9 +206,12 @@ export async function loginUser(email: string, password: string): Promise<LoginR
       displayName: user.displayName,
       stellarAddress: user.stellarAddress,
     },
-    accessToken,
-    refreshToken,
-    expiresIn,
-    token: accessToken, // Backward compatibility
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiresIn: tokens.expiresIn,
+    refreshExpiresIn: tokens.refreshExpiresIn,
+    tokenType: tokens.tokenType,
+    scope: tokens.scope,
+    token: tokens.accessToken, // Backward compatibility
   };
 }

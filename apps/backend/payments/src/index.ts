@@ -3,7 +3,7 @@
  * #68 Dispute Resolution Arbiter Multi-Sig
  */
 import { createLogger } from "@delegolabs/utils";
-import { startHttpServer } from "@delegolabs/utils";
+import { startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
 import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
@@ -56,6 +56,24 @@ export {
   InvalidStateTransitionError,
 } from "./disputes/types.js";
 
+// ─── #45 Escrow Auto-Release on Delivery Confirmation ──────────────────────
+
+export { adminOverrideRelease, executeAutoRelease, handleDeliveryConfirmation } from "./autoRelease/service.js";
+export { getAutoReleaseConfig, setAutoReleaseConfig } from "./autoRelease/configStore.js";
+export { verifyWebhookSignature } from "./autoRelease/hmac.js";
+export type {
+  AdminOverrideReleaseParams,
+  AutoReleaseOutcome,
+  ScheduledReleaseAck,
+} from "./autoRelease/service.js";
+export type {
+  AutoReleaseConfig,
+  DeliveryConfirmation,
+  DeliveryProof,
+  ReleaseResult as AutoReleaseResult,
+} from "./autoRelease/types.js";
+export { EscrowDisputedError, EscrowNotReleasableError } from "./autoRelease/types.js";
+
 const SERVICE_NAME = "payments";
 const DEFAULT_PORT = 3014;
 
@@ -66,22 +84,49 @@ const port = Number(process.env.PAYMENTS_PORT ?? DEFAULT_PORT);
 
 log.info("Starting service", { port, nodeEnv });
 
-startHttpServer({
+const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
+  middleware: [corsMiddleware(), securityHeadersMiddleware()],
   routes: registerRoutes(),
 });
 
 // ─── #358 Settlement Reconciliation ────────────────────────────────────────
 
 // Start periodic settlement reconciliation if enabled
+let stopScheduler: (() => void) | null = null;
 if (process.env.ENABLE_SETTLEMENT_RECONCILIATION !== "false") {
-  const stopScheduler = startReconciliationScheduler();
+  stopScheduler = startReconciliationScheduler();
+}
 
-  // Graceful shutdown
-  process.on("SIGTERM", () => {
-    log.info("SIGTERM received; stopping reconciliation scheduler");
-    stopScheduler();
+// ─── Graceful Shutdown ─────────────────────────────────────────────────────
+
+async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
+  log.info("Received shutdown signal", { signal });
+
+  if (stopScheduler) {
+    try {
+      stopScheduler();
+      log.info("Reconciliation scheduler stopped");
+    } catch (err) {
+      log.error("Error stopping reconciliation scheduler", { error: (err as Error).message });
+    }
+  }
+
+  server.close(() => {
+    log.info("HTTP server closed");
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    log.warn("Force-exiting after shutdown timeout");
+    process.exit(0);
+  }, 10_000).unref();
+}
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void gracefulShutdown(signal);
   });
 }
 

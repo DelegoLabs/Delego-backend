@@ -6,6 +6,7 @@ import {
   publishAuthAuditEvent,
   AUTH_AUDIT_ACTIONS,
 } from "../src/auth/authAuditEvent.js";
+import type { TokenBinding } from "../src/auth/tokenTypes.js";
 import {
   validateSchema,
   RegisterSchema,
@@ -29,6 +30,9 @@ export const authDependencies = {
   loginUser: authService.loginUser,
   refreshAccessToken: authService.refreshAccessToken,
   logoutUser: authService.logoutUser,
+  introspectToken: authService.introspectToken,
+  revokeTokens: authService.revokeTokens,
+  getJwks: authService.getJwks,
   handleOAuthCallback: oauthService.handleOAuthCallback,
   buildAuthorizationUrl: oauthService.buildAuthorizationUrl,
   validateProvider: oauthService.validateProvider,
@@ -36,6 +40,22 @@ export const authDependencies = {
 
 function resolveRequestId(req: IncomingMessage): string {
   return getRequestContext(req)?.requestId ?? generateId();
+}
+
+/** Extract optional token-binding claims from device headers. */
+function getTokenBinding(req: IncomingMessage): TokenBinding | undefined {
+  const headers = req.headers;
+  const deviceId = Array.isArray(headers["x-device-id"])
+    ? headers["x-device-id"][0]
+    : headers["x-device-id"];
+  const fingerprint = Array.isArray(headers["x-device-fingerprint"])
+    ? headers["x-device-fingerprint"][0]
+    : headers["x-device-fingerprint"];
+  if (!deviceId && !fingerprint) return undefined;
+  return {
+    deviceId: deviceId ?? fingerprint ?? "",
+    ...(fingerprint ? { fingerprint } : {}),
+  };
 }
 
 function parseCookies(req: IncomingMessage): Record<string, string> {
@@ -110,6 +130,7 @@ export async function registerHandler(
       body.email,
       body.password,
       body.displayName,
+      getTokenBinding(req),
     );
     publishAuthAuditEvent({
       action: AUTH_AUDIT_ACTIONS.REGISTER,
@@ -123,7 +144,11 @@ export async function registerHandler(
       data: {
         user: result.user,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
+        refreshExpiresIn: result.refreshExpiresIn,
+        tokenType: result.tokenType,
+        scope: result.scope,
       },
       error: null,
     });
@@ -164,7 +189,11 @@ export async function loginHandler(
       return;
     }
 
-    const result = await authDependencies.loginUser(body.email, body.password);
+    const result = await authDependencies.loginUser(
+      body.email,
+      body.password,
+      getTokenBinding(req),
+    );
     publishAuthAuditEvent({
       action: AUTH_AUDIT_ACTIONS.LOGIN,
       success: true,
@@ -177,7 +206,11 @@ export async function loginHandler(
       data: {
         user: result.user,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
+        refreshExpiresIn: result.refreshExpiresIn,
+        tokenType: result.tokenType,
+        scope: result.scope,
       },
       error: null,
     });
@@ -216,7 +249,10 @@ export async function refreshHandler(
       return;
     }
 
-    const result = await authDependencies.refreshAccessToken(refreshToken);
+    const result = await authDependencies.refreshAccessToken(
+      refreshToken,
+      getTokenBinding(req),
+    );
     publishAuthAuditEvent({
       action: AUTH_AUDIT_ACTIONS.REFRESH,
       success: true,
@@ -228,7 +264,11 @@ export async function refreshHandler(
     json(res, 200, {
       data: {
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
+        refreshExpiresIn: result.refreshExpiresIn,
+        tokenType: result.tokenType,
+        scope: result.scope,
       },
       error: null,
     });
@@ -358,4 +398,113 @@ export async function oauthAuthorizeHandler(
   } catch (err: any) {
     sendApiError(res, 400, "INVALID_PROVIDER", err.message, req);
   }
+}
+
+/**
+ * POST /api/v1/auth/introspect — RFC 7662-style token introspection.
+ * Body: { token: string } — returns whether the token is active, plus claims.
+ */
+export async function introspectHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const requestId = resolveRequestId(req);
+
+  try {
+    const body = await readJsonBody(req);
+    const token = typeof body.token === "string" ? body.token : undefined;
+
+    if (!token) {
+      badRequest(res, "token is required", req);
+      return;
+    }
+
+    const result = await authDependencies.introspectToken(token);
+    publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.LOGIN,
+      success: result.active,
+      requestId,
+      userId: result.userId,
+      email: result.email,
+    });
+    json(res, 200, { data: result, error: null });
+  } catch (err: any) {
+    if (err instanceof InvalidJsonError || err instanceof BodyTooLargeError) {
+      badRequest(res, err.message, req);
+    } else {
+      sendApiError(res, 400, "INTROSPECTION_ERROR", err.message, req);
+    }
+  }
+}
+
+/**
+ * POST /api/v1/auth/revoke — revoke an access and/or refresh token.
+ * Body: { token?, refreshToken?, reason? } — blacklists the token(s) and
+ * revokes the refresh-token family.
+ */
+export async function revokeHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const requestId = resolveRequestId(req);
+
+  try {
+    const body = await readJsonBody(req);
+    const token = typeof body.token === "string" ? body.token : undefined;
+    const refreshToken = typeof body.refreshToken === "string" ? body.refreshToken : undefined;
+    const reason =
+      body.reason === "logout" ||
+      body.reason === "password_change" ||
+      body.reason === "security" ||
+      body.reason === "admin"
+        ? body.reason
+        : undefined;
+
+    if (!token && !refreshToken) {
+      badRequest(res, "token or refreshToken is required", req);
+      return;
+    }
+
+    const auth = extractAuth(req);
+    const result = await authDependencies.revokeTokens({
+      token,
+      refreshToken,
+      userId: auth.userId ?? undefined,
+      reason,
+    });
+
+    publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.LOGOUT,
+      success: true,
+      requestId,
+      userId: auth.userId ?? undefined,
+    });
+
+    json(res, 200, {
+      data: { success: true, ...result },
+      error: null,
+    });
+  } catch (err: any) {
+    if (err instanceof InvalidJsonError || err instanceof BodyTooLargeError) {
+      badRequest(res, err.message, req);
+    } else {
+      sendApiError(res, 400, "REVOCATION_ERROR", err.message, req);
+    }
+  }
+}
+
+/**
+ * GET /api/v1/auth/.well-known/jwks.json — JWKS endpoint for key distribution.
+ * Resource servers verify tokens against the published public keys.
+ */
+export function jwksHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): void {
+  const keys = authDependencies.getJwks();
+  res.writeHead(200, {
+    "Content-Type": "application/json",
+    "Cache-Control": "public, max-age=300",
+  });
+  res.end(JSON.stringify({ keys }));
 }
