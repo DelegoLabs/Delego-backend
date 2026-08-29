@@ -10,6 +10,7 @@ import { startReconciliationScheduler } from "./reconciliation/settlementReconci
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 export type { SettlementDiscrepancy } from "./reconciliation/settlementReconciler.js";
+export { estimateTransactionFee, type FeeEstimate } from "../escrow/feeEstimator.js";
 export type {
   DisputeEscrowParams,
   DisputeResult,

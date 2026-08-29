@@ -63,8 +63,11 @@ export class NotificationDeduplicator {
   }
 
   private generateKey(event: NotificationEvent): string {
-    const baseKey = this.config.keyGenerator(event);
     const scopePrefix = this.config.scope === "user" ? event.userId : this.config.scope;
+    // For global/tenant scopes the userId must not be part of the key, so
+    // two events from different users with the same identifier still collide.
+    const keyEvent = this.config.scope === "user" ? event : { ...event, userId: "" };
+    const baseKey = this.config.keyGenerator(keyEvent);
     return `${DEDUP_NS}:${scopePrefix}:${baseKey}`;
   }
 
@@ -151,31 +154,38 @@ export class NotificationDeduplicator {
         return events.map(() => ({ allowed: true, reason: "new" as const }));
       }
 
-      return results.map(([err, result], index) => {
+      const outcomes: DeduplicationResult[] = [];
+      let pipelineIndex = 0;
+      for (let index = 0; index < events.length; index++) {
         this.metrics.totalChecks++;
 
         if (keys[index] === "") {
           this.metrics.bypassed++;
-          return { allowed: true, reason: "bypassed" as const };
+          outcomes.push({ allowed: true, reason: "bypassed" as const });
+          continue;
         }
 
+        const [err, result] = results[pipelineIndex++];
         if (err) {
           log.error("Batch dedup check failed for item", {
             index,
             error: err instanceof Error ? err.message : String(err),
           });
           this.metrics.allowed++;
-          return { allowed: true, reason: "new" as const };
+          outcomes.push({ allowed: true, reason: "new" as const });
+          continue;
         }
 
         if (result === "OK") {
           this.metrics.allowed++;
-          return { allowed: true, reason: "new" as const };
+          outcomes.push({ allowed: true, reason: "new" as const });
+          continue;
         }
 
         this.metrics.duplicatesBlocked++;
-        return { allowed: false, reason: "duplicate" as const };
-      });
+        outcomes.push({ allowed: false, reason: "duplicate" as const });
+      }
+      return outcomes;
     } catch (err) {
       log.error("Batch deduplication check failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -187,6 +197,7 @@ export class NotificationDeduplicator {
   }
 
   async getMetrics(): Promise<DeduplicationMetrics> {
+    this.updateDeduplicationRate();
     return { ...this.metrics };
   }
 

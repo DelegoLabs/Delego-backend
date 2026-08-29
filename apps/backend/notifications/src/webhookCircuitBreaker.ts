@@ -127,10 +127,11 @@ function evaluateState(
  */
 export async function recordSuccess(
   store: WebhookCircuitBreakerStore,
-  webhookId: string
+  webhookId: string,
+  config?: Partial<WebhookCircuitBreakerConfig>
 ): Promise<WebhookCircuitBreaker> {
   let breaker = (await store.get(webhookId)) ?? getDefaultBreaker(webhookId);
-  breaker = { ...breaker };
+  breaker = { ...breaker, config: { ...breaker.config, ...config } };
 
   breaker.state = evaluateState(breaker);
   const now = new Date().toISOString();
@@ -165,10 +166,11 @@ export async function recordSuccess(
 export async function recordFailure(
   store: WebhookCircuitBreakerStore,
   webhookId: string,
-  errorMessage?: string
+  errorMessage?: string,
+  config?: Partial<WebhookCircuitBreakerConfig>
 ): Promise<WebhookCircuitBreaker> {
   let breaker = (await store.get(webhookId)) ?? getDefaultBreaker(webhookId);
-  breaker = { ...breaker };
+  breaker = { ...breaker, config: { ...breaker.config, ...config } };
 
   breaker.state = evaluateState(breaker);
   const now = new Date();

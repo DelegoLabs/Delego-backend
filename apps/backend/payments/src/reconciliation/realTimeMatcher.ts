@@ -70,7 +70,7 @@ function stringSimilarity(a: string, b: string): number {
  * Compares two monetary amounts with a tolerance for minor rounding differences.
  * Returns a score between 0 and 1.
  */
-function amountSimilarity(a: string, b: string, tolerancePercent = 0.01): number {
+function amountSimilarity(a: string, b: string, tolerancePercent = 0.001): number {
   const numA = parseFloat(a);
   const numB = parseFloat(b);
 
@@ -250,7 +250,7 @@ export function matchBatch(
       }
     }
 
-    if (bestMatch && bestMatch.matchScore > 0) {
+    if (bestMatch && bestMatch.matchScore >= fullConfig.autoMatchThreshold) {
       matches.push(bestMatch);
       matchedExternal.add(bestMatch.externalRecordId);
     }

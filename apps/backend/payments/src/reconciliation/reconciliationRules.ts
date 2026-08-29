@@ -143,6 +143,40 @@ function evaluateCondition(condition: string, ctx: RuleEvaluationContext): boole
     return !evaluateCondition(normalized.slice(2, -1), ctx);
   }
 
+  // NOTE: `.every()` / `.some()` must be checked before the comparison
+  // operators, because their predicate may itself contain operators (e.g.
+  // `d => d.severity === 'critical'`) that would otherwise be mis-parsed.
+
+  // Handle method calls like .every()
+  if (normalized.includes(".every(")) {
+    const match = normalized.match(/^(\S+)\.every\((.+)\)$/);
+    if (match) {
+      const [, arrayExpr, predicate] = match;
+      const arr = resolveValue(arrayExpr, ctx);
+      if (Array.isArray(arr)) {
+        return arr.every((item: unknown) => {
+          const itemCtx = bindItem(predicate, item, ctx);
+          return evaluateCondition(arrowBody(predicate), itemCtx);
+        });
+      }
+    }
+  }
+
+  // Handle .some()
+  if (normalized.includes(".some(")) {
+    const match = normalized.match(/^(\S+)\.some\((.+)\)$/);
+    if (match) {
+      const [, arrayExpr, predicate] = match;
+      const arr = resolveValue(arrayExpr, ctx);
+      if (Array.isArray(arr)) {
+        return arr.some((item: unknown) => {
+          const itemCtx = bindItem(predicate, item, ctx);
+          return evaluateCondition(arrowBody(predicate), itemCtx);
+        });
+      }
+    }
+  }
+
   // Handle equality
   if (normalized.includes(" === ")) {
     const [left, right] = normalized.split(" === ").map((s) => s.trim());
@@ -166,42 +200,28 @@ function evaluateCondition(condition: string, ctx: RuleEvaluationContext): boole
     return leftVal >= rightVal;
   }
 
+  // Handle less than or equal
+  if (normalized.includes(" <= ")) {
+    const [left, right] = normalized.split(" <= ").map((s) => s.trim());
+    const leftVal = Number(resolveValue(left, ctx));
+    const rightVal = Number(resolveValue(right, ctx));
+    return leftVal <= rightVal;
+  }
+
+  // Handle greater than
+  if (normalized.includes(" > ")) {
+    const [left, right] = normalized.split(" > ").map((s) => s.trim());
+    const leftVal = Number(resolveValue(left, ctx));
+    const rightVal = Number(resolveValue(right, ctx));
+    return leftVal > rightVal;
+  }
+
   // Handle less than
   if (normalized.includes(" < ")) {
     const [left, right] = normalized.split(" < ").map((s) => s.trim());
     const leftVal = Number(resolveValue(left, ctx));
     const rightVal = Number(resolveValue(right, ctx));
     return leftVal < rightVal;
-  }
-
-  // Handle method calls like .every()
-  if (normalized.includes(".every(")) {
-    const match = normalized.match(/^(\S+)\.every\((.+)\)$/);
-    if (match) {
-      const [, arrayExpr, predicate] = match;
-      const arr = resolveValue(arrayExpr, ctx);
-      if (Array.isArray(arr)) {
-        return arr.every((item: unknown) => {
-          const itemCtx = { ...ctx, match: { ...ctx.match, _item: item } };
-          return evaluateCondition(predicate, itemCtx);
-        });
-      }
-    }
-  }
-
-  // Handle .some()
-  if (normalized.includes(".some(")) {
-    const match = normalized.match(/^(\S+)\.some\((.+)\)$/);
-    if (match) {
-      const [, arrayExpr, predicate] = match;
-      const arr = resolveValue(arrayExpr, ctx);
-      if (Array.isArray(arr)) {
-        return arr.some((item: unknown) => {
-          const itemCtx = { ...ctx, match: { ...ctx.match, _item: item } };
-          return evaluateCondition(predicate, itemCtx);
-        });
-      }
-    }
   }
 
   // Handle parseFloat()
@@ -214,6 +234,29 @@ function evaluateCondition(condition: string, ctx: RuleEvaluationContext): boole
 
   log.debug("Unparseable condition, defaulting to false", { condition: normalized });
   return false;
+}
+
+/** Extract the expression body of an arrow predicate (`d => <expr>`). */
+function arrowBody(predicate: string): string {
+  const match = /^\s*\w+\s*=>\s*(.+)$/.exec(predicate);
+  return match ? match[1] : predicate;
+}
+
+/** Bind an iterated item to its arrow parameter name in the evaluation context. */
+function bindItem(
+  predicate: string,
+  item: unknown,
+  ctx: RuleEvaluationContext
+): RuleEvaluationContext {
+  const itemCtx = {
+    ...ctx,
+    match: { ...ctx.match, _item: item },
+  } as RuleEvaluationContext;
+  const match = /^\s*(\w+)\s*=>/.exec(predicate);
+  if (match) {
+    (itemCtx as unknown as Record<string, unknown>)[match[1]] = item;
+  }
+  return itemCtx;
 }
 
 function resolveValue(expr: string, ctx: RuleEvaluationContext): unknown {
