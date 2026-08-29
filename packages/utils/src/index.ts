@@ -149,9 +149,9 @@ export {
   type SecurityEventType,
   type SecurityEventSeverity,
   type SecurityEvent,
-  type FileUploadValidationInput,
   type ValidationErrorList,
 } from "./securityEventDetection.js";
+export { requireAuth } from "./auth.js";
 export {
   generateApiKey,
   verifyApiKey,

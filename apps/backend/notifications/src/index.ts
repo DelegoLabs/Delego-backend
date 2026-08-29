@@ -1,7 +1,7 @@
 /**
  * @delegolabs/notifications — Entry point
  */
-import { createLogger, startHttpServer, route, json, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
+import { createLogger, startHttpServer, route, json, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
 import { readBody } from "./readBody.js";
 import { broadcastNotificationToUser, getWebSocketMetrics, initWebSocketServer } from "./websocket.js";
 import { sequelize } from "./db.js";
@@ -113,7 +113,7 @@ if (rpcUrl && escrowContractId) {
 const server: Server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [corsMiddleware(), securityHeadersMiddleware()],
+  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth({ publicPaths: ["/health", "/vapid-public-key"] })],
   routes: [
     route("GET", "/vapid-public-key", (_req: IncomingMessage, res: ServerResponse) => {
       const key = getVapidPublicKey();

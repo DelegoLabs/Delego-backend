@@ -10,6 +10,7 @@ import {
   createHealthRoutes,
   corsMiddleware,
   securityHeadersMiddleware,
+  requireAuth,
 } from "@delegolabs/utils";
 import { Pool } from "pg";
 import { Redis } from "ioredis";
@@ -403,7 +404,7 @@ async function main(): Promise<void> {
   startHttpServer({
     port,
     serviceName: SERVICE_NAME,
-    middleware: [corsMiddleware(), securityHeadersMiddleware()],
+    middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth()],
     routes: [
       ...createHealthRoutes({
         registry: orchestratorHealthRegistry,
