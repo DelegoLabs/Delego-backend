@@ -8,6 +8,9 @@ import { bodyLimitMiddleware } from "../routes/api-v1.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
 import { requestIdMiddleware } from "../middleware/requestId.js";
 import { compressionMiddleware } from "../middleware/compression.js";
+import { openApiValidationMiddleware } from "../middleware/openApiValidation.js";
+import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
+import { raspMiddleware } from "../middleware/rasp.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -26,9 +29,14 @@ startHttpServer({
     requestIdMiddleware(),
     corsMiddleware(),
     securityHeadersMiddleware(),
+    raspMiddleware(),
     bodyLimitMiddleware(),
+    openApiValidationMiddleware({
+      validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
+    }),
     rateLimitMiddleware(),
     compressionMiddleware(),
+    requestResponseLoggingMiddleware(),
   ],
   routes: registerRoutes(),
 });

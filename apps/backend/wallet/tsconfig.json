@@ -14,7 +14,8 @@
   "include": [
     "src/**/*",
     "stellar/**/*",
-    "permissions/**/*"
+    "permissions/**/*",
+    "transactions/**/*"
   ],
   "exclude": [
     "**/*.test.ts",

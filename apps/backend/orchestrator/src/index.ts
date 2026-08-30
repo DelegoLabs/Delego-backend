@@ -10,8 +10,10 @@ import {
   createHealthRoutes,
   corsMiddleware,
   securityHeadersMiddleware,
+  requireAuth,
 } from "@delegolabs/utils";
 import { Pool } from "pg";
+import { Redis } from "ioredis";
 import { createOrchestratorHealthRegistry } from "./health.js";
 import {
   createWorkflow,
@@ -24,7 +26,10 @@ import {
   createCheckoutSagaCoordinator,
   type CheckoutWorkflowInput,
 } from "../workflows/checkout/index.js";
-import { connectSagaDb, PostgresSagaStore } from "./saga/index.js";
+import { connectSagaDb, PostgresSagaStore, serializeSagaExecution } from "./saga/index.js";
+import { startOutboxRelay, type OutboxRelayHandle } from "./events/outboxRelay.js";
+import { PostgresServiceEventOutboxStore } from "./events/postgres-service-event-outbox.js";
+import { setServiceEventOutboxStore } from "./events/service-event-outbox.js";
 
 const SERVICE_NAME = "orchestrator";
 const DEFAULT_PORT = 3010;
@@ -37,6 +42,15 @@ const port = Number(process.env.ORCHESTRATOR_PORT ?? DEFAULT_PORT);
 const sagaStore = new PostgresSagaStore();
 const checkoutSagaCoordinator = createCheckoutSagaCoordinator(sagaStore);
 const orchestratorHealthRegistry = createOrchestratorHealthRegistry();
+
+// ─── #33 Transactional Outbox Relay ──────────────────────────────────────────
+// Backs service_event_outbox writes (see workflows/purchase/index.ts transitionWorkflow)
+// with an actual Redis publisher, so events survive an orchestrator crash between the
+// DB commit and the publish. Disable with ENABLE_OUTBOX_RELAY=false (e.g. for a
+// single-purpose worker deployment that doesn't own delivery).
+const outboxPool = new Pool({ connectionString: process.env.DATABASE_URL });
+setServiceEventOutboxStore(new PostgresServiceEventOutboxStore(outboxPool));
+let outboxRelay: OutboxRelayHandle | null = null;
 
 // ─── #64 Reconciliation Engine ───────────────────────────────────────────────
 
@@ -366,10 +380,9 @@ function readJsonBody(req: import("node:http").IncomingMessage): Promise<Record<
 }
 
 async function main(): Promise<void> {
-  // Connect and recover before accepting traffic so checkout requests never race startup
-  // recovery — and fail fast (rather than just logging) if durable saga storage isn't ready.
+  // Connect before accepting traffic and fail fast (rather than just logging) if durable
+  // saga storage isn't ready.
   await connectSagaDb();
-  await checkoutSagaCoordinator.recoverAll();
 
   try {
     const unfinished = await recoverUnfinishedWorkflows();
@@ -378,11 +391,19 @@ async function main(): Promise<void> {
     log.warn("Failed to recover unfinished purchase workflows during startup", { error: (err as Error).message });
   }
 
+  if (process.env.ENABLE_OUTBOX_RELAY !== "false") {
+    const redisClient = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+      lazyConnect: true,
+      maxRetriesPerRequest: 3,
+    });
+    outboxRelay = startOutboxRelay({ redisClient, log });
+  }
+
   log.info("Starting orchestrator", { port });
   startHttpServer({
     port,
     serviceName: SERVICE_NAME,
-    middleware: [corsMiddleware(), securityHeadersMiddleware()],
+    middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth()],
     routes: [
       ...createHealthRoutes({
         registry: orchestratorHealthRegistry,
@@ -425,15 +446,10 @@ async function main(): Promise<void> {
         try {
           const sagaId = `checkout:${input.orderId}`;
           const result = await checkoutWorkflow(input as CheckoutWorkflowInput, checkoutSagaCoordinator, sagaId);
-          json(res, result.status === "completed" ? 200 : 502, {
-            data: {
-              sagaId: result.sagaId,
-              orderId: result.orderId,
-              status: result.status,
-              completedSteps: result.completedSteps,
-            },
+          json(res, result.status === "completed" || result.status === "compensated" ? 200 : 502, {
+            data: serializeSagaExecution(result),
             error:
-              result.status === "completed"
+              result.status === "completed" || result.status === "compensated"
                 ? null
                 : { code: "CHECKOUT_SAGA_FAILED", message: result.error ?? "Checkout saga failed" },
           });
@@ -458,12 +474,7 @@ async function main(): Promise<void> {
           return;
         }
         json(res, 200, {
-          data: {
-            sagaId: record.sagaId,
-            orderId: record.orderId,
-            status: record.status,
-            completedSteps: record.completedSteps,
-          },
+          data: serializeSagaExecution(record),
           error: null,
         });
       }),
@@ -472,12 +483,7 @@ async function main(): Promise<void> {
         try {
           const result = await checkoutSagaCoordinator.resume(params.sagaId);
           json(res, 200, {
-            data: {
-              sagaId: result.sagaId,
-              orderId: result.orderId,
-              status: result.status,
-              completedSteps: result.completedSteps,
-            },
+            data: serializeSagaExecution(result),
             error: null,
           });
         } catch (err) {
@@ -488,6 +494,23 @@ async function main(): Promise<void> {
             error: { code: status === 404 ? "NOT_FOUND" : "SAGA_RESUME_FAILED", message },
           });
         }
+      }),
+
+      // Issue #48 — Saga event-sourcing audit trail
+      route("GET", "/sagas/:sagaId/events", async (_req, res, params) => {
+        const events = await sagaStore.getEvents(params.sagaId);
+        json(res, 200, {
+          data: events.map((event) => ({
+            sagaId: event.sagaId,
+            correlationId: event.correlationId,
+            eventType: event.eventType,
+            fromStatus: event.fromStatus,
+            toStatus: event.toStatus,
+            payload: event.payload,
+            createdAt: event.createdAt.toISOString(),
+          })),
+          error: null,
+        });
       }),
 
       // Issue #146 — Workflow state migration endpoints
@@ -552,6 +575,27 @@ async function main(): Promise<void> {
       }),
     ],
   });
+
+  // Issue #48 — Saga crash recovery runs after the server is accepting traffic so startup
+  // never blocks new requests. Failed/time-out sagas are auto-recovered or compensated in the
+  // background; the timeout sweeper keeps healing them while the service is live.
+  void checkoutSagaCoordinator.recoverAll().then(
+    (result) => {
+      log.info("Saga startup recovery complete", {
+        recovered: result.recovered,
+        failed: result.failed,
+        details: result.details,
+      });
+    },
+    (err) => {
+      log.error("Saga startup recovery failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  );
+
+  const sagaSweeper = checkoutSagaCoordinator.startTimeoutSweeper();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => sagaSweeper.stop());
+  }
 }
 
 main().catch((err) => {
@@ -560,6 +604,31 @@ main().catch((err) => {
   });
   process.exitCode = 1;
 });
+
+// ─── Graceful Shutdown ─────────────────────────────────────────────────────
+// Stops the OutboxRelay's poll loop and awaits its in-flight batch before the
+// process exits, so a deploy/restart never abandons a claimed-but-not-yet-published
+// batch — see events/outboxRelay.ts's stop() for the drain semantics.
+
+async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
+  log.info("Received shutdown signal", { signal });
+
+  if (outboxRelay) {
+    try {
+      await outboxRelay.stop();
+    } catch (err) {
+      log.error("Error stopping outbox relay", { error: (err as Error).message });
+    }
+  }
+
+  process.exit(0);
+}
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void gracefulShutdown(signal);
+  });
+}
 
 // Export workflows and state machine for internal use (issue #7 & #54)
 export { RedisPublisher } from "./pubsub/index.js";

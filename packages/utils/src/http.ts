@@ -1,5 +1,65 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 
+// ─── Request body size limiting ────────────────────────────────────────────
+
+/** Default cap for `readBodyWithLimit` — 1 MiB. */
+export const DEFAULT_BODY_SIZE_LIMIT_BYTES = 1024 * 1024;
+
+/**
+ * Thrown by `readBodyWithLimit` when the request body exceeds the configured
+ * limit. Callers should catch this specifically (via `instanceof`) and
+ * respond 413 Payload Too Large — see wallet/payments `readJsonBody` and
+ * notifications `readBody` for the reference wiring.
+ */
+export class PayloadTooLargeError extends Error {
+  readonly limitBytes: number;
+
+  constructor(limitBytes: number) {
+    super(`Request body exceeds the ${limitBytes}-byte limit`);
+    this.name = "PayloadTooLargeError";
+    this.limitBytes = limitBytes;
+  }
+}
+
+/**
+ * Reads the raw request body, rejecting with `PayloadTooLargeError` as soon
+ * as more than `limitBytes` have been read — the check happens per-chunk so
+ * an oversized body is rejected without buffering the whole thing in memory.
+ */
+export function readBodyWithLimit(
+  req: IncomingMessage,
+  limitBytes: number = DEFAULT_BODY_SIZE_LIMIT_BYTES
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    let bytesRead = 0;
+    let rejected = false;
+
+    req.on("data", (chunk: Buffer | string) => {
+      if (rejected) return;
+
+      bytesRead += Buffer.byteLength(chunk);
+      if (bytesRead > limitBytes) {
+        rejected = true;
+        reject(new PayloadTooLargeError(limitBytes));
+        req.removeAllListeners("data");
+        req.removeAllListeners("end");
+        return;
+      }
+
+      body += chunk;
+    });
+
+    req.on("end", () => {
+      if (!rejected) resolve(body);
+    });
+
+    req.on("error", (err) => {
+      if (!rejected) reject(err);
+    });
+  });
+}
+
 export type RouteHandler = (
   req: IncomingMessage,
   res: ServerResponse,
@@ -102,6 +162,13 @@ export function startHttpServer(options: HttpServerOptions): Server {
           try {
             await matched.route.handler(req, res, matched.params);
           } catch (err) {
+            if (err instanceof PayloadTooLargeError) {
+              json(res, 413, {
+                data: null,
+                error: { code: "PAYLOAD_TOO_LARGE", message: err.message },
+              });
+              return;
+            }
             json(res, 500, {
               data: null,
               error: {

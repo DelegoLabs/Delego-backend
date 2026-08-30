@@ -1,42 +1,8 @@
-import { Horizon } from "@stellar/stellar-sdk";
+import { estimateTransactionFee, type FeeEstimate } from "@delegolabs/payments/fee-estimator";
 import { createLogger } from "@delegolabs/utils";
 
 const log = createLogger("wallet:dynamic-fee", process.env.LOG_LEVEL ?? "info");
 
-export interface FeeEstimate {
-  source: "horizon" | "fallback";
-  baseFeeStroops: number;
-  recommendedFeeStroops: number;
-  percentile: "p50" | "p95" | "p99";
-  fetchedAt: string;
-}
-
-async function estimateTransactionFee(
-  horizonUrl: string,
-  percentile: "p50" | "p95" | "p99" = "p95"
-): Promise<FeeEstimate> {
-  const fallbackFee = percentile === "p99" ? 300 : percentile === "p95" ? 200 : 100;
-  try {
-    const server = new Horizon.Server(horizonUrl);
-    const feeStats = await server.feeStats();
-    const baseFee = parseInt((feeStats as unknown as { last_ledger_base_fee?: string }).last_ledger_base_fee ?? "100", 10);
-    return {
-      source: "horizon",
-      baseFeeStroops: baseFee,
-      recommendedFeeStroops: Math.max(baseFee, fallbackFee),
-      percentile,
-      fetchedAt: new Date().toISOString(),
-    };
-  } catch {
-    return {
-      source: "fallback",
-      baseFeeStroops: 100,
-      recommendedFeeStroops: fallbackFee,
-      percentile,
-      fetchedAt: new Date().toISOString(),
-    };
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Types

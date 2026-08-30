@@ -134,14 +134,6 @@ export function runSafetyChecks(
     severity: instancesInRemovedStates.length === 0 ? "info" : "error",
   });
 
-  const requiredFields = plan.contextTransforms
-    .filter((t) => t.operation === "add" && t.value !== null)
-    .map((t) => t.path);
-
-  const instancesWithMissingFields = activeInstances.filter((i) =>
-    requiredFields.some((f) => !(f in i.context))
-  );
-
   results.push({
     check: "context_transforms_preserve_required_fields",
     passed: instancesWithMissingFields.length === 0,

@@ -3,7 +3,7 @@
  * TODO: Implement service logic
  */
 import { createLogger } from "@delegolabs/utils";
-import { startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
+import { startHttpServer, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
 import {
   SorobanTransactionSimulator,
   readSorobanRpcConfig,
@@ -31,11 +31,14 @@ import { registerRoutes } from "./routes.js";
 import { startWebSocketServer, stopWebSocketServer } from "./websocket/server.js";
 import { startBatchFlushTimers, stopBatchFlushTimers } from "./batching/batchQueue.js";
 import { closeQueue } from "./queue/txQueue.js";
+import { initSimulationCache } from "./simulationCache.js";
+import { initDLQ } from "./queue/transactionDLQ.js";
+import { getRedisConnection } from "./queue/txQueue.js";
 
 const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [corsMiddleware(), securityHeadersMiddleware()],
+  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth()],
   routes: registerRoutes(),
 });
 
@@ -44,6 +47,31 @@ startWebSocketServer();
 
 // Issue #42: Start background batch flush timers
 startBatchFlushTimers();
+
+// Issue #141: Initialize simulation cache
+try {
+  const redis = getRedisConnection();
+  initSimulationCache(
+    {
+      maxEntries: parseInt(process.env.SIM_CACHE_MAX_ENTRIES ?? "1000"),
+      ttlSeconds: parseInt(process.env.SIM_CACHE_TTL_SECONDS ?? "300"),
+      sharedCacheEnabled: process.env.SIM_CACHE_SHARED !== "false",
+    },
+    redis
+  );
+  log.info("Simulation cache initialized");
+} catch (err) {
+  log.error("Failed to initialize simulation cache", { error: (err as Error).message });
+}
+
+// Issue #143: Initialize transaction DLQ
+try {
+  const redis = getRedisConnection();
+  initDLQ(redis);
+  log.info("Transaction DLQ initialized");
+} catch (err) {
+  log.error("Failed to initialize transaction DLQ", { error: (err as Error).message });
+}
 
 // ─── Graceful Shutdown ─────────────────────────────────────────────────────
 

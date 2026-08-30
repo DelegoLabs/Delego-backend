@@ -20,6 +20,38 @@ const SALT_LENGTH = 16;
 const KEY_LENGTH = 32;
 const ITERATIONS = 10000;
 
+/**
+ * #31 — The wallet encrypts every signing key at rest with this secret. If it is left
+ * unset in production, `resolveMasterSecret` below falls back to this well-known string,
+ * which is checked into source control and public to anyone who has read this file —
+ * an attacker who knows it can decrypt every wallet seed in the vault.
+ */
+export const DEFAULT_WALLET_MASTER_SECRET = "default-dev-wallet-master-secret-key-32-chars";
+
+/**
+ * Resolves the effective master secret for a given raw env value, enforcing that
+ * production deployments cannot silently run on the well-known default secret.
+ *
+ * - Production + unset/default → throws (fail closed; refuses to start).
+ * - Non-production + unset/default → warns and falls back to the default (local/dev ergonomics).
+ * - Any environment with a real secret configured → returns it unchanged.
+ */
+function resolveMasterSecret(rawValue: string | undefined, nodeEnv: string | undefined): string {
+  const isDefault = !rawValue || rawValue === DEFAULT_WALLET_MASTER_SECRET;
+
+  if (isDefault) {
+    if (nodeEnv === "production") {
+      throw new Error(
+        "WALLET_MASTER_SECRET must be set in production and must not equal the default development value"
+      );
+    }
+    log.warn("Using default wallet master secret — set WALLET_MASTER_SECRET before deploying to production");
+    return DEFAULT_WALLET_MASTER_SECRET;
+  }
+
+  return rawValue;
+}
+
 export class VaultService {
   private masterSecret: string;
   private vaultData: Record<
@@ -28,7 +60,7 @@ export class VaultService {
   > = {};
 
   constructor() {
-    this.masterSecret = process.env.WALLET_MASTER_SECRET ?? "default-dev-wallet-master-secret-key-32-chars";
+    this.masterSecret = resolveMasterSecret(process.env.WALLET_MASTER_SECRET, process.env.NODE_ENV);
   }
 
   private async getEncryptionKey(salt: Buffer, masterSecret = this.masterSecret): Promise<Buffer> {
@@ -261,7 +293,7 @@ export function getMasterKeyForVersion(keyVersion: string): string {
   }
 
   if (normalized === getActiveKeyVersion() || normalized === "v1") {
-    return process.env.WALLET_MASTER_SECRET ?? "default-dev-wallet-master-secret-key-32-chars";
+    return resolveMasterSecret(process.env.WALLET_MASTER_SECRET, process.env.NODE_ENV);
   }
 
   throw new Error(`Unknown signing key version: ${normalized}`);

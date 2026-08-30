@@ -8,7 +8,7 @@ import {
   logoutHandler,
   authDependencies,
 } from "../../../apps/backend/gateway/routes/auth.ts";
-import { generateToken } from "../../../apps/backend/gateway/dist/src/auth/authService.js";
+import { generateToken } from "../../../apps/backend/gateway/src/auth/authService.js";
 
 function createJsonRequest(body, headers = {}) {
   const req = new Readable({

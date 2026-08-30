@@ -70,7 +70,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: [lint, type-check]
 
     services:
@@ -111,7 +111,10 @@ jobs:
         run: pnpm --filter "./packages/*" --filter "./apps/backend/*" --filter "./agents" build
 
       - name: Run tests
-        run: pnpm test
+        # The integration suite (tests/integration) needs a migrated database and real
+        # services — it is exercised by the dedicated `migrations` and
+        # `test-integration` jobs, which apply migrations first.
+        run: pnpm -r --filter=!@delegolabs/tests-integration test
 
   migrations:
     name: Database Migrations
@@ -137,6 +140,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages and services
+        run: pnpm --filter "./packages/*" --filter "./apps/backend/*" --filter "./agents" build
 
       - name: Start clean PostgreSQL
         run: docker compose up -d --wait postgres
@@ -185,6 +191,74 @@ jobs:
 
       - name: Build project
         run: pnpm build
+
+  test-integration:
+    name: Integration Tests (real Postgres + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build]
+
+    # Issue #36 — the `test` job above runs entirely against MOCK_REDIS and never
+    # touches a live database, so SQL bugs, transaction/locking races, and real
+    # Redis command behavior ship untested. This job runs the same
+    # `pnpm test:integration` command the `migrations` job already uses, but adds
+    # a Redis service and a build step so the full suite (saga crash recovery,
+    # outbox relay + consumer dedupe, auth register/login/refresh round-trip,
+    # delegation/wallet ownership rules, rate limiting) runs against real
+    # infrastructure instead of skipping. The `test` job stays mocked and fast —
+    # this job is additive, not a replacement.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: delego
+          POSTGRES_PASSWORD: delego
+          POSTGRES_DB: delego
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U delego -d delego"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://delego:delego@localhost:5432/delego
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages and services
+        run: pnpm --filter "./packages/*" --filter "./apps/backend/*" --filter "./agents" build
+
+      - name: Apply migrations to the live database
+        run: pnpm db:migrate
+
+      - name: Run integration tests against real Postgres + Redis
+        run: pnpm test:integration
 
   docker:
     name: Docker Compose

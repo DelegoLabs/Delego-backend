@@ -6,10 +6,13 @@ import { createLogger } from "@delegolabs/utils";
 import { startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
 import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
+import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
+import { startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 export type { SettlementDiscrepancy } from "./reconciliation/settlementReconciler.js";
+export { estimateTransactionFee, type FeeEstimate } from "../escrow/feeEstimator.js";
 export type {
   DisputeEscrowParams,
   DisputeResult,
@@ -17,11 +20,72 @@ export type {
   EscrowStatusResult,
   FundEscrowParams,
   FundEscrowResult,
+  PartialReleaseEscrowParams,
+  PartialReleaseResult,
+  PartialRefundEscrowParams,
+  PartialRefundResult,
   RefundEscrowParams,
   RefundResult,
   ReleaseEscrowParams,
   ReleaseResult,
+  RemainingBalance,
 } from "./escrowCoordinator/index.js";
+export { InsufficientEscrowBalanceError } from "./escrowCoordinator/index.js";
+
+// ─── #46 Partial Refunds & Dispute Mediation ───────────────────────────────
+
+export {
+  assignMediator,
+  autoAssignMediator,
+  executeDecision,
+  openDispute,
+  submitEvidence,
+  submitMediationDecision,
+} from "./disputes/mediation.js";
+export { executePartialRefund } from "./disputes/partialRefund.js";
+export { startSlaEscalationScheduler, findAndEscalateBreachedDisputes } from "./disputes/slaEscalation.js";
+export type {
+  Dispute,
+  DisputeEvidenceEntry,
+  DisputeStatus,
+  MediationDecision,
+  PartialRefundRequest,
+  ResolutionType,
+} from "./disputes/types.js";
+export {
+  DisputeNotFoundError,
+  DisputeAlreadyResolvedError,
+  InvalidStateTransitionError,
+} from "./disputes/types.js";
+
+// ─── #47 Recurring Payment Subscriptions with Escrow ───────────────────────
+
+export {
+  cancelSubscription,
+  changeSubscriptionPlan,
+  createSubscription,
+  createSubscriptionPlan,
+  getSubscription,
+  getSubscriptionPlan,
+  pauseSubscription,
+  renewSubscription,
+  resumeSubscription,
+} from "./subscriptions/service.js";
+export { chargeSubscriptionPeriod } from "./subscriptions/billing.js";
+export { runBillingCycle, startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
+export type {
+  BillingInterval,
+  Subscription,
+  SubscriptionEvent,
+  SubscriptionPlan,
+  SubscriptionStatus,
+} from "./subscriptions/types.js";
+export {
+  SubscriptionNotActiveError,
+  SubscriptionNotFoundError,
+  SubscriptionPlanNotFoundError,
+  UnsupportedPaymentMethodError,
+} from "./subscriptions/types.js";
 
 // ─── #45 Escrow Auto-Release on Delivery Confirmation ──────────────────────
 
@@ -94,6 +158,28 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     void gracefulShutdown(signal);
+  });
+}
+
+// ─── #46 Dispute SLA Escalation ─────────────────────────────────────────────
+
+if (process.env.ENABLE_DISPUTE_SLA_ESCALATION !== "false") {
+  const stopSlaScheduler = startSlaEscalationScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping dispute SLA escalation scheduler");
+    stopSlaScheduler();
+  });
+}
+
+// ─── #47 Subscription Billing ───────────────────────────────────────────────
+
+if (process.env.ENABLE_SUBSCRIPTION_BILLING !== "false") {
+  const stopBillingScheduler = startSubscriptionBillingScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping subscription billing scheduler");
+    stopBillingScheduler();
   });
 }
 
