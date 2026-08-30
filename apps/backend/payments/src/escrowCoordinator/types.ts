@@ -59,6 +59,46 @@ export interface DisputeResult {
   disputedBy: string;
 }
 
+// ---------------------------------------------------------------------------
+// Issue #46 — Partial refunds & dispute mediation
+// ---------------------------------------------------------------------------
+
+export interface PartialRefundEscrowParams {
+  escrowId: string;
+  escrowContractId: string;
+  callerAddress: string;
+  /** Amount to refund to the buyer, in stroops. Must not exceed the remaining escrow balance. */
+  amountStroops: string;
+  reason: string;
+}
+
+export interface PartialRefundResult {
+  txHash: string;
+  ledger: number;
+  status: "partial_refunded" | "failed";
+  buyerAddress: string;
+  refundedAmount: string;
+  remainingAmount: string;
+}
+
+export interface PartialReleaseEscrowParams {
+  escrowId: string;
+  escrowContractId: string;
+  callerAddress: string;
+  /** Amount to release to the seller, in stroops. Must not exceed the remaining escrow balance. */
+  amountStroops: string;
+  memo?: string;
+}
+
+export interface PartialReleaseResult {
+  txHash: string;
+  ledger: number;
+  status: "partial_released" | "failed";
+  sellerAddress: string;
+  releasedAmount: string;
+  remainingAmount: string;
+}
+
 export interface EscrowStatusResult {
   escrowId: string;
   buyer: string;
@@ -73,7 +113,35 @@ export interface EscrowCoordinator {
   releaseEscrow(params: ReleaseEscrowParams): Promise<ReleaseResult>;
   refundEscrow(params: RefundEscrowParams): Promise<RefundResult>;
   disputeEscrow(params: DisputeEscrowParams): Promise<DisputeResult>;
+  partialRefundEscrow(params: PartialRefundEscrowParams): Promise<PartialRefundResult>;
+  partialReleaseEscrow(params: PartialReleaseEscrowParams): Promise<PartialReleaseResult>;
+  getRemainingBalance(escrowId: string): Promise<RemainingBalance>;
   getEscrowStatus(escrowId: string): Promise<EscrowStatusResult>;
+}
+
+export interface RemainingBalance {
+  escrowId: string;
+  orderId: string;
+  buyerAddress: string;
+  sellerAddress: string;
+  totalAmount: string;
+  releasedAmount: string;
+  refundedAmount: string;
+  remainingAmount: string;
+}
+
+/** Raised when a partial refund/release requests more than the escrow has left. */
+export class InsufficientEscrowBalanceError extends Error {
+  constructor(
+    public readonly escrowId: string,
+    public readonly remainingAmount: string,
+    public readonly requestedAmount: string
+  ) {
+    super(
+      `Escrow ${escrowId} has ${remainingAmount} stroops remaining; requested ${requestedAmount} exceeds the available balance`
+    );
+    this.name = "InsufficientEscrowBalanceError";
+  }
 }
 
 export type PaymentRecordStatus =
@@ -98,6 +166,10 @@ export interface PaymentRecord {
   releaseTxHash: string | null;
   refundTxHash: string | null;
   disputeTxHash: string | null;
+  /** Cumulative amount released to the seller so far (full + partial releases), in stroops. */
+  releasedAmountStroops: string;
+  /** Cumulative amount refunded to the buyer so far (full + partial refunds), in stroops. */
+  refundedAmountStroops: string;
   failureReason: string | null;
   createdAt: Date;
   updatedAt: Date;

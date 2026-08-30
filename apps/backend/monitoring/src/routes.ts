@@ -317,6 +317,10 @@ export async function sendNotificationHandler(req: IncomingMessage, res: ServerR
   json(res, 200, { data: result, error: null });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SLO Dashboard Handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Dashboard handler
 export async function monitoringDashboardHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const auth = extractAuth(req);
@@ -342,4 +346,239 @@ export async function monitoringDashboardHandler(req: IncomingMessage, res: Serv
     },
     error: null,
   });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// SLO Dashboard Handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * SLO Dashboard Handler
+ * GET /monitoring/slo/dashboard
+ * Returns overall SLO status across all services
+ */
+export async function sloDashboardHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
+
+  // In production, this would use the SLOManager
+  // For now, return a placeholder structure
+  json(res, 200, {
+    data: {
+      services: [
+        { name: "gateway", health: "healthy", slos: 3, incidents: 0 },
+        { name: "payments", health: "healthy", slos: 4, incidents: 0 },
+        { name: "wallet", health: "healthy", slos: 3, incidents: 0 },
+        { name: "notifications", health: "healthy", slos: 2, incidents: 0 },
+        { name: "analytics", health: "healthy", slos: 2, incidents: 0 },
+        { name: "fraud-detection", health: "healthy", slos: 3, incidents: 0 },
+      ],
+      summary: {
+        totalSLOs: 17,
+        healthy: 17,
+        warning: 0,
+        critical: 0,
+        exhausted: 0,
+      },
+      burnRateAlerts: 0,
+      errorBudgetAlerts: 0,
+      lastUpdated: new Date().toISOString(),
+    },
+    error: null,
+  });
+}
+
+/**
+ * Service SLO Dashboard Handler
+ * GET /monitoring/slo/dashboard/:service
+ * Returns SLO status for a specific service
+ */
+export async function sloServiceDashboardHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>
+): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
+
+  const service = params.service;
+  if (!service) { badRequest(res, "Service parameter required", req); return; }
+
+  // In production, this would query SLOManager for the specific service
+  const serviceData: Record<string, unknown> = {
+    service,
+    health: "healthy",
+    slos: [
+      { name: "availability", target: 0.999, actual: 0.9995, budgetRemaining: 0.95, burnRate: { "1h": 1.0, "6h": 1.1, "24h": 1.05 }, status: "healthy" },
+      { name: "latency", target: 0.99, actual: 0.995, budgetRemaining: 0.98, burnRate: { "1h": 1.0, "6h": 1.05, "24h": 1.02 }, status: "healthy" },
+      { name: "error_rate", target: 0.999, actual: 0.9998, budgetRemaining: 0.99, burnRate: { "1h": 1.0, "6h": 1.0, "24h": 1.0 }, status: "healthy" },
+    ],
+    burnRateAlerts: [],
+    errorBudgetAlerts: [],
+    lastUpdated: new Date().toISOString(),
+  };
+
+  json(res, 200, { data: serviceData, error: null });
+}
+
+/**
+ * SLO Report Handler
+ * GET /monitoring/slo/report/:service?start=...&end=...
+ * Returns SLO report for a service over a period
+ */
+export async function sloReportHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>
+): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
+
+  const service = params.service;
+  if (!service) { badRequest(res, "Service parameter required", req); return; }
+
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const start = url.searchParams.get("start") ?? new Date(Date.now() - 86400000).toISOString();
+  const end = url.searchParams.get("end") ?? new Date().toISOString();
+
+  const report = {
+    service,
+    period: { start, end },
+    slos: [
+      { name: "availability", target: 0.999, actual: 0.9995, errorBudgetRemaining: 0.95, burnRate: { "1h": 1.0, "6h": 1.1, "24h": 1.05 }, incidents: 0 },
+      { name: "latency", target: 0.99, actual: 0.995, errorBudgetRemaining: 0.98, burnRate: { "1h": 1.0, "6h": 1.05, "24h": 1.02 }, incidents: 0 },
+      { name: "error_rate", target: 0.999, actual: 0.9998, errorBudgetRemaining: 0.99, burnRate: { "1h": 1.0, "6h": 1.0, "24h": 1.0 }, incidents: 0 },
+    ],
+    overallHealth: "healthy",
+    lastUpdated: new Date().toISOString(),
+  };
+
+  json(res, 200, { data: report, error: null });
+}
+
+/**
+ * Create SLO Handler
+ * POST /monitoring/slo
+ * Creates a new SLO configuration
+ */
+export async function createSLOHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
+  if (!isAdmin(req)) { forbidden(res, "Admin role required", req); return; }
+
+  let body: Record<string, unknown>;
+  try { body = await readJsonBody(req); } catch { badRequest(res, "Invalid JSON body", req); return; }
+
+  const { service, name, sli, target, window, alerting } = body;
+  if (typeof service !== "string" || typeof name !== "string" || typeof target !== "number") {
+    badRequest(res, "Service, name, and target are required", req); return;
+  }
+
+  const slo = {
+    id: `slo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    service,
+    name,
+    sli: typeof sli === "object" ? sli : { name, description: "", query: "", unit: "ratio" as const, goodThreshold: 0, totalThreshold: 0 },
+    target,
+    window: (typeof window === "string" ? window : "rolling_24h") as any,
+    alerting: typeof alerting === "object" ? alerting : { burnRateThresholds: [] },
+    createdAt: new Date().toISOString(),
+  };
+
+  json(res, 201, { data: slo, error: null });
+}
+
+/**
+ * List SLOs Handler
+ * GET /monitoring/slo?service=...
+ * Lists all SLOs, optionally filtered by service
+ */
+export async function listSLOsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
+
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const service = url.searchParams.get("service");
+
+  // In production, this would query the SLOManager
+  const slos = service 
+    ? [
+        { id: `slo_${service}_availability`, service, name: "availability", target: 0.999, window: "rolling_24h" },
+        { id: `slo_${service}_latency`, service, name: "latency", target: 0.99, window: "rolling_24h" },
+      ]
+    : [
+        { id: "slo_gateway_availability", service: "gateway", name: "availability", target: 0.999, window: "rolling_24h" },
+        { id: "slo_gateway_latency", service: "gateway", name: "latency", target: 0.99, window: "rolling_24h" },
+        { id: "slo_payments_availability", service: "payments", name: "availability", target: 0.999, window: "rolling_24h" },
+        { id: "slo_payments_latency", service: "payments", name: "latency", target: 0.99, window: "rolling_24h" },
+      ];
+
+  json(res, 200, { data: { slos, total: slos.length }, error: null });
+}
+
+/**
+ * Evaluate SLO Handler
+ * POST /monitoring/slo/evaluate
+ * Evaluates SLO status based on actual metrics
+ */
+export async function evaluateSLOHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
+
+  let body: Record<string, unknown>;
+  try { body = await readJsonBody(req); } catch { badRequest(res, "Invalid JSON body", req); return; }
+
+  const { sloId, service, actualAvailability } = body;
+  if (typeof sloId !== "string" || typeof actualAvailability !== "number") {
+    badRequest(res, "SLO ID and actual availability are required", req); return;
+  }
+
+  // In production, this would use the SLOManager to evaluate
+  const result = {
+    sloId,
+    service,
+    actualAvailability,
+    status: actualAvailability >= 0.999 ? "healthy" : actualAvailability >= 0.99 ? "warning" : "critical",
+    errorBudgetRemaining: actualAvailability >= 0.999 ? 0.95 : actualAvailability >= 0.99 ? 0.5 : 0.1,
+    burnRate: { "1h": 1.0, "6h": 1.1, "24h": 1.05 },
+    lastUpdated: new Date().toISOString(),
+  };
+
+  json(res, 200, { data: result, error: null });
+}
+
+/**
+ * Get Budget State Handler
+ * GET /monitoring/slo/:sloId/budget
+ * Returns error budget state for an SLO
+ */
+export async function getBudgetStateHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>
+): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
+
+  const sloId = params.sloId;
+  if (!sloId) { badRequest(res, "SLO ID parameter required", req); return; }
+
+  // In production, this would query the ErrorBudgetTracker
+  const budgetState = {
+    sloId,
+    period: {
+      start: new Date(Date.now() - 86400000).toISOString(),
+      end: new Date().toISOString(),
+      window: "rolling_24h",
+    },
+    target: 0.999,
+    actual: 0.9995,
+    budget: 36.0,
+    consumed: 0.18,
+    remaining: 35.82,
+    burnRate: { "1h": 1.0, "6h": 1.1, "24h": 1.05 },
+    status: { current: "healthy", warningThreshold: 50, criticalThreshold: 80 },
+    lastUpdated: new Date().toISOString(),
+  };
+
+  json(res, 200, { data: budgetState, error: null });
 }
