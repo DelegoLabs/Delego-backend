@@ -19,8 +19,17 @@ export class BodyTooLargeError extends Error {
   }
 }
 
+// Caches the parsed-body promise per request so callers that read the body
+// more than once (e.g. openApiValidationMiddleware validating it, then the
+// route handler reading it again) share a single stream read instead of the
+// second caller hanging on an already-consumed IncomingMessage.
+const parsedBodyCache = new WeakMap<IncomingMessage, Promise<any>>();
+
 export async function readJsonBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
+  const cached = parsedBodyCache.get(req);
+  if (cached) return cached;
+
+  const promise = new Promise<any>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
 
@@ -48,4 +57,7 @@ export async function readJsonBody(req: IncomingMessage): Promise<any> {
       reject(err);
     });
   });
+
+  parsedBodyCache.set(req, promise);
+  return promise;
 }

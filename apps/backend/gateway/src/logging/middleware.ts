@@ -24,11 +24,6 @@ function getLoggingConfig(): LoggingConfig {
   };
 }
 
-function getHeaderValue(header: string | string[] | undefined): string {
-  if (Array.isArray(header)) return header[0] ?? "";
-  return header ?? "";
-}
-
 function captureHeaders(req: IncomingMessage): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -66,7 +61,6 @@ export function requestResponseLoggingMiddleware() {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
 
-    const originalOn = req.on.bind(req);
     const onData = (chunk: Buffer) => {
       chunks.push(chunk);
       totalBytes += chunk.length;

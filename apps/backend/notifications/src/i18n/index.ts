@@ -1,4 +1,5 @@
-// Issue #357 — i18n infrastructure for multi-language notification templates
+// Issue #116 — i18n infrastructure for multi-language notification templates.
+// Issue #357 — original flat-key translation loading.
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,3 +90,61 @@ function _loadLocaleFile(locale: string): Translations | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Issue #116 — Template localization system (ICU, fallback chains, RTL,
+// validation, locale detection, translation memory, translator workflow).
+// ---------------------------------------------------------------------------
+
+export * from "./types.js";
+export {
+  LOCALE_CONFIGS,
+  LOCALE_COUNT,
+  getLocaleConfig,
+  isRtlLocale,
+  normalizeLocaleCode,
+  resolveFallbackChain,
+  supportedLocaleCodes,
+} from "./locales.js";
+export {
+  IcuSyntaxError,
+  extractIcuArguments,
+  formatIcu,
+  formatIcuMessage,
+  normalizeLegacyPlaceholders,
+  parseIcuMessage,
+} from "./icu.js";
+export {
+  isTemplateValid,
+  translationArguments,
+  validateIcuSyntax,
+  validateTemplate,
+  validateTemplateTranslation,
+} from "./validate.js";
+export {
+  detectLocale,
+  isKnownLocale,
+  parseAcceptLanguage,
+} from "./detect.js";
+export {
+  TranslationMemory,
+  translationMemory,
+  type MemoryMatch,
+  type TranslationMemoryEntry,
+} from "./memory.js";
+export {
+  InvalidTransitionError,
+  TranslationWorkflow,
+  translationWorkflow,
+} from "./translator.js";
+export {
+  LocalizationManager,
+  TemplateNotFoundError,
+  localizationManager,
+  type RenderResult,
+} from "./manager.js";
+export {
+  SEED_TEMPLATES,
+  buildLocalizedTemplate,
+  seedLocalizationManager,
+} from "./seed.js";

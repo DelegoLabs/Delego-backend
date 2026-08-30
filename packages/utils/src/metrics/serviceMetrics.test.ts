@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ServiceMetricsRegistry } from "./serviceMetrics";
+import { ServiceMetricsRegistry } from "./serviceMetrics.js";
 
 describe("ServiceMetricsRegistry", () => {
   it("increments and reads back a counter", () => {

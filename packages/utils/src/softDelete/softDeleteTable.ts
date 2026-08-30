@@ -10,7 +10,7 @@
  * the established pattern this mirrors).
  *
  * Every table that wants soft delete must have added the columns from
- * `database/migrations/021_soft_delete.sql` (`deleted_at`, `deleted_by`,
+ * `database/migrations/024_soft_delete.sql` (`deleted_at`, `deleted_by`,
  * `delete_reason`).
  */
 import type { CascadeRelation, Queryable, SoftDeleteMetrics, SoftDeleteOptions } from "./types.js";

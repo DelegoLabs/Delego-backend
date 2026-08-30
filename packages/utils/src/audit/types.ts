@@ -2,7 +2,7 @@
  * Shared types for the audit-logging module (Issue #66).
  *
  * These mirror the data types specified in the issue. The corresponding
- * storage lives in `database/migrations/022_audit_log.sql` — an
+ * storage lives in `database/migrations/025_audit_log.sql` — an
  * append-only `audit_log` table with DB-level triggers rejecting UPDATE
  * and DELETE, plus a per-table `audit_retention_policies` config table.
  */
@@ -13,7 +13,7 @@ export type AuditOperation = "INSERT" | "UPDATE" | "DELETE";
 /** One row of the audit log, as named in the issue. */
 export interface AuditLogEntry {
   id: string;
-  /** Monotonically increasing sequence number (DB BIGSERIAL) — the authoritative chain-order key; see 022_audit_log.sql. */
+  /** Monotonically increasing sequence number (DB BIGSERIAL) — the authoritative chain-order key; see 025_audit_log.sql. */
   sequenceNum: number;
   tableName: string;
   recordId: string;

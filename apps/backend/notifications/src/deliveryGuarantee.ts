@@ -10,7 +10,6 @@
  */
 
 import { createLogger } from "@delegolabs/utils";
-import { randomUUID } from "crypto";
 
 const log = createLogger(
   "notifications:delivery-guarantee",
@@ -207,10 +206,10 @@ export class DeliveryGuaranteeService {
     guaranteeViolations: number;
   }> = new Map();
 
-  private readonly confirmationTimeoutMs: number;
+  private readonly options: DeliveryGuaranteeServiceOptions;
 
-  constructor(private readonly options: DeliveryGuaranteeServiceOptions) {
-    this.confirmationTimeoutMs = options.confirmationTimeoutMs ?? 30_000;
+  constructor(options: DeliveryGuaranteeServiceOptions) {
+    this.options = options;
   }
 
   /**

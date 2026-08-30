@@ -11,7 +11,7 @@
 > itself — the `audit_log` table, the append-only trigger, the hash chain,
 > `recordAuditEntry`/`queryAuditLog`/`verifyChain`, and the
 > `/api/v1/admin/audit-log` query API — is real, tested code; see
-> `packages/utils/src/audit/` and `database/migrations/022_audit_log.sql`.
+> `packages/utils/src/audit/` and `database/migrations/025_audit_log.sql`.
 
 ## 1. What's already real vs. what this document covers
 

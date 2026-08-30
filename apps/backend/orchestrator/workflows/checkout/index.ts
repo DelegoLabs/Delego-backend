@@ -294,7 +294,7 @@ async function callPaymentsService<T>(path: string, body: Record<string, unknown
  */
 const depositEscrowStep: SagaStep<CheckoutContext> = {
   name: "deposit-escrow",
-  async action(context) {
+  async execute(context) {
     const result = await callPaymentsService<EscrowOperationResult>("/escrow/deposit", {
       sourceAddress: context.sourceAddress,
       buyerAddress: context.buyerAddress,
@@ -309,7 +309,7 @@ const depositEscrowStep: SagaStep<CheckoutContext> = {
     }
     return { ...context, escrowId: result.escrowId };
   },
-  async compensation(context, error) {
+  async compensate(context, error) {
     if (!context.escrowId) return context;
     log.warn("Refunding escrow deposit after downstream failure", {
       orderId: context.orderId,
@@ -330,10 +330,10 @@ const depositEscrowStep: SagaStep<CheckoutContext> = {
  */
 const confirmCheckoutStep: SagaStep<CheckoutContext> = {
   name: "confirm-checkout",
-  async action(context) {
+  async execute(context) {
     return { ...context, confirmed: true };
   },
-  async compensation(context) {
+  async compensate(context) {
     return { ...context, confirmed: false };
   },
 };
@@ -409,13 +409,18 @@ export async function checkoutWorkflow(
   coordinator: SagaCoordinator<CheckoutContext>,
   sagaId: string
 ): Promise<SagaRecord<CheckoutContext>> {
-  return coordinator.run(sagaId, input.orderId, {
-    orderId: input.orderId,
-    sourceAddress: input.sourceAddress,
-    buyerAddress: input.buyerAddress,
-    sellerAddress: input.sellerAddress,
-    escrowId: null,
-    confirmed: false,
-  });
+  return coordinator.run(
+    sagaId,
+    input.orderId,
+    {
+      orderId: input.orderId,
+      sourceAddress: input.sourceAddress,
+      buyerAddress: input.buyerAddress,
+      sellerAddress: input.sellerAddress,
+      escrowId: null,
+      confirmed: false,
+    },
+    { workflowType: "checkout", correlationId: createWorkflowCorrelationId() }
+  );
 }
 

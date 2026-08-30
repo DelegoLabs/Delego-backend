@@ -5,7 +5,7 @@
  * concatenated with the previous entry's `entryHash` (`prevHash`). That
  * makes the log a hash chain: altering or deleting any historical row
  * (e.g. via direct DB access that bypasses the immutability triggers in
- * `022_audit_log.sql`, or a restored-from-backup row swap) changes what
+ * `025_audit_log.sql`, or a restored-from-backup row swap) changes what
  * that row's hash *should* be, which breaks the chain from that point
  * forward. `verifyChain` walks a sequence of entries and reports the
  * first break, if any.
