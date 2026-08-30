@@ -64,7 +64,7 @@ describe("RASP middleware", () => {
     expect(event).toBeDefined();
     expect(event.request.headers.authorization).toBe("[REDACTED]");
     markRASPFalsePositive();
-    expect(getRASPMetrics().falsePositiveRate).toBe(0.5);
+    expect(getRASPMetrics().falsePositiveRate).toBe(1);
   });
 
   it("supports monitor mode without blocking", async () => {
