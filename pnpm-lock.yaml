@@ -50,6 +50,117 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.20.1)
 
+  apps/backend/analytics:
+    dependencies:
+      '@delegolabs/types':
+        specifier: workspace:*
+        version: link:../../../packages/types
+      '@delegolabs/utils':
+        specifier: workspace:*
+        version: link:../../../packages/utils
+      ioredis:
+        specifier: ^5.11.1
+        version: 5.11.1
+      pg:
+        specifier: ^8.21.0
+        version: 8.23.0
+      pg-hstore:
+        specifier: ^2.3.4
+        version: 2.3.4
+      sequelize:
+        specifier: ^6.37.8
+        version: 6.37.8(pg-hstore@2.3.4)(pg@8.23.0)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)
+
+  apps/backend/cdc:
+    dependencies:
+      '@delegolabs/types':
+        specifier: workspace:*
+        version: link:../../../packages/types
+      '@delegolabs/utils':
+        specifier: workspace:*
+        version: link:../../../packages/utils
+      ioredis:
+        specifier: ^5.11.1
+        version: 5.11.1
+      pg:
+        specifier: ^8.21.0
+        version: 8.23.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)
+
+  apps/backend/fraud-detection:
+    dependencies:
+      '@delegolabs/types':
+        specifier: workspace:*
+        version: link:../../../packages/types
+      '@delegolabs/utils':
+        specifier: workspace:*
+        version: link:../../../packages/utils
+      ioredis:
+        specifier: ^5.11.1
+        version: 5.11.1
+      pg:
+        specifier: ^8.21.0
+        version: 8.23.0
+      pg-hstore:
+        specifier: ^2.3.4
+        version: 2.3.4
+      sequelize:
+        specifier: ^6.37.8
+        version: 6.37.8(pg-hstore@2.3.4)(pg@8.23.0)
+      uuid:
+        specifier: ^9.0.1
+        version: 9.0.1
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+      '@types/uuid':
+        specifier: ^9.0.8
+        version: 9.0.8
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)
+
   apps/backend/gateway:
     dependencies:
       '@delegolabs/types':
@@ -297,6 +408,55 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^2.0.0
+        version: 2.1.9(@types/node@22.20.1)
+
+  apps/backend/reconciliation:
+    dependencies:
+      '@delegolabs/types':
+        specifier: workspace:*
+        version: link:../../../packages/types
+      '@delegolabs/utils':
+        specifier: workspace:*
+        version: link:../../../packages/utils
+      cron:
+        specifier: ^3.1.7
+        version: 3.5.0
+      ioredis:
+        specifier: ^5.11.1
+        version: 5.11.1
+      pg:
+        specifier: ^8.21.0
+        version: 8.23.0
+      pg-hstore:
+        specifier: ^2.3.4
+        version: 2.3.4
+      sequelize:
+        specifier: ^6.37.8
+        version: 6.37.8(pg-hstore@2.3.4)(pg@8.23.0)
+      uuid:
+        specifier: ^9.0.1
+        version: 9.0.1
+    devDependencies:
+      '@types/cron':
+        specifier: ^2.0.1
+        version: 2.4.3
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+      '@types/uuid':
+        specifier: ^9.0.8
+        version: 9.0.8
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)
 
   apps/backend/wallet:
@@ -1178,6 +1338,10 @@ packages:
   '@types/connect@3.4.38':
     resolution: {integrity: sha512-K6uROf1LD88uDQqJCktA4yzL1YYAK6NgfsI0v/mTgyPKWsX1CnJ0XPSDhViejru1GcRkLWb8RlzFYJRqGUbaug==}
 
+  '@types/cron@2.4.3':
+    resolution: {integrity: sha512-ViRBkoZD9Rk0hGeMdd2GHGaOaZuH9mDmwsE5/Zo53Ftwcvh7h9VJc8lIt2wdgEwS4EW5lbtTX6vlE0idCLPOyA==}
+    deprecated: This is a stub types definition. cron provides its own type definitions, so you do not need this installed.
+
   '@types/debug@4.1.13':
     resolution: {integrity: sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==}
 
@@ -1203,6 +1367,9 @@ packages:
 
   '@types/jsonwebtoken@9.0.10':
     resolution: {integrity: sha512-asx5hIG9Qmf/1oStypjanR7iKTv0gXQ1Ov/jfrX6kS/EO0OFni8orbmGCn0672NHR3kXHwpAwR+B368ZGN/2rA==}
+
+  '@types/luxon@3.4.2':
+    resolution: {integrity: sha512-TifLZlFudklWlMBfhubvgqTXRzLDI5pCbGa4P8a3wPyUQSW+1xQ5eDsreP9DWHX3tjq1ke96uYG/nwundroWcA==}
 
   '@types/luxon@3.7.5':
     resolution: {integrity: sha512-jJ41Q4z6ZVO260MNDdHfW7+7a5iMiX8Mr6ZJHcmgrvhZha6dz5704o/lF2kKl6URjH6ivEL97w9xS/MgpJEphg==}
@@ -1230,6 +1397,9 @@ packages:
 
   '@types/serve-static@2.2.0':
     resolution: {integrity: sha512-8mam4H1NHLtu7nmtalF7eyBH14QyOASmcxHhSfEoRyr0nP/YdoesEtU+uSRvMe96TW/HPTtkoKqQLl53N7UXMQ==}
+
+  '@types/uuid@9.0.8':
+    resolution: {integrity: sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==}
 
   '@types/validator@13.15.10':
     resolution: {integrity: sha512-T8L6i7wCuyoK8A/ZeLYt1+q0ty3Zb9+qbSSvrIVitzT3YjZqkTZ40IbRsPanlB4h1QB3JVL1SYCdR6ngtFYcuA==}
@@ -1457,6 +1627,9 @@ packages:
   cron-parser@5.10.0:
     resolution: {integrity: sha512-izNAxJyRWUP8ljBoDSub5WyrVOUlT4SLGShswE7eoRBpp6QUsSycYxLBMJlbshgPBMcPT/nrfgjNY2918ayv2A==}
     engines: {node: '>=18'}
+
+  cron@3.5.0:
+    resolution: {integrity: sha512-0eYZqCnapmxYcV06uktql93wNWdlTmmBFP2iYz+JPVcQqlyFYcn1lFuIk4R54pkOmE7mcldTAPZv6X5XA4Q46A==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -1758,6 +1931,10 @@ packages:
 
   loupe@3.2.1:
     resolution: {integrity: sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ==}
+
+  luxon@3.5.0:
+    resolution: {integrity: sha512-rh+Zjr6DNfUYR3bPwJEnuwDdqMbxZW7LOQfUN4B54+Cl+0o5zaU9RJ6bcidfDtC1cWCZXQ+nvX8bf6bAji37QQ==}
+    engines: {node: '>=12'}
 
   luxon@3.7.2:
     resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
@@ -2090,6 +2267,11 @@ packages:
 
   uuid@8.3.2:
     resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+    hasBin: true
+
+  uuid@9.0.1:
+    resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
     deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
@@ -2865,6 +3047,10 @@ snapshots:
     dependencies:
       '@types/node': 25.9.5
 
+  '@types/cron@2.4.3':
+    dependencies:
+      cron: 3.5.0
+
   '@types/debug@4.1.13':
     dependencies:
       '@types/ms': 2.1.0
@@ -2895,7 +3081,9 @@ snapshots:
   '@types/jsonwebtoken@9.0.10':
     dependencies:
       '@types/ms': 2.1.0
-      '@types/node': 22.20.1
+      '@types/node': 25.9.5
+
+  '@types/luxon@3.4.2': {}
 
   '@types/luxon@3.7.5': {}
 
@@ -2927,6 +3115,8 @@ snapshots:
     dependencies:
       '@types/http-errors': 2.0.5
       '@types/node': 25.9.5
+
+  '@types/uuid@9.0.8': {}
 
   '@types/validator@13.15.10': {}
 
@@ -3185,6 +3375,11 @@ snapshots:
   cron-parser@5.10.0:
     dependencies:
       luxon: 3.7.2
+
+  cron@3.5.0:
+    dependencies:
+      '@types/luxon': 3.4.2
+      luxon: 3.5.0
 
   debug@4.4.3:
     dependencies:
@@ -3501,6 +3696,8 @@ snapshots:
 
   loupe@3.2.1: {}
 
+  luxon@3.5.0: {}
+
   luxon@3.7.2: {}
 
   magic-string@0.30.21:
@@ -3789,6 +3986,8 @@ snapshots:
   undici-types@7.24.6: {}
 
   uuid@8.3.2: {}
+
+  uuid@9.0.1: {}
 
   validator@13.15.35: {}
 

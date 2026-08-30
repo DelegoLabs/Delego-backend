@@ -19,6 +19,7 @@
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
     "workflows/**/*.test.ts",
-    "state/**/*.test.ts"
+    "state/**/*.test.ts",
+    "src/templates/routes.ts"
   ]
 }

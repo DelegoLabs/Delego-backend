@@ -413,6 +413,48 @@ REINDEX TABLE orders;
 VACUUM ANALYZE;
 ```
 
+### Time-Series Optimization
+
+Native PostgreSQL 16 time-series tuning (migration `026_time_series_optimization.sql`)
+provides declarative range partitioning, BRIN acceleration, TOAST compression,
+retention enforcement, continuous aggregates (materialized views), and
+hot/warm/cold data tiering for the canonical `ts_metrics`, `ts_events`, and
+`ts_audit_events` tables, all driven by config tables:
+
+- `time_series_table_config` — mirrors `TimeSeriesTableConfig`
+- `continuous_aggregate_config` — mirrors `ContinuousAggregate`
+- `data_tiering_policy` — mirrors `DataTieringPolicy`
+
+```bash
+# Run one maintenance cycle (create look-ahead + drop expired partitions,
+# refresh continuous aggregates, apply data tiering) immediately
+pnpm db:ts-maintain:once
+
+# Run maintenance every 60 minutes (wire this into cron/systemd instead)
+pnpm db:ts-maintain
+
+# Seed sample rows and measure time-range query latency (< 50 ms target)
+pnpm db:ts-benchmark
+```
+
+SQL entry points (callable directly or via the scripts):
+
+```sql
+SELECT * FROM ts_maintain(2);                      -- create + drop partitions
+SELECT * FROM ts_apply_retention();                -- enforce retention policies
+SELECT * FROM ts_refresh_continuous_aggregates();  -- refresh continuous aggregates
+SELECT * FROM ts_apply_tiering();                  -- hot/warm/cold classification
+SELECT * FROM ts_benchmark_time_range('ts_events', NOW() - INTERVAL '1 hour', NOW());
+SELECT * FROM ts_list_partitions('ts_events');
+```
+
+Compression ratio can be measured with the physical vs. logical size comparison:
+
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('ts_events'))       AS physical,
+       pg_size_pretty(pg_database_size(current_database()))      AS db_size;
+```
+
 ## Best Practices
 
 ### Schema Design
