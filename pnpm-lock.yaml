@@ -308,8 +308,8 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/utils
       bullmq:
-        specifier: ^5.78.1
-        version: 5.81.4
+        specifier: ^6.3.1
+        version: 6.3.1(ioredis@5.11.1)(pg@8.23.0)
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
@@ -354,8 +354,8 @@ importers:
         specifier: ^16.0.0
         version: 16.2.0
       bullmq:
-        specifier: ^5.78.1
-        version: 5.81.4
+        specifier: ^6.3.1
+        version: 6.3.1(ioredis@5.11.1)(pg@8.23.0)
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
@@ -446,8 +446,8 @@ importers:
         specifier: ^16.0.0
         version: 16.2.0
       bullmq:
-        specifier: ^5.78.1
-        version: 5.81.4
+        specifier: ^6.3.1
+        version: 6.3.1(ioredis@5.11.1)(pg@8.23.0)
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
@@ -1513,12 +1513,21 @@ packages:
   buffer@6.0.3:
     resolution: {integrity: sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==}
 
-  bullmq@5.81.4:
-    resolution: {integrity: sha512-n+WHSzz20KooBGoJyASre6oJNz/p5f1IJRRN2ibD+NWPQaNpNQmDrwYuPO+bsXrQeM1MQzUxXGbdjmyOFKP2xQ==}
-    engines: {node: '>=12.22.0'}
+  bullmq@6.3.1:
+    resolution: {integrity: sha512-dxFRQtN42H1SWpODKr1eHqFsgYPAWOKiZDihatP8Skdd/j8e0x77AP//TUqGMVuUmjHf/eNMa2e+g6bidc4oYg==}
+    engines: {node: '>=14.17.0'}
     peerDependencies:
+      bullmq-otel: '>=2.0.0'
+      ioredis: '>=5.0.0'
+      pg: '>=8.0.0'
       redis: '>=5.0.0'
     peerDependenciesMeta:
+      bullmq-otel:
+        optional: true
+      ioredis:
+        optional: true
+      pg:
+        optional: true
       redis:
         optional: true
 
@@ -1587,11 +1596,6 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
-
-  cron-parser@4.9.0:
-    resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
-    engines: {node: '>=12.0.0'}
-    deprecated: v4 is no longer maintained, upgrade to v5
 
   cron-parser@5.10.0:
     resolution: {integrity: sha512-izNAxJyRWUP8ljBoDSub5WyrVOUlT4SLGShswE7eoRBpp6QUsSycYxLBMJlbshgPBMcPT/nrfgjNY2918ayv2A==}
@@ -3264,16 +3268,16 @@ snapshots:
       base64-js: 1.5.1
       ieee754: 1.2.1
 
-  bullmq@5.81.4:
+  bullmq@6.3.1(ioredis@5.11.1)(pg@8.23.0):
     dependencies:
-      cron-parser: 4.9.0
-      ioredis: 5.11.1
+      cron-parser: 5.10.0
       msgpackr: 2.0.5
       node-abort-controller: 3.1.1
       semver: 7.8.5
       tslib: 2.8.1
-    transitivePeerDependencies:
-      - supports-color
+    optionalDependencies:
+      ioredis: 5.11.1
+      pg: 8.23.0
 
   cac@6.7.14: {}
 
@@ -3336,10 +3340,6 @@ snapshots:
       parse-json: 5.2.0
     optionalDependencies:
       typescript: 5.9.3
-
-  cron-parser@4.9.0:
-    dependencies:
-      luxon: 3.7.2
 
   cron-parser@5.10.0:
     dependencies:
