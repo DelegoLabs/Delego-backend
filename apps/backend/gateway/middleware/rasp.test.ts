@@ -1,5 +1,5 @@
 import { describe, expect, beforeEach, it } from "vitest";
-import { getRASPConfig, getRASPMetrics, resetRASPMetrics, raspMiddleware, simulateRASPAttack } from "./rasp.js";
+import { getRASPConfig, getRASPMetrics, resetRASPMetrics, raspMiddleware, simulateRASPAttack, markRASPFalsePositive } from "./rasp.js";
 
 function request(path: string, body = "") {
   const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
@@ -45,5 +45,33 @@ describe("RASP middleware", () => {
   it("does not flag ordinary input", () => {
     expect(simulateRASPAttack({ path: "/api/v1/status", body: "hello world" })).toBeNull();
     expect(getRASPMetrics().totalEvents).toBe(0);
+  });
+
+  it("does not consume the request body stream", async () => {
+    const req = request("/api/v1/status");
+    let continued = false;
+    await raspMiddleware(getRASPConfig())(req, response(), () => { continued = true; });
+    expect(continued).toBe(true);
+    expect(req.body).toBe("");
+  });
+
+  it("redacts sensitive headers in recorded events", async () => {
+    const req = request("/api/v1/status?id=1%20OR%201=1");
+    req.headers.authorization = "Bearer secret";
+    const res = response();
+    await raspMiddleware(getRASPConfig())(req, res, () => {});
+    const event = (await import("./rasp.js")).getRASPEvents()[0];
+    expect(event).toBeDefined();
+    expect(event.request.headers.authorization).toBe("[REDACTED]");
+    markRASPFalsePositive();
+    expect(getRASPMetrics().falsePositiveRate).toBe(0.5);
+  });
+
+  it("supports monitor mode without blocking", async () => {
+    let continued = false;
+    await raspMiddleware({ ...getRASPConfig(), mode: "monitor" })(request("/api/v1/status?id=1%20OR%201=1"), response(), () => { continued = true; });
+    expect(continued).toBe(true);
+    expect(getRASPMetrics().byAction.blocked).toBeUndefined();
+    expect(getRASPMetrics().totalEvents).toBe(1);
   });
 });
