@@ -35,6 +35,8 @@ The incremental migrations are:
 | `013_soroban_transaction_ledger.sql` | Idempotent Soroban transaction ledger for submission, confirmation, and failure states |
 | `014_payment_records_dispute.sql` | Dispute transactions on payment_records for the escrow coordinator |
 | `015_oauth_providers.sql` | OAuth2 provider account linking |
+| `016_disputes.sql` | Partial refund balance tracking plus dispute mediation, evidence, audit log, and reputation tables (Issue #46) |
+| `017_subscriptions.sql` | Recurring payment subscription plans, subscriptions, and the per-period escrow charge ledger (Issue #47) |
 | `016_in_app_notifications.sql` | Durable in-app notifications and indexes (Issues #58/#60) |
 | `017_escrow_lock_metrics.sql` | Metrics tracking for escrow funding locks |
 | `018_scheduled_notifications.sql` | Durable storage for scheduled/recurring notifications (Issue #59) |
