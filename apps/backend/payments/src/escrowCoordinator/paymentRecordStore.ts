@@ -41,6 +41,8 @@ interface PaymentRecordRow extends QueryResultRow {
   release_tx_hash: string | null;
   refund_tx_hash: string | null;
   dispute_tx_hash: string | null;
+  released_amount_stroops: string;
+  refunded_amount_stroops: string;
   failure_reason: string | null;
   created_at: Date;
   updated_at: Date;
@@ -61,6 +63,8 @@ function mapRow(row: PaymentRecordRow): PaymentRecord {
     releaseTxHash: row.release_tx_hash,
     refundTxHash: row.refund_tx_hash,
     disputeTxHash: row.dispute_tx_hash,
+    releasedAmountStroops: row.released_amount_stroops ?? "0",
+    refundedAmountStroops: row.refunded_amount_stroops ?? "0",
     failureReason: row.failure_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -174,4 +178,74 @@ export async function updatePaymentRecord(
 
   if (!rows[0]) throw new Error(`Payment record not found: ${id}`);
   return mapRow(rows[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #46 — Partial refund / partial release balance tracking
+// ---------------------------------------------------------------------------
+
+export interface PaymentRecordAmountDelta {
+  releasedDelta?: string;
+  refundedDelta?: string;
+  /** Optional status to set atomically alongside the increment (e.g. once the balance is fully consumed). */
+  status?: PaymentRecordStatus;
+}
+
+/**
+ * Atomically increments the cumulative released/refunded amounts on a
+ * payment record. Uses a single `SET col = col + $delta` statement so
+ * concurrent partial releases/refunds against the same escrow can't race
+ * each other into an inconsistent remaining balance.
+ */
+export async function incrementPaymentRecordAmounts(
+  id: string,
+  delta: PaymentRecordAmountDelta
+): Promise<PaymentRecord> {
+  const fields: string[] = [];
+  const values: unknown[] = [id];
+
+  const addField = (column: string, expr: (placeholder: string) => string, value: unknown) => {
+    values.push(value);
+    fields.push(`${column} = ${expr(`$${values.length}`)}`);
+  };
+
+  if (delta.releasedDelta !== undefined) {
+    addField("released_amount_stroops", (p) => `released_amount_stroops + ${p}::bigint`, delta.releasedDelta);
+  }
+  if (delta.refundedDelta !== undefined) {
+    addField("refunded_amount_stroops", (p) => `refunded_amount_stroops + ${p}::bigint`, delta.refundedDelta);
+  }
+  if (delta.status !== undefined) {
+    addField("status", (p) => p, delta.status);
+  }
+
+  if (fields.length === 0) {
+    const { rows } = await getPool().query<PaymentRecordRow>(
+      `SELECT * FROM payment_records WHERE id = $1`,
+      [id]
+    );
+    if (!rows[0]) throw new Error(`Payment record not found: ${id}`);
+    return mapRow(rows[0]);
+  }
+
+  fields.push("updated_at = NOW()");
+
+  const { rows } = await getPool().query<PaymentRecordRow>(
+    `UPDATE payment_records
+     SET ${fields.join(", ")}
+     WHERE id = $1
+     RETURNING *`,
+    values
+  );
+
+  if (!rows[0]) throw new Error(`Payment record not found: ${id}`);
+  const updated = mapRow(rows[0]);
+  log.info("Payment record amounts incremented", {
+    id,
+    releasedDelta: delta.releasedDelta,
+    refundedDelta: delta.refundedDelta,
+    releasedAmountStroops: updated.releasedAmountStroops,
+    refundedAmountStroops: updated.refundedAmountStroops,
+  });
+  return updated;
 }

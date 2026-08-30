@@ -12,6 +12,8 @@ export type PaymentStatusChannel =
   | "payment:released"
   | "payment:refunded"
   | "payment:disputed"
+  | "payment:partial_released"
+  | "payment:partial_refunded"
   | "payment:failed";
 
 export interface PaymentStatusEventPayload {

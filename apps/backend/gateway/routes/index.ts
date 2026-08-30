@@ -91,6 +91,8 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/wallets/:walletId", getWalletHandler),
     // Admin — rate-limit dashboard (#340)
     route("GET", "/api/v1/admin/rate-limit/metrics", rateLimitMetricsHandler),
+    // Admin — tiered token-bucket rate-limit metrics (#51)
+    route("GET", "/api/v1/admin/rate-limit/tiered-metrics", tieredRateLimitMetricsHandler),
     // Admin — circuit breaker status (#364)
     route("GET", "/api/v1/admin/circuit-breakers", circuitBreakerStatusHandler),
     // Request/response logging (#151)
