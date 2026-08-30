@@ -4,7 +4,14 @@
   "private": true,
   "description": "Delego payments service",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/src/index.js",
+  "exports": {
+    ".": "./dist/src/index.js",
+    "./fee-estimator": {
+      "types": "./dist/escrow/feeEstimator.d.ts",
+      "import": "./dist/escrow/feeEstimator.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
@@ -18,7 +25,8 @@
     "@delegolabs/utils": "workspace:*",
     "pg": "^8.21.0",
     "ioredis": "^5.11.1",
-    "@stellar/stellar-sdk": "^15.1.0"
+    "bullmq": "^5.78.1",
+    "@stellar/stellar-sdk": "^16.0.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

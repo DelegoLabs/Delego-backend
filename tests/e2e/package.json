@@ -2,8 +2,13 @@
   "name": "@delegolabs/tests-e2e",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "scripts": {
-    "test": "echo 'TODO: Playwright or Cypress e2e tests'",
+    "test": "NODE_ENV=test node --test src/critical-journeys.test.js",
     "typecheck": "echo 'N/A'"
+  },
+  "dependencies": {
+    "@delegolabs/utils": "workspace:*",
+    "@delegolabs/types": "workspace:*"
   }
 }

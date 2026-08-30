@@ -1,0 +1,10 @@
+# Fingerprinted false-positive suppressions for #81's Gitleaks scan.
+# Each entry is a specific finding's fingerprint (`gitleaks detect -v`
+# prints it), not a broad path/regex exemption — so a real secret later
+# added to the same file still gets caught.
+#
+# apps/backend/gateway/src/auth/tokenKeys.ts:56 — pemFromEnv() constructs
+# the literal PEM header/footer strings to wrap a key body that's already
+# been base64-decoded from an env var; this is PEM-formatting code, not an
+# embedded private key.
+ad7f168ca0de35eeb4fdbb4b33631c6e8369ee51:apps/backend/gateway/src/auth/tokenKeys.ts:private-key:56

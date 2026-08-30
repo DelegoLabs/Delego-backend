@@ -2,12 +2,15 @@
  * @delegolabs/gateway — API entry point
  * Routes external requests to internal services.
  */
-import { createLogger, startHttpServer } from "@delegolabs/utils";
+import { createLogger, startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
 import { registerRoutes } from "../routes/index.js";
 import { bodyLimitMiddleware } from "../routes/api-v1.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
 import { requestIdMiddleware } from "../middleware/requestId.js";
 import { compressionMiddleware } from "../middleware/compression.js";
+import { openApiValidationMiddleware } from "../middleware/openApiValidation.js";
+import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
+import { raspMiddleware } from "../middleware/rasp.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -22,7 +25,19 @@ log.info("Starting gateway", { port, nodeEnv });
 startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [requestIdMiddleware(), bodyLimitMiddleware(), rateLimitMiddleware(), compressionMiddleware()],
+  middleware: [
+    requestIdMiddleware(),
+    corsMiddleware(),
+    securityHeadersMiddleware(),
+    raspMiddleware(),
+    bodyLimitMiddleware(),
+    openApiValidationMiddleware({
+      validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
+    }),
+    rateLimitMiddleware(),
+    compressionMiddleware(),
+    requestResponseLoggingMiddleware(),
+  ],
   routes: registerRoutes(),
 });
 

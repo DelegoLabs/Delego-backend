@@ -2,7 +2,8 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": ".",
+    "rootDir": "..",
+    "noEmit": true,
     "lib": [
       "ES2022"
     ],
@@ -13,7 +14,9 @@
   "include": [
     "src/**/*",
     "routes/**/*",
-    "middleware/**/*"
+    "middleware/**/*",
+    "../lua-scripts/src/**/*",
+    "../monitoring/src/**/*"
   ],
   "exclude": [
     "**/*.test.ts",

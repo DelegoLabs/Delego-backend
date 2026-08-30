@@ -48,11 +48,11 @@ export function verifyJwt(token: string): JwtPayload {
 
   // Verify signature
   const expectedSig = hmacSha256(`${headerB64}.${payloadB64}`, JWT_SECRET);
+  const actualSignature = Buffer.from(signatureB64, "base64url");
+  const expectedSignature = Buffer.from(expectedSig, "base64url");
   if (
-    !crypto.timingSafeEqual(
-      Buffer.from(signatureB64, "base64url"),
-      Buffer.from(expectedSig, "base64url"),
-    )
+    actualSignature.length !== expectedSignature.length ||
+    !crypto.timingSafeEqual(actualSignature, expectedSignature)
   ) {
     throw new Error("JWT signature verification failed");
   }

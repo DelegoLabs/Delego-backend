@@ -1,0 +1,83 @@
+# Orchestrator Deployment & Service (Issue #76)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: delego-orchestrator
+  labels:
+    app: delego
+    service: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: delego
+      service: orchestrator
+  template:
+    metadata:
+      labels:
+        app: delego
+        service: orchestrator
+    spec:
+      containers:
+        - name: orchestrator
+          image: ghcr.io/delegolabs/delego-backend/orchestrator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3010
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: ORCHESTRATOR_PORT
+              value: "3010"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: delego-db
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: delego-redis
+                  key: url
+            - name: WALLET_SERVICE_URL
+              value: http://delego-wallet:3012
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: delego-orchestrator
+  labels:
+    app: delego
+    service: orchestrator
+spec:
+  selector:
+    app: delego
+    service: orchestrator
+  ports:
+    - name: http
+      port: 3010
+      targetPort: http

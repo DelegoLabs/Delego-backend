@@ -21,6 +21,8 @@
     "test:e2e": "pnpm --filter @delegolabs/tests-e2e test",
     "db:migrate": "node scripts/setup/migrate.js",
     "db:migrate:status": "node scripts/setup/migrate.js --status",
+    "db:migrate:dry-run": "node scripts/setup/migrate.js --dry-run",
+    "db:migrate:create": "node scripts/setup/migrate.js --create",
     "db:seed": "node scripts/setup/seed.js",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
@@ -34,12 +36,7 @@
     "husky": "^9.1.7",
     "pg": "^8.21.0"
   },
-  "pnpm": {
-    "overrides": {
-      "axios": ">=1.16.0"
-    }
-  },
   "dependencies": {
-    "@stellar/stellar-sdk": "^15.1.0"
+    "@stellar/stellar-sdk": "^16.0.0"
   }
 }

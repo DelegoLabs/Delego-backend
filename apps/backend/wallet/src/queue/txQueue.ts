@@ -21,6 +21,15 @@ import {
   type SubmissionFailure,
 } from "./submissionFailure.js";
 import { SorobanTransactionSimulator, readSorobanRpcConfig } from "../sorobanSimulator.js";
+import { getTransactionFee } from "../dynamicFee.js";
+import {
+  recordAuditEntry,
+  recordLockAcquisition,
+  recordLockRelease,
+  recordContentionEvent,
+  detectSequenceGap,
+} from "./sequenceMonitoring.js";
+import { addToDLQ } from "./transactionDLQ.js";
 
 export { classifySubmissionFailure, type SubmissionFailure } from "./submissionFailure.js";
 
@@ -56,7 +65,9 @@ export interface LedgerSubmissionCheck {
 
 function throwClassifiedSubmissionFailure(
   failure: SubmissionFailure,
-  attempt: number
+  attempt: number,
+  request?: TransactionRequest,
+  jobId?: string
 ): never {
   log.error("Transaction error in worker", {
     code: failure.code,
@@ -64,6 +75,19 @@ function throwClassifiedSubmissionFailure(
     retryable: failure.retryable,
     txHash: failure.txHash,
   });
+
+  // Add terminal failures to DLQ
+  if (!failure.retryable && request && jobId) {
+    addToDLQ(
+      `dlq_${jobId}_${Date.now()}`,
+      jobId,
+      request,
+      failure,
+      attempt
+    ).catch((err) => {
+      log.error("Failed to add to DLQ", { error: err.message });
+    });
+  }
 
   if (failure.retryable) {
     log.warn(`Retryable submission failure. Attempt ${attempt}/5`, {
@@ -212,10 +236,13 @@ export async function reserveSequenceBlock(
   }
   
   if (!lockAcquired) {
+    await recordContentionEvent(address, redis);
     throw new Error("Failed to acquire sequence reservation lock");
   }
   
   try {
+    await recordLockAcquisition(address, "txQueue", redis);
+
     // Load account from Horizon to get the source account details
     const sourceAccount = await horizonServer.loadAccount(address);
     const ledgerSequence = BigInt(sourceAccount.sequenceNumber());
@@ -261,10 +288,14 @@ export async function reserveSequenceBlock(
       leaseId
     });
     
+    await recordAuditEntry(address, "reserve", redis, leaseId, firstSequence.toString(),
+      `Reserved ${size} sequences: ${firstSequence}-${lastSequence}`);
+
     return reservation;
   } finally {
     // Release lock
     await redis.del(lockKey);
+    await recordLockRelease(address, redis);
   }
 }
 
@@ -298,11 +329,16 @@ async function getNextSequenceFromReservation(
         const newCursor = cursor + 1n;
         await redis.set(cursorKey, newCursor.toString(), "PX", parseInt(reservation.expiresAt) - Date.now());
         
+        await recordAuditEntry(address, "consume", redis, reservation.leaseId, cursor.toString(),
+          `Consumed sequence ${cursor} from reservation ${reservation.leaseId}`);
+
         const releaseReservation = async () => {
           // Check if reservation is exhausted
           if (newCursor > lastSeq) {
             await redis.lrem(key, 0, json);
             await redis.del(cursorKey);
+            await recordAuditEntry(address, "expire", redis, reservation.leaseId, undefined,
+              `Reservation ${reservation.leaseId} exhausted`);
           }
         };
         
@@ -339,6 +375,8 @@ async function getNextSequenceNumber(
     if (cursorKeys.length > 0) {
       await redis.del(...cursorKeys);
     }
+    await recordAuditEntry(sourceAddress, "expire", redis, undefined, undefined,
+      "Cache and reservations reset");
     log.info("Cleared cached sequence number and reservations from Redis", { sourceAddress });
   };
 
@@ -356,6 +394,18 @@ async function getNextSequenceNumber(
       sequence: reservationResult.sequence,
       leaseId: reservationResult.reservation.leaseId
     });
+    
+    // Detect gaps between current sequence and expected
+    const expectedSeq = BigInt(reservationResult.reservation.firstSequence);
+    const actualSeq = BigInt(reservationResult.sequence);
+    if (actualSeq > expectedSeq + 1n) {
+      await detectSequenceGap(
+        sourceAddress,
+        expectedSeq.toString(),
+        actualSeq.toString(),
+        redis
+      );
+    }
     
     return {
       sequence: reservationResult.sequence,
@@ -432,7 +482,7 @@ async function executeTxJob(
 
     // 4. Build draft transaction using the thread-safe sequence number
     let tx = new TransactionBuilder(account, {
-      fee: "100",
+      fee: await getTransactionFee(horizonUrl),
       networkPassphrase,
     })
       .addOperation(
@@ -549,7 +599,7 @@ async function executeTxJob(
     throw new Error(`Transaction timeout or status untracked: ${sendRes.status}`);
   } catch (err: unknown) {
     const failure = classifySubmissionFailure(err, { txHash });
-    throwClassifiedSubmissionFailure(failure, attempt);
+    throwClassifiedSubmissionFailure(failure, attempt, request, undefined);
   }
 }
 

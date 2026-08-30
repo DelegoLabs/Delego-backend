@@ -1,0 +1,11 @@
+DROP VIEW IF EXISTS soft_delete_metrics;
+DROP TABLE IF EXISTS soft_delete_cascade_relations;
+DROP TABLE IF EXISTS soft_delete_registry;
+DROP INDEX IF EXISTS idx_orders_not_deleted;
+DROP INDEX IF EXISTS idx_delegations_not_deleted;
+DROP INDEX IF EXISTS idx_wallets_not_deleted;
+DROP INDEX IF EXISTS idx_users_not_deleted;
+ALTER TABLE orders DROP COLUMN IF EXISTS delete_reason, DROP COLUMN IF EXISTS deleted_by, DROP COLUMN IF EXISTS deleted_at;
+ALTER TABLE delegations DROP COLUMN IF EXISTS delete_reason, DROP COLUMN IF EXISTS deleted_by, DROP COLUMN IF EXISTS deleted_at;
+ALTER TABLE wallets DROP COLUMN IF EXISTS delete_reason, DROP COLUMN IF EXISTS deleted_by, DROP COLUMN IF EXISTS deleted_at;
+ALTER TABLE users DROP COLUMN IF EXISTS delete_reason, DROP COLUMN IF EXISTS deleted_by, DROP COLUMN IF EXISTS deleted_at;

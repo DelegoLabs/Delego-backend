@@ -1,0 +1,56 @@
+name: CodeQL (SAST)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan even without a triggering push/PR, to catch newly
+    # disclosed vulnerability patterns in code that hasn't changed.
+    - cron: "0 6 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: CodeQL analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["javascript-typescript"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds broader coverage beyond the default
+          # security-and-quality pack (CORS misconfiguration, more
+          # injection variants, etc.) — real, maintained queries rather
+          # than custom QL this PR can't verify locally (no `codeql` CLI
+          # available in this environment to test a hand-written query
+          # against known-good/known-bad fixtures before shipping it; a
+          # broken custom query silently finds nothing or floods false
+          # positives, either of which is worse than not adding one).
+          # #83's "custom rules for business logic" is intentionally not
+          # attempted here — flagged as a gap for whoever has a CodeQL
+          # CLI environment to author and verify queries against this
+          # repo's actual escrow/payment authorization code.
+          queries: security-extended
+
+      # No build step needed — javascript-typescript uses CodeQL's
+      # extraction-without-compilation mode by default, so this doesn't
+      # need pnpm/node set up first.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

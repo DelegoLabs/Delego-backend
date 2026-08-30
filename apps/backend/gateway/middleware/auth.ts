@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { verifyToken } from "../src/auth/authService.js";
+import { isTokenRevokedSync } from "../src/auth/tokenBlacklist.js";
 
 export interface AuthContext {
   userId: string | null;
@@ -24,6 +25,9 @@ export function getAuthenticatedUserContext(req: IncomingMessage): Authenticated
 
 /**
  * Extract auth context from request headers.
+ *
+ * Verifies the Bearer token signature and rejects tokens that were revoked
+ * on this instance (in-memory blacklist, O(1) — no I/O, < 10ms).
  */
 export function extractAuth(req: IncomingMessage): AuthContext {
   const authHeader = req.headers.authorization;
@@ -34,6 +38,9 @@ export function extractAuth(req: IncomingMessage): AuthContext {
   const token = authHeader.slice(7);
   try {
     const decoded = verifyToken(token);
+    if (decoded.jti && isTokenRevokedSync(decoded.jti)) {
+      return { userId: null, token: null };
+    }
     authenticatedUserContexts.set(req, {
       userId: decoded.userId,
       email: decoded.email ?? "",

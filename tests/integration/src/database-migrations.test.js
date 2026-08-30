@@ -18,7 +18,7 @@ adminUrl.pathname = "/postgres";
 const ADMIN_URL = adminUrl.toString();
 
 function countSqlFiles(dir) {
-  return fs.readdirSync(dir).filter((name) => name.endsWith(".sql")).length;
+  return fs.readdirSync(dir).filter((name) => name.endsWith(".sql") && !name.endsWith(".down.sql")).length;
 }
 
 const TOTAL_MIGRATION_FILES = countSqlFiles(SCHEMA_DIR) + countSqlFiles(MIGRATIONS_DIR);
@@ -162,6 +162,8 @@ suite("database migration runner", () => {
       "notification_preferences",
       "soroban_transaction_ledger",
       "oauth_accounts",
+      "in_app_notifications",
+      "scheduled_notifications",
     ]) {
       assert.ok(tables.has(table), `expected table ${table} to exist`);
     }

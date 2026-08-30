@@ -1,5 +1,7 @@
 // Issue #217 — Processed message deduplication for idempotent workers
 
+import { Pool } from "pg";
+
 export interface ProcessedMessageRecord {
   messageId: string;
   consumer: string;
@@ -38,6 +40,27 @@ export class InMemoryProcessedMessageStore implements ProcessedMessageStore {
 
   clear(): void {
     this.processed.clear();
+  }
+}
+
+/**
+ * Postgres-backed ProcessedMessageStore (Issue #36 — integration test coverage against
+ * real infrastructure). Uses `INSERT ... ON CONFLICT (message_id) DO NOTHING RETURNING
+ * message_id` exactly as prescribed above, so the atomic claim happens in a single
+ * round-trip and races between concurrent workers resolve to exactly one winner.
+ */
+export class PostgresProcessedMessageStore implements ProcessedMessageStore {
+  constructor(private readonly pool: Pool) {}
+
+  async checkAndMark(messageId: string, consumer: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO processed_messages (message_id, consumer)
+       VALUES ($1, $2)
+       ON CONFLICT (message_id) DO NOTHING
+       RETURNING message_id`,
+      [messageId, consumer]
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 }
 

@@ -48,7 +48,7 @@ function discoverFiles(dirPath, group) {
     .readdirSync(dirPath, { withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
-    .filter((name) => name.endsWith(".sql"))
+    .filter((name) => name.endsWith(".sql") && !name.endsWith(".down.sql"))
     .sort();
 
   return entries.map((filename) => {
@@ -58,12 +58,15 @@ function discoverFiles(dirPath, group) {
         `Invalid migration filename: ${path.join(group, filename)} — expected <number>_<description>.sql`,
       );
     }
-    const sql = fs.readFileSync(path.join(dirPath, filename), "utf8");
+    const sqlPath = path.join(dirPath, filename);
+    const downPath = `${sqlPath.slice(0, -4)}.down.sql`;
+    const sql = fs.readFileSync(sqlPath, "utf8");
     return {
       filename: path.join(group, filename),
       group,
       version: Number.parseInt(match[1], 10),
       sql,
+      downSql: fs.existsSync(downPath) ? fs.readFileSync(downPath, "utf8") : null,
       checksum: sha256(sql),
     };
   });
@@ -211,6 +214,57 @@ async function applyMigration(client, file) {
   }
 }
 
+async function rollbackMigration(client, file) {
+  if (!file.downSql) {
+    throw new MigrationError(
+      `${file.filename} has no rollback file (${file.filename.replace(/\.sql$/, ".down.sql")}); refusing unsafe rollback`,
+    );
+  }
+  await client.query("BEGIN");
+  try {
+    await client.query(file.downSql);
+    await client.query("DELETE FROM schema_migrations WHERE filename = $1", [file.filename]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    error.message = `${file.filename} rollback failed: ${error.message}`;
+    throw error;
+  }
+}
+
+function parseOptions() {
+  const args = process.argv.slice(2);
+  const directionIndex = args.indexOf("--direction");
+  const targetIndex = args.indexOf("--target");
+  const createIndex = args.indexOf("--create");
+  const nameIndex = args.indexOf("--name");
+  const direction = directionIndex >= 0 ? args[directionIndex + 1] : "up";
+  if (direction !== "up" && direction !== "down") {
+    throw new MigrationError("--direction must be up or down");
+  }
+  return {
+    status: args.includes("--status") || args.includes("status"),
+    dryRun: args.includes("--dry-run"),
+    force: args.includes("--force"),
+    direction,
+    targetVersion: targetIndex >= 0 ? Number.parseInt(args[targetIndex + 1], 10) : undefined,
+    createName: nameIndex >= 0 ? args[nameIndex + 1] : createIndex >= 0 ? args[createIndex + 1] : undefined,
+  };
+}
+
+function createMigration(name) {
+  if (!name || !/^[A-Za-z0-9_-]+$/.test(name)) {
+    throw new MigrationError("Migration name must contain only letters, numbers, underscores, or hyphens");
+  }
+  const existing = discoverFiles(MIGRATIONS_DIR, "migration");
+  const nextVersion = existing.reduce((max, file) => Math.max(max, file.version), 0) + 1;
+  const filename = `${String(nextVersion).padStart(3, "0")}_${name}`;
+  fs.writeFileSync(path.join(MIGRATIONS_DIR, `${filename}.sql`), "-- Write the forward migration here.\n");
+  fs.writeFileSync(path.join(MIGRATIONS_DIR, `${filename}.down.sql`), "-- Write the rollback migration here.\n");
+  console.log(`Created database/migrations/${filename}.sql`);
+  console.log(`Created database/migrations/${filename}.down.sql`);
+}
+
 async function withClient(callback) {
   const client = new Client({ connectionString: DATABASE_URL });
   try {
@@ -271,22 +325,35 @@ async function runStatus() {
   });
 }
 
-async function runMigrate() {
+async function runMigrate(options) {
   return withClient(async (client) => {
     await acquireLock(client);
     try {
       const { state } = await loadState(client);
       assertNoIntegrityProblems(state);
-      if (state.pending.length === 0) {
+      const candidates = options.direction === "up" ? state.pending : state.applied.slice().sort((a, b) => b.version - a.version);
+      const selected = options.targetVersion === undefined
+        ? candidates.slice(0, options.direction === "down" ? 1 : candidates.length)
+        : candidates.filter((file) => options.direction === "up" ? file.version <= options.targetVersion : file.version > options.targetVersion);
+      if (selected.length === 0) {
         log(`nothing to do; database is up to date (${state.applied.length} applied, 0 pending).`);
         return;
       }
-      await ensureTrackingTable(client);
-      for (const file of state.pending) {
-        log(`applying ${file.filename}`);
-        await applyMigration(client, file);
+      if (options.dryRun) {
+        console.log(`Dry run (${options.direction})`);
+        for (const file of selected) console.log(`\n-- ${file.filename}\n${options.direction === "up" ? file.sql : file.downSql ?? "-- rollback unavailable"}`);
+        return;
       }
-      log(`applied ${state.pending.length} migration(s); database is up to date.`);
+      if (options.direction === "down" && !options.force) {
+        throw new MigrationError("Rollback requires --force; use --dry-run to inspect SQL first");
+      }
+      await ensureTrackingTable(client);
+      for (const file of selected) {
+        log(`${options.direction === "up" ? "applying" : "rolling back"} ${file.filename}`);
+        if (options.direction === "up") await applyMigration(client, file);
+        else await rollbackMigration(client, file);
+      }
+      log(`${options.direction === "up" ? "applied" : "rolled back"} ${selected.length} migration(s).`);
     } finally {
       await releaseLock(client);
     }
@@ -294,16 +361,19 @@ async function runMigrate() {
 }
 
 async function run() {
-  const statusMode = process.argv.includes("--status") || process.argv.includes("status");
+  let options;
   try {
-    if (statusMode) {
+    options = parseOptions();
+    if (options.createName) {
+      createMigration(options.createName);
+    } else if (options.status) {
       await runStatus();
     } else {
       log(`connecting to database: ${DATABASE_URL}`);
-      await runMigrate();
+      await runMigrate(options);
     }
   } catch (error) {
-    logError(statusMode ? "status failed:" : "migration failed:");
+    logError(options?.status ? "status failed:" : "migration failed:");
     console.error(error instanceof MigrationError ? error.message : error);
     process.exitCode = 1;
   }
@@ -318,4 +388,6 @@ module.exports = {
   discoverFiles,
   compareMigrations,
   validateMigrations,
+  parseOptions,
+  rollbackMigration,
 };

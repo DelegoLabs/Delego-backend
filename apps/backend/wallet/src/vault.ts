@@ -20,6 +20,38 @@ const SALT_LENGTH = 16;
 const KEY_LENGTH = 32;
 const ITERATIONS = 10000;
 
+/**
+ * #31 — The wallet encrypts every signing key at rest with this secret. If it is left
+ * unset in production, `resolveMasterSecret` below falls back to this well-known string,
+ * which is checked into source control and public to anyone who has read this file —
+ * an attacker who knows it can decrypt every wallet seed in the vault.
+ */
+export const DEFAULT_WALLET_MASTER_SECRET = "default-dev-wallet-master-secret-key-32-chars";
+
+/**
+ * Resolves the effective master secret for a given raw env value, enforcing that
+ * production deployments cannot silently run on the well-known default secret.
+ *
+ * - Production + unset/default → throws (fail closed; refuses to start).
+ * - Non-production + unset/default → warns and falls back to the default (local/dev ergonomics).
+ * - Any environment with a real secret configured → returns it unchanged.
+ */
+function resolveMasterSecret(rawValue: string | undefined, nodeEnv: string | undefined): string {
+  const isDefault = !rawValue || rawValue === DEFAULT_WALLET_MASTER_SECRET;
+
+  if (isDefault) {
+    if (nodeEnv === "production") {
+      throw new Error(
+        "WALLET_MASTER_SECRET must be set in production and must not equal the default development value"
+      );
+    }
+    log.warn("Using default wallet master secret — set WALLET_MASTER_SECRET before deploying to production");
+    return DEFAULT_WALLET_MASTER_SECRET;
+  }
+
+  return rawValue;
+}
+
 export class VaultService {
   private masterSecret: string;
   private vaultData: Record<
@@ -28,13 +60,13 @@ export class VaultService {
   > = {};
 
   constructor() {
-    this.masterSecret = process.env.WALLET_MASTER_SECRET ?? "default-dev-wallet-master-secret-key-32-chars";
+    this.masterSecret = resolveMasterSecret(process.env.WALLET_MASTER_SECRET, process.env.NODE_ENV);
   }
 
-  private async getEncryptionKey(salt: Buffer): Promise<Buffer> {
+  private async getEncryptionKey(salt: Buffer, masterSecret = this.masterSecret): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       crypto.pbkdf2(
-        this.masterSecret,
+        masterSecret,
         salt,
         ITERATIONS,
         KEY_LENGTH,
@@ -83,7 +115,8 @@ export class VaultService {
 
     const salt = crypto.randomBytes(SALT_LENGTH);
     const iv = crypto.randomBytes(IV_LENGTH);
-    const key = await this.getEncryptionKey(salt);
+    const keyVersion = getActiveKeyVersion();
+    const key = await this.getEncryptionKey(salt, getMasterKeyForVersion(keyVersion));
 
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
     let encrypted = cipher.update(secretKey, "utf8", "hex");
@@ -95,7 +128,7 @@ export class VaultService {
       tag,
       encryptedData: encrypted,
       salt: salt.toString("hex"),
-      keyVersion: getActiveKeyVersion(),
+      keyVersion,
     };
 
     await this.saveVault();
@@ -113,7 +146,7 @@ export class VaultService {
     const salt = Buffer.from(record.salt, "hex");
     const iv = Buffer.from(record.iv, "hex");
     const tag = Buffer.from(record.tag, "hex");
-    const key = await this.getEncryptionKey(salt);
+    const key = await this.getEncryptionKey(salt, getMasterKeyForVersion(record.keyVersion ?? "v1"));
 
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(tag);
@@ -127,6 +160,43 @@ export class VaultService {
   public async listPublicKeys(): Promise<string[]> {
     await this.loadVault();
     return Object.keys(this.vaultData);
+  }
+
+  /** Re-encrypts a bounded batch and saves after each key for interruption safety. */
+  public async rotateKeys(targetVersion: string, batchSize = 50): Promise<{ rotated: number; remaining: number }> {
+    const normalizedVersion = targetVersion.trim();
+    if (!normalizedVersion) throw new Error("targetVersion is required");
+    if (!Number.isInteger(batchSize) || batchSize < 1) throw new Error("batchSize must be a positive integer");
+    const targetSecret = getMasterKeyForVersion(normalizedVersion);
+    await this.loadVault();
+    const publicKeys = Object.keys(this.vaultData);
+    let rotated = 0;
+    for (const publicKey of publicKeys) {
+      const record = this.vaultData[publicKey];
+      if ((record.keyVersion ?? "v1") === normalizedVersion) continue;
+      const plainText = await this.decryptRecord(record);
+      this.vaultData[publicKey] = await this.encryptRecord(plainText, normalizedVersion, targetSecret);
+      rotated += 1;
+      if (rotated % batchSize === 0) await this.saveVault();
+    }
+    await this.saveVault();
+    return { rotated, remaining: publicKeys.length - rotated };
+  }
+
+  private async decryptRecord(record: VaultService["vaultData"][string]): Promise<string> {
+    const key = await this.getEncryptionKey(Buffer.from(record.salt, "hex"), getMasterKeyForVersion(record.keyVersion ?? "v1"));
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, Buffer.from(record.iv, "hex"));
+    decipher.setAuthTag(Buffer.from(record.tag, "hex"));
+    return decipher.update(record.encryptedData, "hex", "utf8") + decipher.final("utf8");
+  }
+
+  private async encryptRecord(plainText: string, keyVersion: string, masterSecret: string) {
+    const salt = crypto.randomBytes(SALT_LENGTH);
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const key = await this.getEncryptionKey(salt, masterSecret);
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+    const encrypted = cipher.update(plainText, "utf8", "hex") + cipher.final("hex");
+    return { iv: iv.toString("hex"), tag: cipher.getAuthTag().toString("hex"), encryptedData: encrypted, salt: salt.toString("hex"), keyVersion };
   }
 }
 
@@ -223,7 +293,7 @@ export function getMasterKeyForVersion(keyVersion: string): string {
   }
 
   if (normalized === getActiveKeyVersion() || normalized === "v1") {
-    return process.env.WALLET_MASTER_SECRET ?? "default-dev-wallet-master-secret-key-32-chars";
+    return resolveMasterSecret(process.env.WALLET_MASTER_SECRET, process.env.NODE_ENV);
   }
 
   throw new Error(`Unknown signing key version: ${normalized}`);

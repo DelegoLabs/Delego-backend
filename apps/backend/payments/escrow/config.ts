@@ -20,3 +20,20 @@ export function isValidStellarAddress(address: string): boolean {
 export function isValidContractId(contractId: string): boolean {
   return CONTRACT_ADDRESS_RE.test(contractId);
 }
+
+/**
+ * Address authorized to submit auto-release `release` calls on behalf of the
+ * platform when a delivery-confirmation webhook triggers a release rather
+ * than an explicit buyer/seller-initiated request (Issue #45).
+ */
+export function getAutoReleaseCallerAddress(): string {
+  const address =
+    process.env.ESCROW_AUTO_RELEASE_CALLER_ADDRESS ??
+    process.env.SETTLEMENT_SOURCE_ADDRESS;
+  if (!address) {
+    throw new Error(
+      "ESCROW_AUTO_RELEASE_CALLER_ADDRESS or SETTLEMENT_SOURCE_ADDRESS must be configured for escrow auto-release"
+    );
+  }
+  return address;
+}

@@ -1,15 +1,16 @@
-import { 
-  Horizon, 
-  rpc, 
-  TransactionBuilder, 
-  Networks, 
-  Operation, 
+import {
+  Horizon,
+  rpc,
+  TransactionBuilder,
+  Networks,
+  Operation,
   nativeToScVal,
   Address,
 } from "@stellar/stellar-sdk";
 import type { TransactionRequest, TransactionResult } from "@delegolabs/types";
 import { createLogger } from "@delegolabs/utils";
 import { addTransactionToQueue } from "../src/queue/txQueue.js";
+import { getTransactionFee } from "../src/dynamicFee.js";
 
 const log = createLogger("wallet:transactions", process.env.LOG_LEVEL ?? "info");
 
@@ -165,7 +166,7 @@ export const transactionService: TransactionService = {
       const scArgs = request.args.map((arg) => argToScVal(arg));
       
       const tx = new TransactionBuilder(sourceAccount, {
-        fee: "100",
+        fee: await getTransactionFee(horizonUrl),
         networkPassphrase,
       })
         .addOperation(
