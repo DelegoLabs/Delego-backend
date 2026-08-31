@@ -299,7 +299,7 @@ export function deriveKeyHierarchy(
     publicKey: masterKey.toString("hex"),
     chainCode: masterChainHex,
     depth: 0,
-    parentFingerprint: 0,
+    parentFingerprint: masterFp,
     childNumber: 0,
     isHardened: false,
   };
