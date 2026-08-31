@@ -66,6 +66,20 @@ import {
   sendNotificationHandler,
   monitoringDashboardHandler,
 } from "../../monitoring/src/routes.js";
+import {
+  createTemplateHandler,
+  listTemplatesHandler,
+  getTemplateHandler,
+  listTemplateVersionsHandler,
+  deleteTemplateHandler,
+  deprecateTemplateVersionHandler,
+  catalogHandler,
+  categoriesHandler,
+  rateTemplateHandler,
+  instantiateTemplateHandler,
+  testTemplateHandler,
+  templateDocumentationHandler,
+} from "../../orchestrator/src/templates/routes.js";
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
@@ -147,5 +161,18 @@ export function registerRoutes(): Route[] {
     // Swagger UI (#352)
     route("GET", "/api/docs", swaggerHandler),
     route("GET", "/api/docs/openapi.json", swaggerHandler),
+    // Workflow template system
+    route("GET", "/api/v1/templates/catalog", catalogHandler),
+    route("GET", "/api/v1/templates/categories", categoriesHandler),
+    route("GET", "/api/v1/templates", listTemplatesHandler),
+    route("POST", "/api/v1/templates", createTemplateHandler),
+    route("GET", "/api/v1/templates/:id", getTemplateHandler),
+    route("GET", "/api/v1/templates/:id/versions", listTemplateVersionsHandler),
+    route("DELETE", "/api/v1/templates/:id", deleteTemplateHandler),
+    route("POST", "/api/v1/templates/:id/deprecate", deprecateTemplateVersionHandler),
+    route("POST", "/api/v1/templates/:id/instantiate", instantiateTemplateHandler),
+    route("POST", "/api/v1/templates/:id/rate", rateTemplateHandler),
+    route("POST", "/api/v1/templates/:id/test", testTemplateHandler),
+    route("GET", "/api/v1/templates/:id/docs", templateDocumentationHandler),
   ];
 }

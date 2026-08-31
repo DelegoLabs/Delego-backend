@@ -16,10 +16,12 @@
     "routes/**/*",
     "middleware/**/*",
     "../lua-scripts/src/**/*",
-    "../monitoring/src/**/*"
+    "../monitoring/src/**/*",
+    "../orchestrator/src/templates/**/*"
   ],
   "exclude": [
     "**/*.test.ts",
-    "**/*.spec.ts"
+    "**/*.spec.ts",
+    "../orchestrator/src/templates/**/*.test.ts"
   ]
 }

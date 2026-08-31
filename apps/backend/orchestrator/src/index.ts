@@ -30,6 +30,8 @@ import { connectSagaDb, PostgresSagaStore, serializeSagaExecution } from "./saga
 import { startOutboxRelay, type OutboxRelayHandle } from "./events/outboxRelay.js";
 import { PostgresServiceEventOutboxStore } from "./events/postgres-service-event-outbox.js";
 import { setServiceEventOutboxStore } from "./events/service-event-outbox.js";
+import { PostgresTaskStore, tasksSequelize, TaskService, TaskEventBroker } from "./tasks/index.js";
+import { createTaskRoutes } from "./tasks/routes.js";
 
 const SERVICE_NAME = "orchestrator";
 const DEFAULT_PORT = 3010;
@@ -51,6 +53,14 @@ const orchestratorHealthRegistry = createOrchestratorHealthRegistry();
 const outboxPool = new Pool({ connectionString: process.env.DATABASE_URL });
 setServiceEventOutboxStore(new PostgresServiceEventOutboxStore(outboxPool));
 let outboxRelay: OutboxRelayHandle | null = null;
+
+// ─── Human Task Management ─────────────────────────────────────────────────
+// Durable store backed by human_tasks (database/migrations/027_human_tasks.sql),
+// a Redis publisher for real-time inbox updates, and the task service that
+// implements routing, assignment, claiming, completion, delegation and SLAs.
+const taskStore = new PostgresTaskStore();
+let taskBroker: TaskEventBroker | null = null;
+const taskService = new TaskService({ store: taskStore });
 
 // ─── #64 Reconciliation Engine ───────────────────────────────────────────────
 
@@ -383,6 +393,12 @@ async function main(): Promise<void> {
   // Connect before accepting traffic and fail fast (rather than just logging) if durable
   // saga storage isn't ready.
   await connectSagaDb();
+  try {
+    await tasksSequelize.authenticate();
+    log.info("Human task store database connection established");
+  } catch (err) {
+    log.warn("Human task store unavailable on startup", { error: err instanceof Error ? err.message : String(err) });
+  }
 
   try {
     const unfinished = await recoverUnfinishedWorkflows();
@@ -399,6 +415,24 @@ async function main(): Promise<void> {
     outboxRelay = startOutboxRelay({ redisClient, log });
   }
 
+  // Real-time task inbox broker: publishes lifecycle events to Redis channels
+  // (`human-task:*`) for live UI updates. Disabled when ENABLE_TASK_EVENTS=false or
+  // when Redis is unavailable — the service still works, just without live events.
+  if (process.env.ENABLE_TASK_EVENTS !== "false") {
+    try {
+      const redisClient = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+      });
+      taskBroker = new TaskEventBroker(redisClient as never);
+      taskService.setBroker(taskBroker);
+    } catch (err) {
+      log.warn("Task event broker unavailable; disabling real-time inbox events", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   log.info("Starting orchestrator", { port });
   startHttpServer({
     port,
@@ -410,6 +444,8 @@ async function main(): Promise<void> {
         serviceName: SERVICE_NAME,
         version: "0.0.1",
       }),
+
+      ...createTaskRoutes(taskService, taskStore),
 
       route("POST", "/checkout", async (req, res) => {
         let body: Record<string, unknown>;
@@ -596,6 +632,28 @@ async function main(): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => sagaSweeper.stop());
   }
+
+  // ─── Human task SLA sweeper ──────────────────────────────────────────────
+  // Periodically escalates/expires tasks that breach their SLA. Interval defaults
+  // to 5 minutes; set TASK_SLA_SCAN_INTERVAL_MS=0 to disable the background loop
+  // (escalations can still be triggered on demand via POST /tasks/sla/scan).
+  const slaIntervalMs = Number(process.env.TASK_SLA_SCAN_INTERVAL_MS ?? 300_000);
+  if (slaIntervalMs > 0) {
+    const { scanSla } = await import("./tasks/sla.js");
+    const graceHours = Number(process.env.TASK_SLA_GRACE_HOURS ?? 24);
+    await scanSla(taskStore, { graceHours }).catch((err) =>
+      log.warn("Initial human task SLA scan failed", { error: err instanceof Error ? err.message : String(err) })
+    );
+    const slaTimer = setInterval(() => {
+      void scanSla(taskStore, { graceHours }).catch((err) =>
+        log.warn("Human task SLA scan failed", { error: err instanceof Error ? err.message : String(err) })
+      );
+    }, slaIntervalMs);
+    slaTimer.unref();
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      process.once(signal, () => clearInterval(slaTimer));
+    }
+  }
 }
 
 main().catch((err) => {
@@ -640,6 +698,4 @@ export { publishWorkflowEvent, createWorkflowCorrelationId } from "./workflow-ev
 export type { WorkflowEventEnvelope } from "./workflow-events.js";
 export { PurchaseWorkflowMachine } from "../state/index.js";
 export type { PurchaseState, PurchaseEvent } from "../state/index.js";
-
-
 

@@ -210,6 +210,44 @@ The notifications service sends customer-facing updates.
 - Web Push API for push notifications
 - Twilio for SMS (Planned)
 
+### CDC Service (`apps/backend/cdc`)
+
+**Package**: `@delegolabs/cdc`
+**Port**: 3017
+**Health Check**: `GET /health`
+
+The CDC service implements Change Data Capture for real-time database
+synchronization across services. It captures PostgreSQL row changes via native
+logical replication (or an external Debezium cluster), transforms them into
+domain events, and publishes them to the Redis bus with exactly-once delivery.
+
+#### Responsibilities
+
+- Capture INSERT / UPDATE / DELETE row changes from configured tables
+- Transform raw WAL changes into canonical `CDCEvent`s and domain events
+- Publish to Redis (durable stream `cdc:events` + real-time pub/sub fan-out)
+- Exactly-once delivery via the `cdc_published_events` dedup table + durable
+  replication checkpoints
+- Schema evolution handling (`cdc_schema_versions`)
+- Monitoring dashboard (`GET /cdc/dashboard`) showing WAL lag, throughput, and errors
+- Failover / recovery by resuming from the durable slot checkpoint
+
+#### Tech Stack
+
+- Node.js with TypeScript
+- PostgreSQL logical replication (native slots, `test_decoding`)
+- Redis streams + pub/sub
+- `@delegolabs/utils` HTTP server + metrics
+
+#### Endpoints
+
+- `GET /api/v1/cdc/metrics` - CDC `CDCMetrics` snapshot
+- `GET /api/v1/cdc/position` - current WAL LSN + lag
+- `GET /api/v1/cdc/config` - effective connector config (secrets redacted)
+- `GET /cdc/dashboard` - HTML monitoring dashboard
+- `GET /metrics` - Prometheus text metrics
+- `POST /api/v1/cdc/pause` / `POST /api/v1/cdc/resume` - pipeline control
+
 ## Architecture
 
 ### Service Architecture
@@ -290,6 +328,7 @@ pnpm --filter @delegolabs/orchestrator dev
 pnpm --filter @delegolabs/wallet dev
 pnpm --filter @delegolabs/payments dev
 pnpm --filter @delegolabs/notifications dev
+pnpm --filter @delegolabs/cdc dev
 pnpm --filter @delegolabs/agents dev
 ```
 
