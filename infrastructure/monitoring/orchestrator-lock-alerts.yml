@@ -1,0 +1,33 @@
+groups:
+  - name: orchestrator-locks
+    rules:
+      - alert: OrchestratorLockContentionHigh
+        expr: orchestrator_lock_contention_ratio > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          service: orchestrator
+        annotations:
+          summary: Orchestrator lock contention is high
+          description: More than 30% of lock acquire attempts are waiting or timing out.
+          runbook_url: https://github.com/DelegoLabs/Delego-backend/blob/main/apps/backend/orchestrator/README.md
+      - alert: OrchestratorLockStolen
+        expr: rate(orchestrator_lock_stolen_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: orchestrator
+        annotations:
+          summary: Orchestrator lock steal detected
+          description: A lock was renewed or held after another instance took ownership — TTL may be too short.
+          runbook_url: https://github.com/DelegoLabs/Delego-backend/blob/main/apps/backend/orchestrator/README.md
+      - alert: OrchestratorLockDeadlockTimeout
+        expr: increase(orchestrator_lock_deadlock_timeout_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: orchestrator
+        annotations:
+          summary: Orchestrator lock wait hit the deadlock timeout
+          description: A lock acquire waited 30s without succeeding.
+          runbook_url: https://github.com/DelegoLabs/Delego-backend/blob/main/apps/backend/orchestrator/README.md

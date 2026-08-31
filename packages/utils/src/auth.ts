@@ -52,13 +52,22 @@ function verifyHmac(token: string, secret: string): { userId: string } | null {
   return userId ? { userId } : null;
 }
 
+function isPublicPath(pathname: string, publicPaths: Set<string>): boolean {
+  if (publicPaths.has(pathname)) return true;
+  // `/health` in the public set also covers `/health/live`, `/health/metrics`, etc.
+  if (publicPaths.has("/health") && (pathname === "/health" || pathname.startsWith("/health/"))) {
+    return true;
+  }
+  return false;
+}
+
 export function requireAuth(options: AuthOptions = {}): (req: IncomingMessage, res: ServerResponse, next: (err?: any) => void) => void {
   const publicPaths = new Set(options.publicPaths ?? DEFAULT_PUBLIC_PATHS);
 
   return (req: IncomingMessage, res: ServerResponse, next: (err?: any) => void): void => {
     const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
 
-    if (publicPaths.has(pathname)) {
+    if (isPublicPath(pathname, publicPaths)) {
       next();
       return;
     }

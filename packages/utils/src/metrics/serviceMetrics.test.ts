@@ -82,4 +82,19 @@ describe("ServiceMetricsRegistry", () => {
     expect(text).toContain("h1_count 1");
     expect(text).toContain("h1_sum 2");
   });
+
+  it("renders labeled series instead of collapsing them to the unlabeled value", () => {
+    const registry = new ServiceMetricsRegistry();
+    registry.counter("lock_acquire_total").inc(1, { level: "workflow", result: "acquired" });
+    registry.counter("lock_acquire_total").inc(2, { level: "step", result: "contended" });
+    registry.gauge("lock_held").set(4, { level: "workflow" });
+    registry.histogram("lock_acquire_duration_seconds").observe(0.01, { level: "workflow", result: "acquired" });
+
+    const text = registry.toPrometheusText();
+    expect(text).toContain('lock_acquire_total{level="workflow",result="acquired"} 1');
+    expect(text).toContain('lock_acquire_total{level="step",result="contended"} 2');
+    expect(text).toContain('lock_held{level="workflow"} 4');
+    expect(text).toContain('lock_acquire_duration_seconds_count{level="workflow",result="acquired"} 1');
+    expect(text).not.toMatch(/^lock_acquire_total 0$/m);
+  });
 });

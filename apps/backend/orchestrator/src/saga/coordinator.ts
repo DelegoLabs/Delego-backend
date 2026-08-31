@@ -1,15 +1,7 @@
-import { createLogger, generateId, type Logger } from "@delegolabs/utils";
-import {
-  SagaConcurrencyError,
-  type CompletedStep,
-  type SagaEvent,
-  type SagaRecord,
-  type SagaRecoveryDetail,
-  type SagaRecoveryResult,
-  type SagaStep,
-  type SagaStore,
-  type SagaWorkflowType,
-} from "./types.js";
+import { createLogger, type Logger } from "@delegolabs/utils";
+import { SagaConcurrencyError, type SagaRecord, type SagaStep, type SagaStore } from "./types.js";
+import type { DistributedLockManager } from "../locks/manager.js";
+import { lockKeyForStep, lockKeyForWorkflow } from "../locks/keys.js";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 /** Saga-level deadline — a running/compensating saga older than this is auto-compensated on recovery. */
@@ -22,14 +14,8 @@ export interface SagaCoordinatorOptions<TContext> {
   log?: Logger;
   /** How long a step claim is honored before another runner may safely reclaim it. */
   claimLeaseMs?: number;
-  /** Saga-level deadline used to detect sagas that must be auto-recovered/compensated. */
-  sagaTimeoutMs?: number;
-}
-
-export interface RunOptions {
-  workflowType?: SagaWorkflowType;
-  /** Distributed-tracing correlation id. Generated when not supplied. */
-  correlationId?: string;
+  /** Optional Redis lock manager for multi-instance coordination. */
+  locks?: DistributedLockManager;
 }
 
 /**
@@ -44,7 +30,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
   private readonly store: SagaStore;
   private readonly log: Logger;
   private readonly claimLeaseMs: number;
-  private readonly sagaTimeoutMs: number;
+  private readonly locks?: DistributedLockManager;
 
   constructor(options: SagaCoordinatorOptions<TContext>) {
     if (options.steps.length === 0) {
@@ -66,10 +52,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
       throw new Error("claimLeaseMs must be a positive safe integer");
     }
     this.claimLeaseMs = claimLeaseMs;
-    this.sagaTimeoutMs = options.sagaTimeoutMs ?? DEFAULT_SAGA_TIMEOUT_MS;
-    if (!Number.isSafeInteger(this.sagaTimeoutMs) || this.sagaTimeoutMs <= 0) {
-      throw new Error("sagaTimeoutMs must be a positive safe integer");
-    }
+    this.locks = options.locks;
   }
 
   /** Starts a new saga, or resumes it if sagaId was already started (idempotent). */
@@ -104,7 +87,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
     if (record.status === "completed" || record.status === "compensated" || record.status === "failed") {
       return record;
     }
-    return this.advance(record);
+    return this.withWorkflowLock(record.sagaId, () => this.advance(record as SagaRecord<TContext>));
   }
 
   /** Continues a previously started saga from its persisted state — used for crash recovery and manual retries. */
@@ -116,7 +99,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
     if (record.status === "completed" || record.status === "compensated" || record.status === "failed") {
       return record as SagaRecord<TContext>;
     }
-    return this.advance(record as SagaRecord<TContext>);
+    return this.withWorkflowLock(record.sagaId, () => this.advance(record as SagaRecord<TContext>));
   }
 
   /**
@@ -207,29 +190,32 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
     }, delayMs + 50);
   }
 
-  /**
-   * Background sweeper that detects and auto-recovers timed-out sagas while the service is
-   * running, so a crash that leaves a saga mid-flight is healed within `intervalMs` rather than
-   * only on the next restart. Returns a handle whose stop() clears the timer.
-   */
-  startTimeoutSweeper(intervalMs: number = this.sagaTimeoutMs): { stop: () => void } {
-    const timer = setInterval(async () => {
-      try {
-        const timedOut = await this.store.listTimedOut();
-        for (const record of timedOut) {
-          await this.recoverOne(record.sagaId);
-        }
-      } catch (err) {
-        this.log.error("Saga timeout sweep failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }, intervalMs);
-    // Don't keep the process alive solely for the sweeper.
-    if (typeof timer.unref === "function") timer.unref();
-    return {
-      stop: () => clearInterval(timer),
-    };
+  private async withWorkflowLock(
+    sagaId: string,
+    fn: () => Promise<SagaRecord<TContext>>,
+  ): Promise<SagaRecord<TContext>> {
+    if (!this.locks) return fn();
+    const key = lockKeyForWorkflow(sagaId);
+    const result = await this.locks.acquire(key, {
+      ttlMs: this.claimLeaseMs,
+      autoRenew: true,
+      waitTimeoutMs: 0,
+      metadata: { sagaId, level: "workflow" },
+    });
+    if (!result.acquired) {
+      this.log.warn("Workflow lock held by another instance, backing off", {
+        sagaId,
+        holder: result.lock?.owner,
+      });
+      const current = await this.store.get(sagaId);
+      if (!current) throw new Error(`Saga not found: ${sagaId}`);
+      return current as SagaRecord<TContext>;
+    }
+    try {
+      return await fn();
+    } finally {
+      await this.locks.release(key);
+    }
   }
 
   private async advance(record: SagaRecord<TContext>): Promise<SagaRecord<TContext>> {
@@ -261,6 +247,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
           step: stepName,
           error: error.message,
         });
+        await this.releaseStepLock(current.sagaId, stepName);
         current = await this.save({
           ...current,
           status: "compensating",
@@ -272,13 +259,16 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
         return this.compensate(current, error);
       }
 
-      const completedStep: CompletedStep = {
-        stepName,
-        status: "completed",
-        output: context as Record<string, unknown>,
-        completedAt: new Date().toISOString(),
-        compensationAction: step.name,
-      };
+      if (this.locks?.wasStolen(lockKeyForStep(current.sagaId, stepName))) {
+        this.log.warn("Step lock stolen during action — not persisting completion", {
+          sagaId: current.sagaId,
+          step: stepName,
+        });
+        return current;
+      }
+
+      // A failure here is a persistence problem, not a step failure — the action already
+      // succeeded, so this must bubble up for recovery/retry rather than trigger compensation.
       current = await this.save({
         ...current,
         context,
@@ -287,7 +277,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
         claimExpiresAt: null,
         updatedAt: new Date(),
       });
-      await this.recordEvent(current, "step_completed", "running", "running", { step: stepName });
+      await this.releaseStepLock(current.sagaId, stepName);
     }
 
     const completed = await this.save({
@@ -372,9 +362,29 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
           step: completedStep.stepName,
           error: compensationError.message,
         });
+        await this.releaseStepLock(current.sagaId, stepName);
+        // Release the lease so a subsequent resume()/recoverAll() doesn't have to wait out a
+        // lease held by a runner that has already given up on this step.
         await this.save({ ...current, claimExpiresAt: null, updatedAt: new Date() });
         throw compensationError;
       }
+
+      if (this.locks?.wasStolen(lockKeyForStep(current.sagaId, stepName))) {
+        this.log.warn("Step lock stolen during compensation — not persisting rollback", {
+          sagaId: current.sagaId,
+          step: stepName,
+        });
+        return current;
+      }
+
+      current = await this.save({
+        ...current,
+        context,
+        completedSteps: current.completedSteps.filter((name) => name !== stepName),
+        claimExpiresAt: null,
+        updatedAt: new Date(),
+      });
+      await this.releaseStepLock(current.sagaId, stepName);
     }
 
     const compensated = await this.save({
@@ -394,6 +404,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
    * two runners from claiming the *same* version simultaneously — it doesn't stop a second runner
    * from reading the already-claimed record and re-claiming the same step at the next version. The
    * lease (`claimExpiresAt`) closes that gap: a step already claimed by a live lease is refused.
+   * Redis step locks add a cross-instance mutex around the same claim.
    */
   private async claimStep(record: SagaRecord<TContext>, stepName: string): Promise<SagaRecord<TContext> | null> {
     if (
@@ -407,6 +418,25 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
       });
       return null;
     }
+
+    const stepKey = lockKeyForStep(record.sagaId, stepName);
+    if (this.locks) {
+      const redisClaim = await this.locks.acquire(stepKey, {
+        ttlMs: this.claimLeaseMs,
+        autoRenew: true,
+        waitTimeoutMs: 0,
+        metadata: { sagaId: record.sagaId, step: stepName, level: "step" },
+      });
+      if (!redisClaim.acquired) {
+        this.log.warn("Step lock held by another instance, backing off", {
+          sagaId: record.sagaId,
+          step: stepName,
+          holder: redisClaim.lock?.owner,
+        });
+        return null;
+      }
+    }
+
     try {
       return await this.save({
         ...record,
@@ -415,6 +445,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
         updatedAt: new Date(),
       });
     } catch (err) {
+      await this.releaseStepLock(record.sagaId, stepName);
       if (err instanceof SagaConcurrencyError) {
         this.log.warn("Saga step already claimed by another runner, backing off", {
           sagaId: record.sagaId,
@@ -426,23 +457,9 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
     }
   }
 
-  private async recordEvent(
-    record: SagaRecord<TContext>,
-    eventType: string,
-    fromStatus: SagaRecord["status"] | null,
-    toStatus: SagaRecord["status"] | null,
-    payload: Record<string, unknown>
-  ): Promise<void> {
-    const event: SagaEvent = {
-      sagaId: record.sagaId,
-      correlationId: record.correlationId,
-      eventType,
-      fromStatus,
-      toStatus,
-      payload,
-      createdAt: new Date(),
-    };
-    await this.store.appendEvent(event);
+  private async releaseStepLock(sagaId: string, stepName: string): Promise<void> {
+    if (!this.locks) return;
+    await this.locks.release(lockKeyForStep(sagaId, stepName));
   }
 
   /** Saves a record of this coordinator's TContext — store.save() is typed generically. */

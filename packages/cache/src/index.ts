@@ -38,3 +38,18 @@ export type {
   CacheInvalidation,
   ClusterMetrics,
 } from "./types.js";
+
+export {
+  redisLockAcquire,
+  redisLockRelease,
+  redisLockRenew,
+  redisLockInspect,
+  redisLockScan,
+  workflowLockKey,
+  stepLockKey,
+  fenceKeyFor,
+  serializeLockPayload,
+  parseLockPayload,
+  type RedisLockPayload,
+  type RedisLockRenewResult,
+} from "./lock.js";

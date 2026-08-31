@@ -301,6 +301,9 @@ importers:
 
   apps/backend/orchestrator:
     dependencies:
+      '@delegolabs/cache':
+        specifier: workspace:*
+        version: link:../../../packages/cache
       '@delegolabs/types':
         specifier: workspace:*
         version: link:../../../packages/types

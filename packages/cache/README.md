@@ -27,8 +27,9 @@ await invalidate(client, { tags: [`seller:${sellerId}`], mode: "tag" });
 
 - **Real, tested code:** `getCacheClient` (single-node and cluster-mode
   client construction from env), `getOrSet`/`setCacheEntry` (cache-aside
-  pattern), `invalidate` (exact/prefix/tag eviction), and
-  `collectClusterMetrics`/`evaluateClusterHealth` (metrics parsing +
+  pattern), `invalidate` (exact/prefix/tag eviction),
+  `redisLockAcquire`/`redisLockRelease`/`redisLockRenew` (SET NX PX + Lua),
+  and `collectClusterMetrics`/`evaluateClusterHealth` (metrics parsing +
   threshold checks). All covered by unit tests against `ioredis-mock`
   (`pnpm --filter @delegolabs/cache test`).
 - **Documented, not deployed:** the actual 6-node cluster, Sentinel

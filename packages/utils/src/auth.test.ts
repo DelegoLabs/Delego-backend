@@ -129,6 +129,18 @@ describe("requireAuth", () => {
     expect((req as any).userId).toBeUndefined();
   });
 
+  it("treats /health/* as public when /health is in the public set", async () => {
+    const middleware = requireAuth();
+    for (const path of ["/health/live", "/health/ready", "/health/metrics"]) {
+      const req = makeReq();
+      req.url = path;
+      const res = createMockRes();
+      const next = vi.fn();
+      await middleware(req, res, next);
+      expect(next).toHaveBeenCalledOnce();
+    }
+  });
+
   it("still requires auth for non-public paths", async () => {
     const middleware = requireAuth({ publicPaths: ["/health", "/vapid-public-key"] });
     const req = makeReq();

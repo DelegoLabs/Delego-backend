@@ -3,7 +3,7 @@
  *
  * Dependencies:
  *   postgres — critical (saga + workflow persistence)
- *   redis    — non-critical (workflow event pub/sub)
+ *   redis    — critical when distributed locks are enabled (default); otherwise non-critical (pub/sub)
  */
 
 import { HealthRegistry, httpHealthCheck, type HealthCheckFn } from "@delegolabs/utils";
@@ -13,6 +13,8 @@ export interface OrchestratorHealthOptions {
   checkPostgres?: () => Promise<void>;
   fetchImpl?: typeof fetch;
   redisUrl?: string;
+  /** When true (default if distributed locks are on), Redis failure fails readiness. */
+  redisCritical?: boolean;
 }
 
 function createPostgresCheck(checkPostgres?: () => Promise<void>): HealthCheckFn {
@@ -38,7 +40,8 @@ function createPostgresCheck(checkPostgres?: () => Promise<void>): HealthCheckFn
 export function createOrchestratorHealthRegistry(
   options: OrchestratorHealthOptions = {},
 ): HealthRegistry {
-  const { checkPostgres, fetchImpl = fetch, redisUrl } = options;
+  const { checkPostgres, fetchImpl = fetch, redisUrl, redisCritical } = options;
+  const redisIsCritical = redisCritical ?? process.env.ENABLE_DISTRIBUTED_LOCKS !== "false";
 
   const registry = new HealthRegistry();
 
@@ -54,7 +57,7 @@ export function createOrchestratorHealthRegistry(
       timeoutMs: 2000,
       fetchImpl,
     }),
-    { type: "redis", critical: false },
+    { type: "redis", critical: redisIsCritical },
   );
 
   return registry;

@@ -113,6 +113,7 @@ export async function cancelTimeout(orderId: string): Promise<void> {
 import type { ApiResponse } from "@delegolabs/types";
 import { SagaCoordinator, type SagaStep } from "../../src/saga/index.js";
 import type { SagaRecord, SagaStore } from "../../src/saga/index.js";
+import type { DistributedLockManager } from "../../src/locks/manager.js";
 import {
   createWorkflowCorrelationId,
   createWorkflowEventEnvelope,
@@ -337,10 +338,14 @@ const confirmCheckoutStep: SagaStep<CheckoutContext> = {
   },
 };
 
-export function createCheckoutSagaCoordinator(store: SagaStore): SagaCoordinator<CheckoutContext> {
+export function createCheckoutSagaCoordinator(
+  store: SagaStore,
+  locks?: DistributedLockManager,
+): SagaCoordinator<CheckoutContext> {
   return new SagaCoordinator<CheckoutContext>({
     steps: [depositEscrowStep, confirmCheckoutStep],
     store,
+    locks,
   });
 }
 
