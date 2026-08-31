@@ -8,7 +8,6 @@ Deterministic, checksum-validated SQL migrations for Delego.
 - `database/migrations/` contains **incremental changes** applied after the baseline.
 - Baseline files always run before incremental files.
 - Within each directory, files run in ascending numeric-prefix order; the filename is the tie-breaker.
-
 The current baseline is:
 
 | Baseline | Description |

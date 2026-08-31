@@ -103,7 +103,13 @@ export function registerRoutes(): Route[] {
     route("PATCH", "/api/v1/delegations/:id", updateDelegationHandler),
     route("DELETE", "/api/v1/delegations/:id", revokeDelegationHandler),
     route("GET", "/api/v1/wallets/:walletId", getWalletHandler),
-    // Admin — rate-limit dashboard (#340)
+    // Payment method vault routes
+    ...registerPaymentRoutes(),
+    // Account recovery routes
+    ...registerRecoveryRoutes(),
+    // Multi-currency routes
+    ...registerMultiCurrencyRoutes(),
+    // Admin â€" rate-limit dashboard (#340)
     route("GET", "/api/v1/admin/rate-limit/metrics", rateLimitMetricsHandler),
     // Admin — tiered token-bucket rate-limit metrics (#51)
     route("GET", "/api/v1/admin/rate-limit/tiered-metrics", tieredRateLimitMetricsHandler),
