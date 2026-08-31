@@ -22,11 +22,10 @@ Two real paths forward, neither attempted here:
 
 ## Dependency scanning (#82)
 
-- **`.github/dependabot.yml`**: weekly scans across every workspace package (root + each `apps/backend/*`, `agents`, `packages/*`), grouped patch/minor updates batched into one PR per package per week, `github-actions` ecosystem included (a stale/unpinned Action is itself a supply-chain risk).
-- **`pnpm audit --prod --audit-level=high`** in `ci.yml`'s `security-scan` job now actually gates merges — was `continue-on-error: true` before this PR (advisory only, never blocking). Fixed the 3 real high-severity findings that existed at the time (see `pnpm-workspace.yaml`'s comment for the fix and why it's a direct `@stellar/stellar-sdk` version bump rather than a pnpm `overrides` entry).
+- **Dependabot**: Automated version bumps via Dependabot (`.github/dependabot.yml`) have been removed to prevent duplicate/uncoordinated PR floods across monorepo packages. Dependency vulnerability tracking is handled via `pnpm audit` in CI.
+- **`pnpm audit --prod --audit-level=high`** in `ci.yml`'s `security-scan` job gates merges. Fixed the 3 real high-severity findings that existed at the time (see `pnpm-workspace.yaml`'s comment for the fix and why it's a direct `@stellar/stellar-sdk` version bump rather than a pnpm `overrides` entry).
 - **SBOM generation**: `ci.yml`'s `security-scan` job generates a CycloneDX SBOM via `@cyclonedx/cdxgen` (not `cyclonedx-npm` — that tool shells out to `npm ls`, which errors against this repo's pnpm-managed `node_modules` layout) and uploads it as a build artifact, retained 90 days.
 - **Not implemented — license compliance enforcement**: #82 asks for this explicitly. No license-checking tool is wired up; this repo's dependency tree hasn't been audited for license compatibility as part of this PR.
-- **Auto-remediation PRs**: this is what Dependabot's `updates` config itself provides (it opens PRs for outdated/vulnerable dependencies automatically) — no additional tooling needed beyond `.github/dependabot.yml` existing.
 
 ## Secret scanning (#81)
 
