@@ -27,4 +27,11 @@ export {
   listChannelsHandler,
   sendNotificationHandler,
   monitoringDashboardHandler,
+  sloDashboardHandler,
+  sloServiceDashboardHandler,
+  sloReportHandler,
+  createSLOHandler,
+  listSLOsHandler,
+  evaluateSLOHandler,
+  getBudgetStateHandler,
 } from "./routes.js";

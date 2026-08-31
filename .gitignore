@@ -1,55 +1,167 @@
-# Dependencies
+# Node modules
 node_modules/
-.pnpm-store/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+*.log
+.nyc_output/
 
 # Build outputs
 dist/
 build/
 .next/
-out/
-target/
-
-# Environment
-.env
-.env.local
-.env.*.local
+.next-optimized/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Logs
-logs/
-*.log
-npm-debug.log*
-pnpm-debug.log*
+# Docker
+.dockerignore
 
-# Test / coverage
+# Git
+.gitattributes
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Coverage
 coverage/
 .nyc_output/
 
-# Soroban
-.soroban/
-*.wasm
+# Cache
+.cache/
 
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
+# Logs
+logs/
 
-# Docker
-docker-data/
+# Package manager
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
 
-# Misc
-*.tsbuildinfo
-.turbo/
+# Jupyter Notebook
+.ipynb_checkpoints
 
-issue.md
-pr.md
+# Edge
+edge/
 
-# MiMoCode
-.mimocode/
-.mimo/
+# Generated files
+.gitleaks.toml
+.gitleaksignore
+
+# Monitoring
+*.pem
+*.key
+*.crt
+
+# SLO Dashboard
+.slo-dashboard.json
+
+# Pull Request Descriptions
+.prs/
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.raw/
+
+# OBS Studio project files
+*.obs
+
+# Production builds
+dist/
+out/
+
+# Editor directories and files
+.editorconfig
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-project
+*.sublime-workspace
+*.suo
+*.user
+*.userosx
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.manifest
+*.cache
+*.idb
+*.pdb
+*.hip
+*.iip
+*.max
+*.dep
+*.prp
+*.plc
+*.x64
+*.ilk
+*.manifest
+*.idb
+*.pdb
+*.sup
+*.vc
+*.ncb
+*.aps
+*.opensdf
+*.sln
+*.suo
+*.user
+*.userosx
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.manifest
+*.cache
+*.idb
+*.pdb
+*.hip
+*.iip
+*.max
+*.dep
+*.prp
+*.plc
+*.x64
+*.ilk
+*.manifest
+*.idb
+*.pdb
+*.sup
+*.vc
+*.ncb
+*.aps
+*.opensdf
+
+# Ignore pull request description file
+.prs/PR*.md
