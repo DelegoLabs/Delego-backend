@@ -11,6 +11,7 @@ import { compressionMiddleware } from "../middleware/compression.js";
 import { openApiValidationMiddleware } from "../middleware/openApiValidation.js";
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 import { raspMiddleware } from "../middleware/rasp.js";
+import { versionNegotiationMiddleware } from "./middleware/versioning.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -30,6 +31,9 @@ startHttpServer({
     corsMiddleware(),
     securityHeadersMiddleware(),
     raspMiddleware(),
+    // Version negotiation must run before auth and rate-limiting so that
+    // sunset versions get 410 Gone before any further processing.
+    versionNegotiationMiddleware(),
     bodyLimitMiddleware(),
     openApiValidationMiddleware({
       validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
@@ -40,4 +44,3 @@ startHttpServer({
   ],
   routes: registerRoutes(),
 });
-

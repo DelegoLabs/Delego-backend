@@ -1,6 +1,7 @@
 import type { Route } from "@delegolabs/utils";
 import { route } from "@delegolabs/utils";
 import { registerHealthRoutes } from "./health.js";
+import { versionDiscoveryRoute } from "../src/versionedRouter.js";
 import { apiV1Handler } from "./api-v1.js";
 import {
   registerHandler,
@@ -85,6 +86,8 @@ import {
 export function registerRoutes(): Route[] {
   return [
     ...registerHealthRoutes(),
+    // API version discovery — GET /api/versions (issue #54)
+    versionDiscoveryRoute,
     route("GET", "/api/v1/status", apiV1Handler),
     route("POST", "/api/v1/auth/register", registerHandler),
     route("POST", "/api/v1/auth/login", loginHandler),

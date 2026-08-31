@@ -2,6 +2,7 @@ import { createLogger } from "@delegolabs/utils";
 import { getEscrowContractId } from "./config.js";
 import { submitContractCall } from "./wallet-client.js";
 import { getEscrowCircuitBreaker } from "./circuitBreaker.js";
+import { normalizeContractError } from "./errors.js";
 import type {
   DepositEscrowParams,
   EscrowOperationResult,
@@ -44,15 +45,21 @@ export const escrowService: EscrowService = {
       adminAddress: params.adminAddress,
     });
 
-    const tx = await breaker.execute(() =>
-      submitContractCall({
-        sourceAddress: params.sourceAddress,
-        contractId,
-        method: "initialize",
-        args: [params.adminAddress],
-        memo: "Initialize escrow contract",
-      })
-    );
+    const tx = await (async () => {
+      try {
+        return await breaker.execute(() =>
+          submitContractCall({
+            sourceAddress: params.sourceAddress,
+            contractId,
+            method: "initialize",
+            args: [params.adminAddress],
+            memo: "Initialize escrow contract",
+          })
+        );
+      } catch (err) {
+        throw normalizeContractError(err);
+      }
+    })();
 
     log.info("Escrow contract initialized", { txHash: tx.hash, ledger: tx.ledger });
     return toEscrowResult(tx);
@@ -70,17 +77,23 @@ export const escrowService: EscrowService = {
       orderId: params.orderId,
     });
 
-    const tx = await breaker.execute(() =>
-      submitContractCall({
-        sourceAddress: params.sourceAddress,
-        contractId,
-        method: "create_escrow",
-        args: [params.buyerAddress, params.sellerAddress],
-        memo: params.orderId
-          ? `Deposit escrow for order ${params.orderId}`
-          : "Deposit escrow funds",
-      })
-    );
+    const tx = await (async () => {
+      try {
+        return await breaker.execute(() =>
+          submitContractCall({
+            sourceAddress: params.sourceAddress,
+            contractId,
+            method: "create_escrow",
+            args: [params.buyerAddress, params.sellerAddress],
+            memo: params.orderId
+              ? `Deposit escrow for order ${params.orderId}`
+              : "Deposit escrow funds",
+          })
+        );
+      } catch (err) {
+        throw normalizeContractError(err);
+      }
+    })();
 
     // Contract returns u64 escrow ID; wallet submit does not decode return values yet.
     log.info("Escrow deposit transaction completed", { txHash: tx.hash, ledger: tx.ledger });
@@ -98,15 +111,21 @@ export const escrowService: EscrowService = {
       escrowId,
     });
 
-    const tx = await breaker.execute(() =>
-      submitContractCall({
-        sourceAddress: params.sourceAddress,
-        contractId,
-        method: "release",
-        args: [escrowId],
-        memo: `Release escrow ${params.escrowId}`,
-      })
-    );
+    const tx = await (async () => {
+      try {
+        return await breaker.execute(() =>
+          submitContractCall({
+            sourceAddress: params.sourceAddress,
+            contractId,
+            method: "release",
+            args: [escrowId],
+            memo: `Release escrow ${params.escrowId}`,
+          })
+        );
+      } catch (err) {
+        throw normalizeContractError(err);
+      }
+    })();
 
     log.info("Escrow release transaction completed", {
       txHash: tx.hash,
@@ -131,15 +150,21 @@ export const escrowService: EscrowService = {
     // Note: the escrow contract's `refund` method currently accepts only (escrow_id, caller).
     // We persist/publish `refundReasonCode` at the payments-service layer (API response/event payload)
     // and include it in the transaction memo for traceability.
-    const tx = await breaker.execute(() =>
-      submitContractCall({
-        sourceAddress: params.sourceAddress,
-        contractId,
-        method: "refund",
-        args: [escrowId],
-        memo: `Refund escrow ${params.escrowId} (${params.refundReasonCode})`,
-      })
-    );
+    const tx = await (async () => {
+      try {
+        return await breaker.execute(() =>
+          submitContractCall({
+            sourceAddress: params.sourceAddress,
+            contractId,
+            method: "refund",
+            args: [escrowId],
+            memo: `Refund escrow ${params.escrowId} (${params.refundReasonCode})`,
+          })
+        );
+      } catch (err) {
+        throw normalizeContractError(err);
+      }
+    })();
 
     log.info("Escrow refund transaction completed", {
       txHash: tx.hash,

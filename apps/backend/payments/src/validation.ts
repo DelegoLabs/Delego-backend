@@ -887,6 +887,114 @@ export function validateDeliveryConfirmation(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Issue #207 – Fund Escrow Request Schema
+// ---------------------------------------------------------------------------
+
+/**
+ * Validated request payload for funding an escrow on behalf of a buyer.
+ *
+ * All fields are non-empty strings; idempotencyKey must be a UUID v4 to
+ * guarantee exactly-once escrow creation even if the caller retries on
+ * network failure.
+ */
+export interface FundEscrowRequest {
+  orderId: string;
+  buyerWalletId: string;
+  merchantAddress: string;
+  amountStroops: string;
+  idempotencyKey: string;
+}
+
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Validate a fund-escrow request body (fail-fast: returns the first error).
+ *
+ * Rules:
+ * - orderId: non-empty string
+ * - buyerWalletId: non-empty string
+ * - merchantAddress: valid Stellar address matching ^G[A-Z2-7]{55}$
+ * - amountStroops: digits-only string, not '0', and ≤ Number.MAX_SAFE_INTEGER
+ * - idempotencyKey: UUID v4
+ */
+export function validateFundEscrowRequest(
+  body: Record<string, unknown>
+): ValidationResult<FundEscrowRequest> {
+  // orderId
+  const orderId = requireString(body, "orderId");
+  if (!orderId.ok) return orderId;
+
+  // buyerWalletId
+  const buyerWalletId = requireString(body, "buyerWalletId");
+  if (!buyerWalletId.ok) return buyerWalletId;
+
+  // merchantAddress
+  const merchantAddressStr = requireString(body, "merchantAddress");
+  if (!merchantAddressStr.ok) return merchantAddressStr;
+  if (!isValidStellarAddress(merchantAddressStr.value)) {
+    return {
+      ok: false,
+      error: invalidField(
+        "merchantAddress",
+        "merchantAddress must be a valid Stellar account address"
+      ),
+    };
+  }
+
+  // amountStroops
+  const amountStr = requireString(body, "amountStroops");
+  if (!amountStr.ok) return amountStr;
+  if (!/^\d+$/.test(amountStr.value)) {
+    return {
+      ok: false,
+      error: invalidField(
+        "amountStroops",
+        "amountStroops must be a positive integer string (digits only)"
+      ),
+    };
+  }
+  if (amountStr.value === "0") {
+    return {
+      ok: false,
+      error: invalidField("amountStroops", "amountStroops must be greater than zero"),
+    };
+  }
+  if (Number(amountStr.value) > Number.MAX_SAFE_INTEGER) {
+    return {
+      ok: false,
+      error: invalidField(
+        "amountStroops",
+        `amountStroops must not exceed ${Number.MAX_SAFE_INTEGER}`
+      ),
+    };
+  }
+
+  // idempotencyKey
+  const idempotencyKeyStr = requireString(body, "idempotencyKey");
+  if (!idempotencyKeyStr.ok) return idempotencyKeyStr;
+  if (!UUID_V4_RE.test(idempotencyKeyStr.value)) {
+    return {
+      ok: false,
+      error: invalidField(
+        "idempotencyKey",
+        "idempotencyKey must be a valid UUID v4"
+      ),
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      orderId: orderId.value,
+      buyerWalletId: buyerWalletId.value,
+      merchantAddress: merchantAddressStr.value,
+      amountStroops: amountStr.value,
+      idempotencyKey: idempotencyKeyStr.value,
+    },
+  };
+}
+
 export function _resetLockRedisClient(): void {
   _lockRedisClient = null;
   activeFundingLocks.clear();

@@ -7,6 +7,7 @@ import { handleDeliveryConfirmationWebhook } from "../escrow/autoSettlement.js";
 import { getWebhookSecret, verifyWebhookSignature, WEBHOOK_SIGNATURE_HEADER } from "./autoRelease/hmac.js";
 import { handleDeliveryConfirmation } from "./autoRelease/service.js";
 import { EscrowDisputedError, EscrowNotReleasableError } from "./autoRelease/types.js";
+import { ContractInvocationError } from "../escrow/errors.js";
 import { settleOrder, refundOrder } from "../settlement/index.js";
 import { getEscrowFundingLockManager } from "./escrowCoordinator/escrowFundingLock.js";
 import {
@@ -110,6 +111,18 @@ function sendOperationError(res: ServerResponse, code: string, err: unknown): vo
     error: {
       code,
       message: err instanceof Error ? err.message : "Unknown error",
+    },
+  });
+}
+
+function sendContractError(res: ServerResponse, err: ContractInvocationError): void {
+  const status = err.retryable ? 503 : 422;
+  json(res, status, {
+    data: null,
+    error: {
+      code: err.code,
+      message: err.message,
+      txHash: err.txHash ?? null,
     },
   });
 }
@@ -232,6 +245,10 @@ export function registerRoutes(): Route[] {
           });
           return;
         }
+        if (err instanceof ContractInvocationError) {
+          sendContractError(res, err);
+          return;
+        }
         sendOperationError(res, "ESCROW_INITIALIZE_FAILED", err);
       }
     }),
@@ -293,6 +310,10 @@ export function registerRoutes(): Route[] {
           });
           return;
         }
+        if (err instanceof ContractInvocationError) {
+          sendContractError(res, err);
+          return;
+        }
         sendOperationError(res, "ESCROW_DEPOSIT_FAILED", err);
       } finally {
         if (lockedOrderId) {
@@ -329,6 +350,10 @@ export function registerRoutes(): Route[] {
             code: "VALIDATION_ERROR",
             message: "Invalid JSON body",
           });
+          return;
+        }
+        if (err instanceof ContractInvocationError) {
+          sendContractError(res, err);
           return;
         }
         sendOperationError(res, "ESCROW_RELEASE_FAILED", err);
@@ -369,6 +394,10 @@ export function registerRoutes(): Route[] {
             code: "VALIDATION_ERROR",
             message: "Invalid JSON body",
           });
+          return;
+        }
+        if (err instanceof ContractInvocationError) {
+          sendContractError(res, err);
           return;
         }
         sendOperationError(res, "ESCROW_REFUND_FAILED", err);

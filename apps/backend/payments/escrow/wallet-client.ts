@@ -6,6 +6,7 @@ import type {
 import { createLogger } from "@delegolabs/utils";
 import { getWalletUrl } from "./config.js";
 import { estimateTransactionFee, type FeeEstimate } from "./feeEstimator.js";
+import { normalizeContractError } from "./errors.js";
 
 const log = createLogger(
   "payments:wallet-client",
@@ -80,7 +81,7 @@ export async function submitContractCall(
       error: message,
       method: request.method,
     });
-    throw new Error(`Wallet service unavailable: ${message}`);
+    throw normalizeContractError(new Error(`Wallet service unavailable: ${message}`));
   }
 
   const rawBody = await response.text();
@@ -92,8 +93,10 @@ export async function submitContractCall(
       status: response.status,
       method: request.method,
     });
-    throw new Error(
-      `Wallet service returned invalid response (status ${response.status})`,
+    throw normalizeContractError(
+      new Error(
+        `Wallet service returned invalid response (status ${response.status})`,
+      ),
     );
   }
 
@@ -105,11 +108,13 @@ export async function submitContractCall(
       error: message,
       method: request.method,
     });
-    throw new Error(message);
+    throw normalizeContractError(new Error(message));
   }
 
   if (!body.data) {
-    throw new Error("Wallet service returned empty transaction result");
+    throw normalizeContractError(
+      new Error("Wallet service returned empty transaction result"),
+    );
   }
 
   log.info("Escrow contract transaction submitted", {

@@ -30,10 +30,33 @@ import {
   detectSequenceGap,
 } from "./sequenceMonitoring.js";
 import { addToDLQ } from "./transactionDLQ.js";
+import { insertAuditLog } from "../transactions/auditLog.js";
 
 export { classifySubmissionFailure, type SubmissionFailure } from "./submissionFailure.js";
 
 const log = createLogger("wallet:queue", process.env.LOG_LEVEL ?? "info");
+
+export interface XdrValidationResult {
+  valid: boolean;
+  sizeBytes: number;
+  maxBytes: number;
+  error?: string;
+}
+
+export function validateXdrSize(request: TransactionRequest): XdrValidationResult {
+  const sizeBytes = Buffer.byteLength(JSON.stringify(request), "utf8");
+  const raw = Number(process.env.MAX_XDR_BYTES ?? 65536);
+  const maxBytes = isNaN(raw) || raw <= 0 ? 65536 : raw;
+  const valid = sizeBytes <= maxBytes;
+  return valid
+    ? { valid: true, sizeBytes, maxBytes }
+    : {
+        valid: false,
+        sizeBytes,
+        maxBytes,
+        error: `Payload too large: ${sizeBytes} bytes exceeds limit of ${maxBytes} bytes`,
+      };
+}
 
 let redisClient: Redis;
 let txQueue: Queue | null = null;
@@ -568,6 +591,17 @@ async function executeTxJob(
           }
         }
 
+        // Audit: record successful signing
+        if (request.walletId) {
+          try {
+            await insertAuditLog({ walletId: request.walletId, status: "SUCCESS", txHash });
+          } catch (auditErr: any) {
+            log.error("Failed to insert signing audit log (success)", { error: auditErr.message });
+          }
+        } else {
+          log.warn("walletId not available; skipping signing audit log (success)");
+        }
+
         return {
           hash: txHash,
           ledger: successTx.ledger,
@@ -594,11 +628,37 @@ async function executeTxJob(
     const isConfirmed = await verifyLedgerSubmission(txHash);
     if (isConfirmed) {
       log.info("Transaction confirmed on ledger despite polling timeout", { txHash });
+
+      // Audit: record successful signing (fallback confirmation path)
+      if (request.walletId) {
+        try {
+          await insertAuditLog({ walletId: request.walletId, status: "SUCCESS", txHash });
+        } catch (auditErr: any) {
+          log.error("Failed to insert signing audit log (success, fallback)", { error: auditErr.message });
+        }
+      } else {
+        log.warn("walletId not available; skipping signing audit log (success, fallback)");
+      }
+
       return { hash: txHash, ledger: 0, success: true };
     }
     throw new Error(`Transaction timeout or status untracked: ${sendRes.status}`);
   } catch (err: unknown) {
     const failure = classifySubmissionFailure(err, { txHash });
+
+    // Audit terminal (non-retryable) failures only — transient retries are not final outcomes
+    if (!failure.retryable) {
+      if (request.walletId) {
+        try {
+          await insertAuditLog({ walletId: request.walletId, status: "FAILURE", txHash: null });
+        } catch (auditErr: any) {
+          log.error("Failed to insert signing audit log (failure)", { error: auditErr.message });
+        }
+      } else {
+        log.warn("walletId not available; skipping signing audit log (failure)");
+      }
+    }
+
     throwClassifiedSubmissionFailure(failure, attempt, request, undefined);
   }
 }
@@ -698,6 +758,13 @@ export function initQueue() {
 }
 
 export async function addTransactionToQueue(request: TransactionRequest): Promise<TransactionResult> {
+  // XDR payload size guard — must be the first check
+  const xdrResult = validateXdrSize(request);
+  if (!xdrResult.valid) {
+    log.warn("XDR payload size exceeded", { sizeBytes: xdrResult.sizeBytes, maxBytes: xdrResult.maxBytes });
+    throw new Error(xdrResult.error);
+  }
+
   // Check spend limit first
   let userId = request.userId;
   let walletId = request.walletId;
