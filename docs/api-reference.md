@@ -20,10 +20,32 @@ The Delego API is a RESTful API that provides access to the platform's core func
 
 ### API Versioning
 
-The API uses URL versioning to ensure backward compatibility:
+Delego supports URL-path versioning, Accept-header negotiation, and automatic fallback to the latest active version.
 
-- **v1**: Current stable version
-- **v2**: Future versions (when needed)
+- **v1**: Legacy stable version, deprecated as of 2025-06-01 and scheduled for sunset on 2026-12-31
+- **v2**: Current active version and default when no version is requested
+
+#### Version selection
+
+- URL path: `GET /api/v2/status`
+- Accept header: `Accept: application/vnd.delego.v1+json`
+- Default: latest active version (`v2`)
+
+When a deprecated version is used, the API returns a `Deprecation` and `Warning` header and includes the sunset date in `Sunset`.
+
+#### Migration guide
+
+1. Upgrade clients to the current version by using `v2` in the URL or `Accept` header.
+2. If you are pinned to `v1`, switch to `Accept: application/vnd.delego.v2+json` or `/api/v2/...`.
+3. Treat the `Warning` header as a signal that the version is deprecated and will be removed after the sunset date.
+4. Once the `Sunset` date passes, requests to that version return `410 Gone`.
+
+#### Compatibility matrix
+
+| Version | Status | Released | Deprecated | Sunset | Compatible With |
+| --- | --- | --- | --- | --- | --- |
+| v1 | deprecated | 2024-01-15 | 2025-06-01 | 2026-12-31 | v1, v2 |
+| v2 | active | 2025-06-01 | — | — | v1, v2 |
 
 ### Rate Limiting
 
