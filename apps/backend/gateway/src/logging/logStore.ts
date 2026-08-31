@@ -4,9 +4,6 @@
  */
 
 import type { LogEntry, LogSearchQuery } from "@delegolabs/types";
-import { createLogger } from "@delegolabs/utils";
-
-const log = createLogger("gateway:logging", process.env.LOG_LEVEL ?? "info");
 
 const MAX_LOG_ENTRIES = 10000;
 const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;

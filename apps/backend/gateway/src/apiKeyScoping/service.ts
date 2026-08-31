@@ -41,7 +41,7 @@ function modelToApiKey(model: ScopedApiKey): ScopedApiKeyType {
 }
 
 export async function createApiKey(
-  userId: string,
+  _userId: string,
   request: CreateApiKeyRequest
 ): Promise<ApiKeyCreateResult> {
   const rawKey = generateRawKey();

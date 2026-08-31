@@ -17,7 +17,6 @@
  */
 
 import { createLogger } from "@delegolabs/utils";
-import { randomUUID } from "crypto";
 
 const log = createLogger(
   "notifications:webhook-circuit-breaker",
@@ -128,10 +127,11 @@ function evaluateState(
  */
 export async function recordSuccess(
   store: WebhookCircuitBreakerStore,
-  webhookId: string
+  webhookId: string,
+  config?: Partial<WebhookCircuitBreakerConfig>
 ): Promise<WebhookCircuitBreaker> {
   let breaker = (await store.get(webhookId)) ?? getDefaultBreaker(webhookId);
-  breaker = { ...breaker };
+  breaker = { ...breaker, config: { ...breaker.config, ...config } };
 
   breaker.state = evaluateState(breaker);
   const now = new Date().toISOString();
@@ -166,10 +166,11 @@ export async function recordSuccess(
 export async function recordFailure(
   store: WebhookCircuitBreakerStore,
   webhookId: string,
-  errorMessage?: string
+  errorMessage?: string,
+  config?: Partial<WebhookCircuitBreakerConfig>
 ): Promise<WebhookCircuitBreaker> {
   let breaker = (await store.get(webhookId)) ?? getDefaultBreaker(webhookId);
-  breaker = { ...breaker };
+  breaker = { ...breaker, config: { ...breaker.config, ...config } };
 
   breaker.state = evaluateState(breaker);
   const now = new Date();
@@ -242,7 +243,6 @@ export async function executeWithCircuitBreaker<T>(
     throw new CircuitBreakerOpenError(webhookId, breaker.config.timeoutMs);
   }
 
-  const start = Date.now();
   try {
     const result = await fn();
     await recordSuccess(store, webhookId);

@@ -5,7 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { createLogger } from "@delegolabs/utils";
-import { getRedisClient } from "../gateway/src/rateLimit/redisClient.js";
+import { getRedisClient } from "../../gateway/src/rateLimit/redisClient.js";
 import type { ScriptDeployment, ScriptMetrics } from "@delegolabs/types";
 import { getScript, getCurrentVersion, getScriptRegistry, rollbackScript } from "./registry.js";
 
@@ -166,7 +166,6 @@ function updateMetrics(name: string, version: string, durationMs: number, succes
 }
 
 export function getScriptMetrics(name: string, version?: string): ScriptMetrics[] {
-  const prefix = version ? `${name}:${version}` : name;
   return Array.from(metrics.values()).filter(
     (m) => m.scriptName === name && (!version || m.version === version)
   );

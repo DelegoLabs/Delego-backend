@@ -149,9 +149,9 @@ export {
   type SecurityEventType,
   type SecurityEventSeverity,
   type SecurityEvent,
-  type FileUploadValidationInput,
   type ValidationErrorList,
 } from "./securityEventDetection.js";
+export { requireAuth } from "./auth.js";
 export {
   generateApiKey,
   verifyApiKey,
@@ -201,3 +201,5 @@ export {
   type LogMetrics,
   type RetentionValidationResult,
 } from "./logAggregation.js";
+export * from "./softDelete/index.js";
+export * from "./audit/index.js";

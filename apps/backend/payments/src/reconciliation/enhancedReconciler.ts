@@ -7,8 +7,8 @@
 
 import { createLogger } from "@delegolabs/utils";
 import { Pool } from "pg";
-import { matchBatch, type FieldMatchResult } from "./realTimeMatcher.js";
-import { evaluateRules, DEFAULT_RULES, type RuleAction } from "./reconciliationRules.js";
+import { matchBatch } from "./realTimeMatcher.js";
+import { evaluateRules, DEFAULT_RULES } from "./reconciliationRules.js";
 import { SLATracker, DEFAULT_SLAS } from "./slaMonitor.js";
 import type {
   SettlementRecord,

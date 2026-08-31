@@ -35,7 +35,6 @@
  */
 
 import { createLogger } from "@delegolabs/utils";
-import { randomUUID } from "crypto";
 import {
   insertWorkflowTransitionAudit,
 } from "../../state/workflow-transition-audit.js";
@@ -165,6 +164,62 @@ export async function retryWithLeaseBudget<T>(
 }
 
 // ─── Default compensation steps for the purchase saga ────────────────────────
+
+/**
+ * Builds the default compensation steps for the purchase saga: undo fundEscrow
+ * by releasing escrow, undo confirmPurchase by cancelling the merchant order
+ * (soft-skip when no merchant service is configured), and undo settleEscrow by
+ * refunding the buyer. See the module docstring for the idempotency contract.
+ */
+export function createDefaultPurchaseCompensationSteps(
+  deps: CompensationDependencies
+): CompensationStep[] {
+  const { paymentsClient, merchantClient } = deps;
+
+  return [
+    {
+      name: "fundEscrow",
+      async compensate(context) {
+        // Nothing was funded — nothing to release.
+        if (!context.escrowContractId) return context;
+        const outcome = await paymentsClient.release(context.workflowId);
+        if (outcome.status === "failed") {
+          throw new Error(outcome.reason ?? "Escrow release failed");
+        }
+        return { ...context, escrowContractId: null };
+      },
+    },
+    {
+      name: "confirmPurchase",
+      async compensate(context) {
+        try {
+          const outcome = await merchantClient.cancel(context.workflowId, "system_error");
+          if (outcome.status === "failed") {
+            throw new Error(outcome.reason ?? "Merchant cancellation failed");
+          }
+        } catch (err) {
+          // No merchant service wired up — soft-skip rather than failing the
+          // whole compensation run (escrow funds are still recovered).
+          if (err instanceof Error && /not configured/i.test(err.message)) {
+            return context;
+          }
+          throw err;
+        }
+        return context;
+      },
+    },
+    {
+      name: "settleEscrow",
+      async compensate(context) {
+        const outcome = await paymentsClient.refund(context.workflowId, "system_error");
+        if (outcome.status === "failed") {
+          throw new Error(outcome.reason ?? "Escrow refund failed");
+        }
+        return context;
+      },
+    },
+  ];
+}
 
 /**
  * Default steps used when runCompensation() isn't given an explicit `allSteps`
@@ -320,12 +375,20 @@ export async function runCompensation(
       const dlqEntry: SagaRecord = {
         sagaId: workflowId,
         orderId: workflowId,
+        workflowType: "purchase",
         status: "failed",
-        completedSteps: compensatedSteps,
+        completedSteps: compensatedSteps.map((step) => ({
+          stepName: step,
+          status: "compensated" as const,
+          output: {},
+          completedAt: new Date().toISOString(),
+        })),
         context: currentContext as unknown as Record<string, unknown>,
         currentStep: stuckStep?.step ?? null,
-        error: stuckStep?.error ?? cause.message,
         version: 0,
+        correlationId: "",
+        error: stuckStep?.error ?? cause.message,
+        expiresAt: null,
         claimExpiresAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),

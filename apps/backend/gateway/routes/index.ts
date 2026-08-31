@@ -22,8 +22,10 @@ import {
 } from "./delegations.js";
 import { getWalletHandler } from "./wallets.js";
 import { rateLimitMetricsHandler, circuitBreakerStatusHandler } from "./admin.js";
+import { auditLogQueryHandler, auditLogVerifyHandler } from "./audit.js";
 import { swaggerHandler } from "../src/swagger.js";
 import { logSearchHandler, logStatsHandler, logClearHandler } from "../src/logging/routes.js";
+import { raspMetricsHandler, raspEventsHandler, raspSimulationHandler, raspFalsePositiveHandler } from "./rasp.js";
 import {
   createApiKeyHandler,
   listApiKeysHandler,
@@ -42,7 +44,7 @@ import {
   rollbackScriptHandler,
   getScriptMetricsHandler,
   deleteScriptHandler,
-} from "../lua-scripts/src/routes.js";
+} from "../../lua-scripts/src/routes.js";
 import {
   createScheduleHandler,
   listSchedulesHandler,
@@ -63,7 +65,7 @@ import {
   listChannelsHandler,
   sendNotificationHandler,
   monitoringDashboardHandler,
-} from "../monitoring/src/routes.js";
+} from "../../monitoring/src/routes.js";
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
@@ -89,12 +91,19 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/wallets/:walletId", getWalletHandler),
     // Admin — rate-limit dashboard (#340)
     route("GET", "/api/v1/admin/rate-limit/metrics", rateLimitMetricsHandler),
+    // Admin — tiered token-bucket rate-limit metrics (#51)
+    route("GET", "/api/v1/admin/rate-limit/tiered-metrics", tieredRateLimitMetricsHandler),
     // Admin — circuit breaker status (#364)
     route("GET", "/api/v1/admin/circuit-breakers", circuitBreakerStatusHandler),
     // Request/response logging (#151)
     route("GET", "/api/v1/admin/logs", logSearchHandler),
     route("GET", "/api/v1/admin/logs/stats", logStatsHandler),
     route("DELETE", "/api/v1/admin/logs", logClearHandler),
+    // Runtime application self-protection telemetry and simulation (#160)
+    route("GET", "/api/v1/admin/rasp/metrics", raspMetricsHandler),
+    route("GET", "/api/v1/admin/rasp/events", raspEventsHandler),
+    route("POST", "/api/v1/admin/rasp/simulate", raspSimulationHandler),
+    route("POST", "/api/v1/admin/rasp/false-positive", raspFalsePositiveHandler),
     // API key scoping (#152)
     route("POST", "/api/v1/api-keys", createApiKeyHandler),
     route("GET", "/api/v1/api-keys", listApiKeysHandler),
@@ -132,6 +141,9 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/monitoring/channels", listChannelsHandler),
     route("POST", "/api/v1/monitoring/notifications/send", sendNotificationHandler),
     route("GET", "/api/v1/monitoring/dashboard", monitoringDashboardHandler),
+    // Admin — audit log query API (#66)
+    route("GET", "/api/v1/admin/audit-log", auditLogQueryHandler),
+    route("GET", "/api/v1/admin/audit-log/verify", auditLogVerifyHandler),
     // Swagger UI (#352)
     route("GET", "/api/docs", swaggerHandler),
     route("GET", "/api/docs/openapi.json", swaggerHandler),

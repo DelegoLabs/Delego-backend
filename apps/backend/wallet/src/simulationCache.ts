@@ -14,7 +14,6 @@
  */
 
 import { createHash } from "node:crypto";
-import type { Transaction } from "@stellar/stellar-sdk";
 import { Redis } from "ioredis";
 // @ts-ignore
 import MockRedis from "ioredis-mock";
@@ -63,8 +62,6 @@ export interface SimulationCacheMetrics {
 const CACHE_KEY_PREFIX = "sim:cache:";
 const CACHE_INDEX_KEY = "sim:cache:index";
 const DEDUP_KEY_PREFIX = "sim:dedup:";
-const METRICS_KEY = "sim:cache:metrics";
-const WARMUP_KEY_PREFIX = "sim:warmup:";
 const CONTRACT_VERSION_KEY_PREFIX = "sim:contract_version:";
 
 const DEFAULT_CONFIG: SimulationCacheConfig = {
@@ -254,19 +251,6 @@ function setInLocal(key: string, entry: SimulationCacheEntry): void {
 // ---------------------------------------------------------------------------
 // Deduplication
 // ---------------------------------------------------------------------------
-
-async function checkDeduplication(dedupKey: string): Promise<any | null> {
-  if (!redisClient || !config.sharedCacheEnabled) return null;
-
-  try {
-    const existing = await redisClient.get(`${DEDUP_KEY_PREFIX}${dedupKey}`);
-    if (existing) {
-      localMetrics.deduplicated++;
-      return JSON.parse(existing);
-    }
-  } catch {}
-  return null;
-}
 
 async function setDeduplication(dedupKey: string, result: any): Promise<void> {
   if (!redisClient || !config.sharedCacheEnabled) return;
@@ -536,7 +520,7 @@ export async function setContractVersion(
   if (r && config.sharedCacheEnabled) {
     await r.set(`${CONTRACT_VERSION_KEY_PREFIX}${contractId}`, version);
   }
-  await invalidateContractCache(contractId, r);
+  await invalidateContractCache(contractId, r ?? undefined);
 }
 
 export async function getContractVersion(

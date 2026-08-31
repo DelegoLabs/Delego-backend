@@ -79,7 +79,7 @@ export function resetCompensationOutcomeStore(): void {
  * outcome with the latest attempt and increments `attempts`.
  *
  * Backed by `workflow_compensation_outcomes`
- * (see database/migrations/018_workflow_compensation_outcomes.sql).
+ * (see database/migrations/020_workflow_compensation_outcomes.sql).
  */
 export async function upsertCompensationOutcome(
   input: UpsertCompensationOutcomeInput

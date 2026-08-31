@@ -45,7 +45,7 @@ describe("webhook circuit breaker", () => {
 
     it("opens circuit when failure threshold is reached", async () => {
       for (let i = 0; i < 3; i++) {
-        await recordFailure(store, "wh-1");
+        await recordFailure(store, "wh-1", undefined, makeConfig());
       }
       const breaker = (await store.get("wh-1"))!;
       expect(breaker.state).toBe("open");
@@ -56,14 +56,14 @@ describe("webhook circuit breaker", () => {
     it("re-opens from half_open on failure", async () => {
       const cfg = makeConfig({ failureThreshold: 2, timeoutMs: 1 });
       // Open the circuit
-      await recordFailure(store, "wh-1");
-      await recordFailure(store, "wh-1");
+      await recordFailure(store, "wh-1", undefined, cfg);
+      await recordFailure(store, "wh-1", undefined, cfg);
       // Wait for cooldown
       await new Promise((r) => setTimeout(r, 5));
       // Transition to half_open
       await getState(store, "wh-1");
       // Fail in half_open
-      await recordFailure(store, "wh-1", "still broken");
+      await recordFailure(store, "wh-1", "still broken", cfg);
       const breaker = (await store.get("wh-1"))!;
       expect(breaker.state).toBe("open");
     });
@@ -79,9 +79,9 @@ describe("webhook circuit breaker", () => {
     });
 
     it("closes circuit after success threshold in half_open", async () => {
-      const cfg = makeConfig({ failureThreshold: 1, successThreshold: 2 });
+      const cfg = makeConfig({ failureThreshold: 1, successThreshold: 2, timeoutMs: 1 });
       // Open circuit
-      await recordFailure(store, "wh-1");
+      await recordFailure(store, "wh-1", undefined, cfg);
       const b = (await store.get("wh-1"))!;
       expect(b.state).toBe("open");
 
@@ -92,8 +92,8 @@ describe("webhook circuit breaker", () => {
       await getState(store, "wh-1");
 
       // Record enough successes to close
-      await recordSuccess(store, "wh-1");
-      const finalBreaker = await recordSuccess(store, "wh-1");
+      await recordSuccess(store, "wh-1", cfg);
+      const finalBreaker = await recordSuccess(store, "wh-1", cfg);
       expect(finalBreaker.state).toBe("closed");
       expect(finalBreaker.failureCount).toBe(0);
     });
@@ -106,15 +106,16 @@ describe("webhook circuit breaker", () => {
     });
 
     it("transitions open → half_open after cooldown", async () => {
-      await recordFailure(store, "wh-1");
-      await recordFailure(store, "wh-1");
-      await recordFailure(store, "wh-1");
+      const cfg = makeConfig({ timeoutMs: 50 });
+      await recordFailure(store, "wh-1", undefined, cfg);
+      await recordFailure(store, "wh-1", undefined, cfg);
+      await recordFailure(store, "wh-1", undefined, cfg);
       // Open
       let state = await getState(store, "wh-1");
       expect(state).toBe("open");
 
       // Wait for cooldown
-      await new Promise((r) => setTimeout(r, 5));
+      await new Promise((r) => setTimeout(r, 60));
       state = await getState(store, "wh-1");
       expect(state).toBe("half_open");
     });
@@ -128,7 +129,7 @@ describe("webhook circuit breaker", () => {
 
     it("throws CircuitBreakerOpenError when circuit is open", async () => {
       for (let i = 0; i < 3; i++) {
-        await recordFailure(store, "wh-1");
+        await recordFailure(store, "wh-1", undefined, makeConfig());
       }
       await expect(
         executeWithCircuitBreaker(store, "wh-1", async () => "ok")

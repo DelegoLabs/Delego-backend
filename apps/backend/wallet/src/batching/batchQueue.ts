@@ -112,7 +112,7 @@ function calculateDynamicBatchSize(
   let accumulatedGas = 0n;
   let count = 0;
 
-  for (const item of items) {
+  for (const _item of items) {
     const opGas = BigInt(DEFAULT_OP_GAS_STROOPS);
     accumulatedGas += opGas;
     if (accumulatedGas > maxGas) break;
@@ -403,10 +403,7 @@ export async function submitBatch(
   // Dynamic batch sizing based on gas limits
   const effectiveBatchSize = calculateDynamicBatchSize(transactions, maxGasStroops);
   if (transactions.length > MAX_BATCH_SIZE) {
-    log.warn("Batch size exceeds maximum, truncating", {
-      requested: transactions.length,
-      max: MAX_BATCH_SIZE,
-    });
+    throw new Error(`Batch size exceeds maximum of ${MAX_BATCH_SIZE}`);
   }
 
   for (const tx of transactions) {

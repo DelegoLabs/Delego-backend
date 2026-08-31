@@ -94,7 +94,7 @@ export class SorobanTransactionSimulator {
     transaction: Transaction
   ): Promise<SimulateTransactionResponse> {
     // Extract contract/method info from transaction for cache key
-    const ops = transaction.operations;
+    const ops = transaction.operations ?? [];
     let contractId = "";
     let method = "";
     let args: unknown[] = [];

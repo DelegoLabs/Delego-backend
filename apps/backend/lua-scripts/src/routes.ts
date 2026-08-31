@@ -7,9 +7,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { json } from "@delegolabs/utils";
 import { extractAuth, getAuthenticatedUserContext } from "../../gateway/middleware/auth.js";
 import { unauthorized, forbidden, badRequest, notFound, sendApiError } from "../../gateway/src/errors.js";
-import { registerScript, getScript, listScripts, getScriptRegistry, rollbackScript, deleteScript } from "./registry.js";
+import { registerScript, getScript, listScripts, getScriptRegistry, deleteScript } from "./registry.js";
 import { runTestSuite, validateScriptSyntax, generateTestReport } from "./testing.js";
-import { deployScript, rollbackDeployment, getDeployment, listDeployments, getScriptMetrics } from "./deployment.js";
+import { deployScript, rollbackDeployment, getScriptMetrics } from "./deployment.js";
 import type { LuaScript } from "@delegolabs/types";
 
 function isAdmin(req: IncomingMessage): boolean {

@@ -1,7 +1,19 @@
-import { createLogger, type Logger } from "@delegolabs/utils";
-import { SagaConcurrencyError, type SagaRecord, type SagaStep, type SagaStore } from "./types.js";
+import { createLogger, generateId, type Logger } from "@delegolabs/utils";
+import {
+  SagaConcurrencyError,
+  type CompletedStep,
+  type SagaEvent,
+  type SagaRecord,
+  type SagaRecoveryDetail,
+  type SagaRecoveryResult,
+  type SagaStep,
+  type SagaStore,
+  type SagaWorkflowType,
+} from "./types.js";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
+/** Saga-level deadline — a running/compensating saga older than this is auto-compensated on recovery. */
+const DEFAULT_SAGA_TIMEOUT_MS = 5 * 60_000;
 
 export interface SagaCoordinatorOptions<TContext> {
   /** Saga steps in the order they should execute. Compensations run in reverse order. */
@@ -10,6 +22,14 @@ export interface SagaCoordinatorOptions<TContext> {
   log?: Logger;
   /** How long a step claim is honored before another runner may safely reclaim it. */
   claimLeaseMs?: number;
+  /** Saga-level deadline used to detect sagas that must be auto-recovered/compensated. */
+  sagaTimeoutMs?: number;
+}
+
+export interface RunOptions {
+  workflowType?: SagaWorkflowType;
+  /** Distributed-tracing correlation id. Generated when not supplied. */
+  correlationId?: string;
 }
 
 /**
@@ -24,6 +44,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
   private readonly store: SagaStore;
   private readonly log: Logger;
   private readonly claimLeaseMs: number;
+  private readonly sagaTimeoutMs: number;
 
   constructor(options: SagaCoordinatorOptions<TContext>) {
     if (options.steps.length === 0) {
@@ -45,30 +66,45 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
       throw new Error("claimLeaseMs must be a positive safe integer");
     }
     this.claimLeaseMs = claimLeaseMs;
+    this.sagaTimeoutMs = options.sagaTimeoutMs ?? DEFAULT_SAGA_TIMEOUT_MS;
+    if (!Number.isSafeInteger(this.sagaTimeoutMs) || this.sagaTimeoutMs <= 0) {
+      throw new Error("sagaTimeoutMs must be a positive safe integer");
+    }
   }
 
   /** Starts a new saga, or resumes it if sagaId was already started (idempotent). */
-  async run(sagaId: string, orderId: string, initialContext: TContext): Promise<SagaRecord<TContext>> {
+  async run(
+    sagaId: string,
+    orderId: string,
+    initialContext: TContext,
+    options: RunOptions = {}
+  ): Promise<SagaRecord<TContext>> {
     const now = new Date();
-    const record = await this.store.createIfNotExists({
+    const correlationId = options.correlationId ?? generateId();
+    const created = await this.store.create({
       sagaId,
       orderId,
+      workflowType: options.workflowType ?? "checkout",
       status: "running",
+      currentStep: this.stepOrder[0] ?? null,
       completedSteps: [],
       context: initialContext,
-      currentStep: this.stepOrder[0] ?? null,
-      error: null,
       version: 0,
+      correlationId,
+      error: null,
+      expiresAt: this.sagaTimeoutMs > 0 ? new Date(now.getTime() + this.sagaTimeoutMs) : null,
       claimExpiresAt: null,
       createdAt: now,
       updatedAt: now,
     });
-    // createIfNotExists() can return a previously completed/failed record — treat both as
+    const record = created as SagaRecord<TContext>;
+    await this.recordEvent(record, "saga_started", null, "running", { orderId });
+    // create() can return a previously completed/failed record — treat both as
     // terminal so a retried run() never restarts a saga that already finished.
-    if (record.status === "completed" || record.status === "failed") {
-      return record as SagaRecord<TContext>;
+    if (record.status === "completed" || record.status === "compensated" || record.status === "failed") {
+      return record;
     }
-    return this.advance(record as SagaRecord<TContext>);
+    return this.advance(record);
   }
 
   /** Continues a previously started saga from its persisted state — used for crash recovery and manual retries. */
@@ -77,40 +113,80 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
     if (!record) {
       throw new Error(`Saga not found: ${sagaId}`);
     }
-    if (record.status === "completed" || record.status === "failed") {
+    if (record.status === "completed" || record.status === "compensated" || record.status === "failed") {
       return record as SagaRecord<TContext>;
     }
     return this.advance(record as SagaRecord<TContext>);
   }
 
-  /** Resumes every saga left in "running" or "compensating" — call once at startup. */
-  async recoverAll(): Promise<void> {
+  /**
+   * Resumes every saga left in "running" or "compensating" (and compensates any that have
+   * timed out) — call once at startup. Returns a structured result describing what recovery did
+   * so the service can report it without blocking new requests.
+   */
+  async recoverAll(): Promise<SagaRecoveryResult> {
     const incomplete = await this.store.listIncomplete();
+    const details: SagaRecoveryDetail[] = [];
+    let recovered = 0;
+    let failed = 0;
+
     for (const record of incomplete) {
-      this.log.warn("Recovering incomplete saga after restart", {
-        sagaId: record.sagaId,
-        status: record.status,
-      });
-      await this.recoverOne(record.sagaId);
+      const result = await this.recoverOne(record.sagaId);
+      if (result) {
+        details.push(result);
+        if (result.action === "marked_failed") failed++;
+        else recovered++;
+      }
     }
+
+    return { recovered, failed, details };
   }
 
-  private async recoverOne(sagaId: string): Promise<void> {
+  private async recoverOne(sagaId: string): Promise<SagaRecoveryDetail | null> {
     try {
+      const fetched = await this.store.get(sagaId);
+      if (!fetched) return null;
+      const latest = fetched as SagaRecord<TContext>;
+
+      // Saga-level timeout: a running/compensating saga past its deadline is auto-compensated.
+      if (latest.expiresAt && latest.expiresAt.getTime() <= Date.now()) {
+        this.log.warn("Saga exceeded its deadline — auto-compensating on recovery", {
+          sagaId,
+          expiresAt: latest.expiresAt.toISOString(),
+        });
+        await this.recordEvent(latest, "saga_timed_out", latest.status, "timed_out", {});
+        const timedOut = await this.save({
+          ...latest,
+          status: "timed_out",
+          error: latest.error ?? "Saga exceeded its deadline",
+          claimExpiresAt: null,
+          updatedAt: new Date(),
+        });
+        try {
+          const compensated = await this.compensate(timedOut, new Error("Saga exceeded its deadline"));
+          return {
+            sagaId,
+            action: compensated.status === "compensated" ? "compensated" : "marked_failed",
+            reason: "Saga exceeded its timeout deadline and was auto-compensated",
+          };
+        } catch {
+          return { sagaId, action: "marked_failed", reason: "Saga timed out and compensation failed" };
+        }
+      }
+
       const result = await this.resume(sagaId);
       this.scheduleRetryIfLeased(result);
-      // resume() backs off with the pre-claim record on a lost SagaConcurrencyError race, which
-      // may not carry the winner's claimExpiresAt — re-read the store so the retry is scheduled
-      // against the lease that's actually live, not a stale snapshot that looks lease-free.
       if ((result.status === "running" || result.status === "compensating") && !result.claimExpiresAt) {
-        const latest = await this.store.get(sagaId);
-        if (latest) this.scheduleRetryIfLeased(latest as SagaRecord<TContext>);
+        const fresh = await this.store.get(sagaId);
+        if (fresh) this.scheduleRetryIfLeased(fresh as SagaRecord<TContext>);
       }
+      return { sagaId, action: "resumed", reason: `Recovered in status ${result.status}` };
     } catch (err) {
       this.log.error("Saga recovery failed", {
         sagaId,
         error: err instanceof Error ? err.message : String(err),
       });
+      return { sagaId, action: "marked_failed", reason: err instanceof Error ? err.message : "Recovery failed" };
     }
   }
 
@@ -131,13 +207,39 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
     }, delayMs + 50);
   }
 
+  /**
+   * Background sweeper that detects and auto-recovers timed-out sagas while the service is
+   * running, so a crash that leaves a saga mid-flight is healed within `intervalMs` rather than
+   * only on the next restart. Returns a handle whose stop() clears the timer.
+   */
+  startTimeoutSweeper(intervalMs: number = this.sagaTimeoutMs): { stop: () => void } {
+    const timer = setInterval(async () => {
+      try {
+        const timedOut = await this.store.listTimedOut();
+        for (const record of timedOut) {
+          await this.recoverOne(record.sagaId);
+        }
+      } catch (err) {
+        this.log.error("Saga timeout sweep failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }, intervalMs);
+    // Don't keep the process alive solely for the sweeper.
+    if (typeof timer.unref === "function") timer.unref();
+    return {
+      stop: () => clearInterval(timer),
+    };
+  }
+
   private async advance(record: SagaRecord<TContext>): Promise<SagaRecord<TContext>> {
-    if (record.status === "compensating") {
+    if (record.status === "compensating" || record.status === "timed_out") {
       return this.compensate(record, new Error(record.error ?? "Saga failed"));
     }
 
     let current = record;
-    const remaining = this.stepOrder.filter((name) => !current.completedSteps.includes(name));
+    const completedNames = new Set(current.completedSteps.map((step) => step.stepName));
+    const remaining = this.stepOrder.filter((name) => !completedNames.has(name));
 
     for (const stepName of remaining) {
       const step = this.steps.get(stepName);
@@ -151,7 +253,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
 
       let context: TContext;
       try {
-        context = await step.action(current.context);
+        context = await this.executeWithRetry(step, current.context);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         this.log.error("Saga step failed, starting compensation", {
@@ -166,67 +268,124 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
           claimExpiresAt: null,
           updatedAt: new Date(),
         });
+        await this.recordEvent(current, "step_failed", "running", "compensating", { step: stepName, error: error.message });
         return this.compensate(current, error);
       }
 
-      // A failure here is a persistence problem, not a step failure — the action already
-      // succeeded, so this must bubble up for recovery/retry rather than trigger compensation.
+      const completedStep: CompletedStep = {
+        stepName,
+        status: "completed",
+        output: context as Record<string, unknown>,
+        completedAt: new Date().toISOString(),
+        compensationAction: step.name,
+      };
       current = await this.save({
         ...current,
         context,
-        completedSteps: [...current.completedSteps, stepName],
+        completedSteps: [...current.completedSteps, completedStep],
+        currentStep: this.stepOrder[this.stepOrder.indexOf(stepName) + 1] ?? null,
         claimExpiresAt: null,
         updatedAt: new Date(),
       });
+      await this.recordEvent(current, "step_completed", "running", "running", { step: stepName });
     }
 
-    return this.save({ ...current, status: "completed", currentStep: null, claimExpiresAt: null, updatedAt: new Date() });
+    const completed = await this.save({
+      ...current,
+      status: "completed",
+      currentStep: null,
+      claimExpiresAt: null,
+      updatedAt: new Date(),
+    });
+    await this.recordEvent(completed, "saga_completed", "running", "completed", {});
+    return completed;
   }
 
-  private async compensate(record: SagaRecord<TContext>, error: Error): Promise<SagaRecord<TContext>> {
+  /**
+   * Executes a step, honoring its optional retry policy. A failure whose message matches one of
+   * `retryableErrors` is retried with `backoffMs` delays up to `maxAttempts` times; any other
+   * failure (or exhaustion of attempts) propagates so compensation can begin.
+   */
+  private async executeWithRetry(step: SagaStep<TContext>, context: TContext): Promise<TContext> {
+    const policy = step.retryPolicy;
+    const maxAttempts = policy?.maxAttempts ?? 1;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await step.execute(context);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        lastError = error;
+        const retryable = policy?.retryableErrors.some((pattern) => error.message.includes(pattern)) ?? false;
+        if (!retryable || attempt === maxAttempts) break;
+        this.log.warn("Saga step failed, retrying", {
+          step: step.name,
+          attempt,
+          error: error.message,
+        });
+        await new Promise((resolve) => setTimeout(resolve, policy?.backoffMs ?? 0));
+      }
+    }
+
+    throw lastError ?? new Error(`Saga step ${step.name} failed`);
+  }
+
+  private async compensate(record: SagaRecord<TContext>, _error: Error): Promise<SagaRecord<TContext>> {
     let current = record;
     const toCompensate = [...current.completedSteps].reverse();
 
-    for (const stepName of toCompensate) {
-      const step = this.steps.get(stepName);
+    for (const completedStep of toCompensate) {
+      const step = this.steps.get(completedStep.stepName);
       if (!step) {
-        // A completed step with no registered handler means its side effect can never be
-        // compensated — that's a saga integrity error, not something to paper over.
-        const missingStep = new Error(`Unknown saga step during compensation: ${stepName}`);
+        const missingStep = new Error(`Unknown saga step during compensation: ${completedStep.stepName}`);
         await this.save({ ...current, error: missingStep.message, updatedAt: new Date() });
         throw missingStep;
       }
 
-      const claimed = await this.claimStep(current, stepName);
+      const claimed = await this.claimStep(current, completedStep.stepName);
       if (!claimed) return current;
       current = claimed;
 
-      let context: TContext;
       try {
-        context = await step.compensation(current.context, error);
+        const context = await step.compensate(current.context, completedStep.output);
+        const updatedStep: CompletedStep = {
+          ...completedStep,
+          status: "compensated",
+        };
+        current = await this.save({
+          ...current,
+          context,
+          completedSteps: current.completedSteps.map((stepEntry) =>
+            stepEntry.stepName === completedStep.stepName ? updatedStep : stepEntry
+          ),
+          claimExpiresAt: null,
+          updatedAt: new Date(),
+        });
+        await this.recordEvent(current, "step_compensated", "compensating", "compensating", {
+          step: completedStep.stepName,
+        });
       } catch (compErr) {
         const compensationError = compErr instanceof Error ? compErr : new Error(String(compErr));
         this.log.error("Compensation step failed — saga left in compensating state for retry", {
           sagaId: current.sagaId,
-          step: stepName,
+          step: completedStep.stepName,
           error: compensationError.message,
         });
-        // Release the lease so a subsequent resume()/recoverAll() doesn't have to wait out a
-        // lease held by a runner that has already given up on this step.
         await this.save({ ...current, claimExpiresAt: null, updatedAt: new Date() });
         throw compensationError;
       }
-
-      current = await this.save({
-        ...current,
-        context,
-        completedSteps: current.completedSteps.filter((name) => name !== stepName),
-        claimExpiresAt: null,
-        updatedAt: new Date(),
-      });
     }
 
-    return this.save({ ...current, status: "failed", currentStep: null, claimExpiresAt: null, updatedAt: new Date() });
+    const compensated = await this.save({
+      ...current,
+      status: "compensated",
+      currentStep: null,
+      claimExpiresAt: null,
+      updatedAt: new Date(),
+    });
+    await this.recordEvent(compensated, "saga_compensated", "compensating", "compensated", {});
+    return compensated;
   }
 
   /**
@@ -237,7 +396,11 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
    * lease (`claimExpiresAt`) closes that gap: a step already claimed by a live lease is refused.
    */
   private async claimStep(record: SagaRecord<TContext>, stepName: string): Promise<SagaRecord<TContext> | null> {
-    if (record.currentStep === stepName && record.claimExpiresAt && record.claimExpiresAt.getTime() > Date.now()) {
+    if (
+      record.currentStep === stepName &&
+      record.claimExpiresAt &&
+      record.claimExpiresAt.getTime() > Date.now()
+    ) {
       this.log.warn("Step already claimed by another runner under an active lease, backing off", {
         sagaId: record.sagaId,
         step: stepName,
@@ -261,6 +424,25 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
       }
       throw err;
     }
+  }
+
+  private async recordEvent(
+    record: SagaRecord<TContext>,
+    eventType: string,
+    fromStatus: SagaRecord["status"] | null,
+    toStatus: SagaRecord["status"] | null,
+    payload: Record<string, unknown>
+  ): Promise<void> {
+    const event: SagaEvent = {
+      sagaId: record.sagaId,
+      correlationId: record.correlationId,
+      eventType,
+      fromStatus,
+      toStatus,
+      payload,
+      createdAt: new Date(),
+    };
+    await this.store.appendEvent(event);
   }
 
   /** Saves a record of this coordinator's TContext — store.save() is typed generically. */

@@ -88,7 +88,7 @@ async function sendSlackNotification(
 
 async function sendEmailNotification(
   config: Record<string, unknown>,
-  message: string,
+  _message: string,
   title: string
 ): Promise<{ success: boolean; error?: string }> {
   const _to = config.to as string;

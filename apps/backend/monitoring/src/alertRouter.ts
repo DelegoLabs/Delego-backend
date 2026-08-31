@@ -63,19 +63,6 @@ function matchesMatcher(
   });
 }
 
-function isSilenced(alert: Alert): SilenceWindow | null {
-  const now = new Date();
-  for (const window of silenceWindows.values()) {
-    if (window.alertId && window.alertId !== alert.id) continue;
-    if (window.startsAt && now < new Date(window.startsAt)) continue;
-    if (window.endsAt && now > new Date(window.endsAt)) continue;
-    if (matchesMatcher(alert, window.matchers)) {
-      return window;
-    }
-  }
-  return null;
-}
-
 export function createRoute(route: AlertRoute): AlertRoute {
   routes.set(route.id, route);
   log.info("Alert route created", { id: route.id, name: route.name });
