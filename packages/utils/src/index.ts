@@ -29,6 +29,10 @@ export {
   type IsoDateParseResult,
   type ParseIsoDateOptions,
 } from "./parseIsoDate.js";
+export * from "./pactBroker.js";
+export * from "./k6Performance.js";
+export * from "./chaosEngine.js";
+export * from "./cicdManager.js";
 export {
   aggregateStatus,
   createHealthRoutes,
