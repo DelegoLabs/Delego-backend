@@ -76,3 +76,47 @@ rows and publishes to Redis, then marks them `published`.
 for Redis and contract-derived event consumers. Returns `true` on first delivery and
 `false` on duplicate message ids. Backed by `processed_messages`
 (`database/migrations/006_processed_messages.sql`).
+
+## Human task management
+
+`src/tasks/` implements human task management for workflows requiring manual approval,
+review, data entry, verification or exception handling:
+
+- **Lifecycle** — `created → assigned → claimed → in_progress → completed | rejected`,
+  with `escalated` / `expired` driven by the SLA engine.
+- **Routing** (`src/tasks/routing.ts`) — `round_robin`, `least_loaded`, `skill_based`,
+  `priority` and `specific_user` strategies resolved per workflow+task type via
+  `task_routing_rules`.
+- **SLA** (`src/tasks/sla.ts`) — tasks are escalated past their `dueAt`, then expired
+  after a configurable grace period. A background sweeper runs on a timer.
+- **Service** (`src/tasks/service.ts`) — assign, claim, start, complete, reject,
+  escalate, delegate, comments, attachments and bulk operations; completes validate
+  `formData` against a JSON Schema subset.
+- **Analytics** (`src/tasks/analytics.ts`) — cycle time, throughput and SLA breach rate
+  per assignee / task type.
+- **Real-time inbox** (`src/tasks/subscriptions.ts`) — publishes lifecycle events to
+  Redis channels (`human-task:*`) for live UI updates.
+
+Backed by `database/migrations/027_human_tasks.sql` (`human_tasks`,
+`task_routing_rules`, `task_comments`, `task_attachments`, `task_delegations`).
+
+### Environment variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TASK_SLA_SCAN_INTERVAL_MS` | `300000` | SLA sweeper interval (ms); `0` disables the background loop |
+| `TASK_SLA_GRACE_HOURS` | `24` | Escalation grace period before a breached task expires |
+| `ENABLE_TASK_EVENTS` | `true` | Set `false` to disable Redis real-time inbox events |
+| `TASK_MAX_REQUEST_BODY_BYTES` | `1048576` | Max request body size for task endpoints |
+
+### HTTP endpoints
+
+- `POST /tasks` — create + route a task.
+- `GET /tasks` — list/inbox query (`?assignee=&status=&type=&priority=&workflowType=&mine=true`).
+- `GET /tasks/:id` — task detail with comments and attachments.
+- `POST /tasks/:id/assign|claim|start|complete|reject|escalate|delegate` — lifecycle ops.
+- `POST /tasks/:id/comments`, `POST /tasks/:id/attachments` (plus GET list).
+- `POST /tasks/bulk` — apply one operation to many task ids.
+- `GET/PUT /tasks/routing-rules` — manage routing rules.
+- `POST /tasks/sla/scan` — on-demand SLA escalation/expiry sweep.
+- `GET /tasks/analytics` — metrics for a period (`?start=&end=`).

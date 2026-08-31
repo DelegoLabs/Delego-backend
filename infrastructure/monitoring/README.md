@@ -63,6 +63,33 @@ Orchestrator lock metrics (`orchestrator_lock_*`) are appended on
 `GET /health/metrics`. Alert rule snippets live in
 [`orchestrator-lock-alerts.yml`](./orchestrator-lock-alerts.yml).
 
+## CDC Monitoring (Change Data Capture)
+
+The CDC service (`@delegolabs/cdc`) exposes a dedicated monitoring surface for
+real-time database synchronization:
+
+| Endpoint            | Purpose                                                              |
+| ------------------- | -------------------------------------------------------------------- |
+| `GET /cdc/dashboard`| HTML dashboard showing connector status, WAL lag, throughput, errors  |
+| `GET /api/v1/cdc/metrics` | JSON `CDCMetrics` snapshot (status, events, eps, lagMs, errors) |
+| `GET /metrics`      | Prometheus text metrics (`delego_cdc_*`)                             |
+| `GET /health`       | Standard health surface (this service)                               |
+
+Prometheus metrics exposed (`/metrics`):
+
+```
+delego_cdc_status{connector="logical_replication"} 1
+delego_cdc_events_processed 12345
+delego_cdc_events_per_second 42
+delego_cdc_lag_ms 360
+delego_cdc_errors 0
+```
+
+- **Lag** (`delego_cdc_lag_ms`) is the time since the source reported its latest
+  change — the key signal for "is CDC keeping up".
+- Historical snapshots persist to `cdc_metric_snapshots` so lag/throughput
+  history survives connector restarts.
+
 Planned:
 - Structured JSON logging (see `@delegolabs/utils` logger)
 - Grafana dashboards for the health metrics

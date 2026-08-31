@@ -57,6 +57,10 @@ The incremental migrations are:
 | `021_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
 | `022_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
 | `023_notification_preference_center.sql` | Notification preference center: org defaults, JSONB preference documents, and migration history (Issue #115) |
+| `026_time_series_optimization.sql` | Native time-series optimization: declarative range partitioning, BRIN acceleration, TOAST compression, retention enforcement, continuous aggregates, data tiering, partitioning automation, and a query benchmark for ts_metrics/ts_events/ts_audit_events |
+| `027_human_tasks.sql` | Human task management: `human_tasks`, `task_routing_rules`, `task_comments`, `task_attachments`, and `task_delegations` for workflow tasks requiring manual approval/intervention |
+| `028_workflow_templates.sql` | Workflow template registry: `workflow_templates` (versioned definitions), `template_instantiations` (audit trail), and `template_ratings` (marketplace ratings) |
+| `029_cdc.sql` | Change Data Capture: idempotent publication outbox (`cdc_published_events`), replication slot checkpoints (`cdc_replication_state`), publication registry (`cdc_publications`), schema-evolution versions (`cdc_schema_versions`), and metric snapshots (`cdc_metric_snapshots`) |
 
 ## Naming rules
 
