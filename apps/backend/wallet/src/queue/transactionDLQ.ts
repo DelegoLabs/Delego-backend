@@ -18,7 +18,7 @@ import { Redis } from "ioredis";
 import MockRedis from "ioredis-mock";
 import { createLogger } from "@delegolabs/utils";
 import type { TransactionRequest } from "@delegolabs/types";
-import { classifySubmissionFailure, type SubmissionFailure } from "./submissionFailure.js";
+import type { SubmissionFailure } from "./submissionFailure.js";
 
 const log = createLogger("wallet:dlq", process.env.LOG_LEVEL ?? "info");
 
@@ -76,7 +76,6 @@ export interface DLQAlert {
 
 const DLQ_KEY_PREFIX = "tx:dlq:";
 const DLQ_INDEX_KEY = "tx:dlq:index";
-const DLQ_METRICS_KEY = "tx:dlq:metrics";
 const DLQ_ALERTS_KEY = "tx:dlq:alerts";
 
 const DEFAULT_RETRY_POLICIES: RetryPolicy[] = [
@@ -438,8 +437,7 @@ export async function processAutoReplays(
   redis?: Redis
 ): Promise<{ replayed: number; failed: number; skipped: number }> {
   const r = redis ?? redisClient;
-  const retriable = await getRetriableEntries(r);
-
+  const retriable = await getRetriableEntries(r ?? undefined);
   let replayed = 0;
   let failed = 0;
   let skipped = 0;
@@ -451,9 +449,9 @@ export async function processAutoReplays(
     }
 
     try {
-      await markAsRetrying(entry.id, r);
+      await markAsRetrying(entry.id, r ?? undefined);
       const txHash = await replayFn(entry.request);
-      await markAsReplayed(entry.id, txHash, r);
+      await markAsReplayed(entry.id, txHash, r ?? undefined);
       replayed++;
 
       log.info("DLQ auto-replay succeeded", {
@@ -629,15 +627,15 @@ export async function manualReplay(
   redis?: Redis
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   const r = redis ?? redisClient;
-  const entry = await getDLQEntry(id, r);
+  const entry = await getDLQEntry(id, r ?? undefined);
   if (!entry) {
     return { success: false, error: "DLQ entry not found" };
   }
 
   try {
-    await markAsRetrying(id, r);
+    await markAsRetrying(id, r ?? undefined);
     const txHash = await replayFn(entry.request);
-    await markAsReplayed(id, txHash, r);
+    await markAsReplayed(id, txHash, r ?? undefined);
 
     return { success: true, txHash };
   } catch (err) {

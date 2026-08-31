@@ -15,6 +15,35 @@ export {
 } from "./i18n/index.js";
 export { renderLocalizedTemplate, type LocalizedTemplateResult } from "./i18n/localized-template.js";
 
+// Issue #116 — template localization system (ICU, fallback chains, RTL,
+// validation, locale detection, translation memory, translator workflow).
+export {
+  LocalizationManager,
+  localizationManager,
+  TemplateNotFoundError,
+  seedLocalizationManager,
+  buildLocalizedTemplate,
+  detectLocale,
+  parseAcceptLanguage,
+  resolveFallbackChain,
+  isRtlLocale,
+  getLocaleConfig,
+  formatIcu,
+  formatIcuMessage,
+  validateTemplate,
+  isTemplateValid,
+  TranslationWorkflow,
+  translationWorkflow,
+  TranslationMemory,
+  translationMemory,
+  LOCALE_CONFIGS,
+  LOCALE_COUNT,
+  type LocalizedTemplate,
+  type LocaleConfig,
+  type TranslationJob,
+  type ValidationResult,
+  type RenderedLocalizedTemplate,
+} from "./i18n/index.js";
 export interface ContractNotificationRoute {
   eventType: string;
   templateName: string;

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.750.0",
+    "@delegolabs/payments": "workspace:*",
     "@delegolabs/types": "workspace:*",
     "@delegolabs/utils": "workspace:*",
     "@stellar/stellar-sdk": "^16.0.0",

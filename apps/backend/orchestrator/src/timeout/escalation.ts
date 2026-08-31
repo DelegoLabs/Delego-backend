@@ -10,7 +10,6 @@
  *   6. Different timeout policies per workflow type
  */
 
-import { randomUUID } from "node:crypto";
 import { createLogger } from "@delegolabs/utils";
 
 const log = createLogger("orchestrator:timeout-escalation", process.env.LOG_LEVEL ?? "info");

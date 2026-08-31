@@ -70,7 +70,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: [lint, type-check]
 
     services:
@@ -111,7 +111,10 @@ jobs:
         run: pnpm --filter "./packages/*" --filter "./apps/backend/*" --filter "./agents" build
 
       - name: Run tests
-        run: pnpm test
+        # The integration suite (tests/integration) needs a migrated database and real
+        # services — it is exercised by the dedicated `migrations` and
+        # `test-integration` jobs, which apply migrations first.
+        run: pnpm -r --filter=!@delegolabs/tests-integration test
 
   migrations:
     name: Database Migrations
@@ -137,6 +140,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages and services
+        run: pnpm --filter "./packages/*" --filter "./apps/backend/*" --filter "./agents" build
 
       - name: Start clean PostgreSQL
         run: docker compose up -d --wait postgres

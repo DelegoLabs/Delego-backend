@@ -34,12 +34,32 @@ The incremental migrations are:
 | `013_soroban_transaction_ledger.sql` | Idempotent Soroban transaction ledger for submission, confirmation, and failure states |
 | `014_payment_records_dispute.sql` | Dispute transactions on payment_records for the escrow coordinator |
 | `015_oauth_providers.sql` | OAuth2 provider account linking |
+| `016_disputes.sql` | Partial refund balance tracking plus dispute mediation, evidence, audit log, and reputation tables (Issue #46) |
+| `017_subscriptions.sql` | Recurring payment subscription plans, subscriptions, and the per-period escrow charge ledger (Issue #47) |
 | `016_in_app_notifications.sql` | Durable in-app notifications and indexes (Issues #58/#60) |
+| `017_escrow_lock_metrics.sql` | Metrics tracking for escrow funding locks |
+| `018_scheduled_notifications.sql` | Durable storage for scheduled/recurring notifications (Issue #59) |
+| `019_service_event_outbox_relay.sql` | Retry/claim columns on `service_event_outbox` for the OutboxRelay worker (Issue #33) |
+| `020_workflow_compensation_outcomes.sql` | Escrow compensation outcome per workflow record (Issue #35) |
+| `021_workflow_timeout_analytics.sql` | Timeout analytics and escalation tracking (#145) |
+| `022_redis_pubsub_dead_letters.sql` | Dead letter queue for Redis Pub/Sub failed deliveries (#123) |
+| `023_transaction_dlq_and_monitoring.sql` | Transaction DLQ and monitoring tables (#143) |
+| `024_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
+| `025_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
+| `017_escrow_lock_metrics.sql` | Lock metrics tracking for escrow funding lock optimization (#147) |
+| `017_scheduled_notifications.sql` | Durable storage for scheduled/recurring notifications, so the scheduler survives restarts (Issue #59) |
 | `017_service_event_outbox_relay.sql` | Retry/claim columns on `service_event_outbox` for the OutboxRelay worker (Issue #33) |
 | `018_workflow_compensation_outcomes.sql` | Escrow compensation outcome per workflow record (Issue #35) |
-| `021_payment_method_vault.sql` | PCI DSS SAQ A-EP compliant payment method vault with network tokenization |
-| `022_account_recovery.sql` | Social recovery with guardians, emergency contacts, and time-delayed recovery |
-| `023_multi_currency.sql` | Multi-currency support with path payments, FX rates, and exposure tracking |
+| `018_workflow_timeout_analytics.sql` | Workflow timeout analytics |
+| `019_redis_pubsub_dead_letters.sql` | Dead letter queue for Redis Pub/Sub failed deliveries (#123) |
+| `020_transaction_dlq_and_monitoring.sql` | Transaction dead letter queue and monitoring (#143) |
+| `021_soft_delete.sql` | Soft-delete columns, registry, cascade relations, and metrics view for users/wallets/delegations/orders (Issue #67) |
+| `022_audit_log.sql` | Append-only, hash-chained audit log with DB-level immutability triggers, plus retention policy config (Issue #66) |
+| `023_notification_preference_center.sql` | Notification preference center: org defaults, JSONB preference documents, and migration history (Issue #115) |
+| `026_time_series_optimization.sql` | Native time-series optimization: declarative range partitioning, BRIN acceleration, TOAST compression, retention enforcement, continuous aggregates, data tiering, partitioning automation, and a query benchmark for ts_metrics/ts_events/ts_audit_events |
+| `027_human_tasks.sql` | Human task management: `human_tasks`, `task_routing_rules`, `task_comments`, `task_attachments`, and `task_delegations` for workflow tasks requiring manual approval/intervention |
+| `028_workflow_templates.sql` | Workflow template registry: `workflow_templates` (versioned definitions), `template_instantiations` (audit trail), and `template_ratings` (marketplace ratings) |
+| `029_cdc.sql` | Change Data Capture: idempotent publication outbox (`cdc_published_events`), replication slot checkpoints (`cdc_replication_state`), publication registry (`cdc_publications`), schema-evolution versions (`cdc_schema_versions`), and metric snapshots (`cdc_metric_snapshots`) |
 
 ## Naming rules
 

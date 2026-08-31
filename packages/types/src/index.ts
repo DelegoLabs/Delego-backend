@@ -34,3 +34,6 @@ export * from "./blueGreenSwitcher.js";
 export * from "./grpc.js";
 export * from "./cdn.js";
 export * from "./cdnValidation.js";
+export * from "./human-task.js";
+export * from "./workflow-template.js";
+export * from "./cdc.js";

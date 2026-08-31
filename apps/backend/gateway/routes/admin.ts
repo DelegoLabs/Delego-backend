@@ -17,6 +17,7 @@ import { json } from "@delegolabs/utils";
 import { extractAuth, getAuthenticatedUserContext } from "../middleware/auth.js";
 import { sendApiError, forbidden, unauthorized } from "../src/errors.js";
 import { aggregateRateLimitAnalytics } from "../src/rateLimit/analytics.js";
+import { getRateLimitMetrics } from "../src/rateLimit/tokenBucket/metrics.js";
 import { getAllCircuitBreakerStats } from "../src/circuitBreaker.js";
 
 /** Returns true when the authenticated user has the "admin" role. */
@@ -68,6 +69,47 @@ export async function rateLimitMetricsHandler(
     const message = err instanceof Error ? err.message : "Failed to fetch rate limit analytics";
     sendApiError(res, 500, "INTERNAL_ERROR", message, req);
   }
+}
+
+/**
+ * GET /api/v1/admin/rate-limit/tiered-metrics
+ *
+ * Issue #51 — Returns aggregate counters for the tiered token-bucket
+ * limiter (total/allowed/denied requests, utilization, top denied callers).
+ * Distinct from the legacy `/rate-limit/metrics` endpoint above, which
+ * reports the older fixed-window limiter's per-endpoint/per-user analytics.
+ *
+ * Query params:
+ *   topN  — number of top denied keys to include (1–100, default 10)
+ */
+export async function tieredRateLimitMetricsHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) {
+    unauthorized(res, "Authentication required", req);
+    return;
+  }
+
+  if (!isAdmin(req)) {
+    forbidden(res, "Admin role required", req);
+    return;
+  }
+
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const topNParam = url.searchParams.get("topN");
+  let topN = 10;
+  if (topNParam !== null) {
+    const parsed = parseInt(topNParam, 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 100) {
+      sendApiError(res, 400, "VALIDATION_ERROR", "topN must be an integer between 1 and 100", req);
+      return;
+    }
+    topN = parsed;
+  }
+
+  json(res, 200, { data: getRateLimitMetrics(topN), error: null });
 }
 
 /**

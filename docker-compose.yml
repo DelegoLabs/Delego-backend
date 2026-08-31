@@ -10,6 +10,17 @@ services:
       POSTGRES_USER: delego
       POSTGRES_PASSWORD: delego
       POSTGRES_DB: delego
+    # Logical replication settings required by the CDC service
+    # (@delegolabs/cdc). `wal_level=logical` must be set before the first
+    # start; changing it later requires recreating the volume.
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_wal_senders=10"
     ports:
       - "5432:5432"
     volumes:

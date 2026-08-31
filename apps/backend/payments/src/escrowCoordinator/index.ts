@@ -11,6 +11,7 @@ import {
   createPaymentRecord,
   findPaymentRecordByEscrowId,
   findPaymentRecordByOrderId,
+  incrementPaymentRecordAmounts,
   updatePaymentRecord,
 } from "./paymentRecordStore.js";
 import { publishPaymentStatusEvent } from "./redisEvents.js";
@@ -82,12 +83,23 @@ function mapRecordStatusToEscrowStatus(
   }
 }
 
+/** Escrow balance still available for release/refund: total - released - refunded. */
+function computeRemaining(record: PaymentRecord): bigint {
+  return (
+    BigInt(record.amountStroops) -
+    BigInt(record.releasedAmountStroops) -
+    BigInt(record.refundedAmountStroops)
+  );
+}
+
 async function emitStatusEvent(
   channel:
     | "payment:funded"
     | "payment:released"
     | "payment:refunded"
     | "payment:disputed"
+    | "payment:partial_released"
+    | "payment:partial_refunded"
     | "payment:failed",
   record: PaymentRecord,
   txHash?: string,
@@ -429,6 +441,183 @@ export const escrowCoordinator: EscrowCoordinator = {
     }
   },
 
+  // -------------------------------------------------------------------------
+  // Issue #46 — Partial refunds & dispute mediation
+  // -------------------------------------------------------------------------
+
+  async partialRefundEscrow(params: PartialRefundEscrowParams): Promise<PartialRefundResult> {
+    const record = await findPaymentRecordByEscrowId(params.escrowId);
+    if (!record) {
+      throw new Error(`Payment record not found for escrow ${params.escrowId}`);
+    }
+
+    const remaining = computeRemaining(record);
+    const requested = BigInt(params.amountStroops);
+    if (requested <= 0n || requested > remaining) {
+      throw new InsufficientEscrowBalanceError(params.escrowId, remaining.toString(), params.amountStroops);
+    }
+
+    await updatePaymentRecord(record.id, { failureReason: null });
+
+    try {
+      const tx = await submitContractInvocation({
+        sourceAddress: params.callerAddress,
+        contractId: params.escrowContractId,
+        method: "partial_refund",
+        args: [parseEscrowId(params.escrowId), params.callerAddress, params.amountStroops],
+        memo: `Partial refund escrow ${params.escrowId} (${params.reason})`,
+      });
+
+      if (!tx.success) {
+        const updated = await updatePaymentRecord(record.id, {
+          status: "failed",
+          failureReason: "Partial refund transaction failed on-chain",
+        });
+        await emitStatusEvent(
+          "payment:failed",
+          updated,
+          tx.hash,
+          `Partial refund transaction failed on-chain (${params.reason})`
+        );
+        return {
+          txHash: tx.hash,
+          ledger: tx.ledger,
+          status: "failed",
+          buyerAddress: record.buyerAddress,
+          refundedAmount: "0",
+          remainingAmount: remaining.toString(),
+        };
+      }
+
+      const newRemaining = remaining - requested;
+      const updated = await incrementPaymentRecordAmounts(record.id, {
+        refundedDelta: params.amountStroops,
+        // Only flip to the terminal "refunded" status once nothing is left and
+        // nothing was ever released — a mixed release+refund history is left
+        // as "disputed"/"funded" for the caller (dispute resolution) to finalize.
+        status: newRemaining === 0n && record.releasedAmountStroops === "0" ? "refunded" : undefined,
+      });
+      await emitStatusEvent("payment:partial_refunded", updated, tx.hash, params.reason);
+
+      return {
+        txHash: tx.hash,
+        ledger: tx.ledger,
+        status: "partial_refunded",
+        buyerAddress: record.buyerAddress,
+        refundedAmount: params.amountStroops,
+        remainingAmount: newRemaining.toString(),
+      };
+    } catch (err) {
+      if (err instanceof InsufficientEscrowBalanceError) throw err;
+      const message = err instanceof Error ? err.message : "Unknown partial refund error";
+      log.error("Escrow partial refund failed", { escrowId: params.escrowId, error: message });
+      const updated = await updatePaymentRecord(record.id, {
+        status: "failed",
+        failureReason: message,
+      });
+      await emitStatusEvent("payment:failed", updated, undefined, message);
+      return {
+        txHash: "",
+        ledger: 0,
+        status: "failed",
+        buyerAddress: record.buyerAddress,
+        refundedAmount: "0",
+        remainingAmount: remaining.toString(),
+      };
+    }
+  },
+
+  async partialReleaseEscrow(params: PartialReleaseEscrowParams): Promise<PartialReleaseResult> {
+    const record = await findPaymentRecordByEscrowId(params.escrowId);
+    if (!record) {
+      throw new Error(`Payment record not found for escrow ${params.escrowId}`);
+    }
+
+    const remaining = computeRemaining(record);
+    const requested = BigInt(params.amountStroops);
+    if (requested <= 0n || requested > remaining) {
+      throw new InsufficientEscrowBalanceError(params.escrowId, remaining.toString(), params.amountStroops);
+    }
+
+    await updatePaymentRecord(record.id, { failureReason: null });
+
+    try {
+      const tx = await submitContractInvocation({
+        sourceAddress: params.callerAddress,
+        contractId: params.escrowContractId,
+        method: "partial_release",
+        args: [parseEscrowId(params.escrowId), params.callerAddress, params.amountStroops],
+        memo: params.memo ?? `Partial release escrow ${params.escrowId}`,
+      });
+
+      if (!tx.success) {
+        const updated = await updatePaymentRecord(record.id, {
+          status: "failed",
+          failureReason: "Partial release transaction failed on-chain",
+        });
+        await emitStatusEvent("payment:failed", updated, tx.hash, "Partial release transaction failed on-chain");
+        return {
+          txHash: tx.hash,
+          ledger: tx.ledger,
+          status: "failed",
+          sellerAddress: record.sellerAddress,
+          releasedAmount: "0",
+          remainingAmount: remaining.toString(),
+        };
+      }
+
+      const newRemaining = remaining - requested;
+      const updated = await incrementPaymentRecordAmounts(record.id, {
+        releasedDelta: params.amountStroops,
+        status: newRemaining === 0n && record.refundedAmountStroops === "0" ? "released" : undefined,
+      });
+      await emitStatusEvent("payment:partial_released", updated, tx.hash);
+
+      return {
+        txHash: tx.hash,
+        ledger: tx.ledger,
+        status: "partial_released",
+        sellerAddress: record.sellerAddress,
+        releasedAmount: params.amountStroops,
+        remainingAmount: newRemaining.toString(),
+      };
+    } catch (err) {
+      if (err instanceof InsufficientEscrowBalanceError) throw err;
+      const message = err instanceof Error ? err.message : "Unknown partial release error";
+      log.error("Escrow partial release failed", { escrowId: params.escrowId, error: message });
+      const updated = await updatePaymentRecord(record.id, {
+        status: "failed",
+        failureReason: message,
+      });
+      await emitStatusEvent("payment:failed", updated, undefined, message);
+      return {
+        txHash: "",
+        ledger: 0,
+        status: "failed",
+        sellerAddress: record.sellerAddress,
+        releasedAmount: "0",
+        remainingAmount: remaining.toString(),
+      };
+    }
+  },
+
+  async getRemainingBalance(escrowId: string): Promise<RemainingBalance> {
+    const record = await findPaymentRecordByEscrowId(escrowId);
+    if (!record) {
+      throw new Error(`Payment record not found for escrow ${escrowId}`);
+    }
+    return {
+      escrowId,
+      orderId: record.orderId,
+      buyerAddress: record.buyerAddress,
+      sellerAddress: record.sellerAddress,
+      totalAmount: record.amountStroops,
+      releasedAmount: record.releasedAmountStroops,
+      refundedAmount: record.refundedAmountStroops,
+      remainingAmount: computeRemaining(record).toString(),
+    };
+  },
+
   async getEscrowStatus(escrowId: string): Promise<EscrowStatusResult> {
     const record = await findPaymentRecordByEscrowId(escrowId);
     if (record) {
@@ -464,15 +653,21 @@ export const escrowCoordinator: EscrowCoordinator = {
   },
 };
 
-export type {
-  DisputeEscrowParams,
-  DisputeResult,
-  EscrowCoordinator,
-  EscrowStatusResult,
-  FundEscrowParams,
-  FundEscrowResult,
-  RefundEscrowParams,
-  RefundResult,
-  ReleaseEscrowParams,
-  ReleaseResult,
+export {
+  InsufficientEscrowBalanceError,
+  type DisputeEscrowParams,
+  type DisputeResult,
+  type EscrowCoordinator,
+  type EscrowStatusResult,
+  type FundEscrowParams,
+  type FundEscrowResult,
+  type PartialReleaseEscrowParams,
+  type PartialReleaseResult,
+  type PartialRefundEscrowParams,
+  type PartialRefundResult,
+  type RefundEscrowParams,
+  type RefundResult,
+  type ReleaseEscrowParams,
+  type ReleaseResult,
+  type RemainingBalance,
 } from "./types.js";

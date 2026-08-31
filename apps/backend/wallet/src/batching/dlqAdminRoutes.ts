@@ -14,7 +14,7 @@
  * GET  /admin/dlq/retry-policies       – get retry policies
  * POST /admin/dlq/retry-policies       – update retry policies
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
 import { route, json, type Route } from "@delegolabs/utils";
 import {
   getDLQMetrics,
@@ -195,7 +195,7 @@ export function registerDLQAdminRoutes(): Route[] {
     }),
 
     // Trigger auto-replay for transient failures
-    route("POST", "/admin/dlq/auto-replay", async (req, res) => {
+    route("POST", "/admin/dlq/auto-replay", async (_req, res) => {
       try {
         const replayFn = async (request: TransactionRequest) => {
           const result = await addTransactionToQueue(request);

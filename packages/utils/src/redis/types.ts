@@ -90,6 +90,9 @@ export interface RedisPubSubConfig {
   enableMetrics: boolean;
 }
 
+/** Alias used by consumers of the Pub/Sub module. */
+export type PubSubConfig = RedisPubSubConfig;
+
 // ─── Health Check Types ─────────────────────────────────────────────────────
 
 export interface PubSubHealth {

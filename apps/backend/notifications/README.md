@@ -10,6 +10,46 @@ pnpm --filter @delegolabs/notifications dev
 
 Health check: `GET http://localhost:3015/health`
 
+## Notification Preference Center (Issue #115)
+
+Granular per-channel / per-category controls with frequency options, quiet hours (timezone-aware), org → user inheritance, and a migration tool.
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/preferences/:userId?orgId=<id>` | Effective preference (org defaults inherited where the user made no explicit choice) |
+| `PUT` | `/preferences/:userId` | Replace the user's preference document wholesale |
+| `PATCH` | `/preferences/:userId` | Apply a partial update (channels, categories, quiet hours, unsubscribe) |
+| `GET` | `/preferences/org/:orgId` | Org-level default preferences |
+| `PUT` | `/preferences/org/:orgId` | Set org-level default preferences |
+| `POST` | `/preferences/migrate` | Run the preference migration tool (legacy v1 → v2) |
+| `GET` | `/preferences/migrations` | List preference migration history |
+
+### Preference document
+
+```ts
+interface NotificationPreference {
+  userId: string;
+  orgId?: string;
+  channels: Record<"email" | "push" | "in_app" | "sms", ChannelPreference>;
+  categories: Record<string, CategoryPreference>;
+  quietHours: { enabled: boolean; start: string; end: string; timezone: string };
+  globalUnsubscribe: boolean;
+  updatedAt: string;
+}
+```
+
+Each channel carries `enabled`, a `frequency` (`immediate` | `hourly_digest` | `daily_digest` | `weekly_digest`), and per-type toggles. Each category carries `enabled`, allowed `channels`, a `frequency` (`immediate` | `digest`), and `criticalOnly`. Quiet hours are evaluated in the configured IANA timezone; non-critical notifications are suppressed inside the window.
+
+### Inheritance
+
+Org-level defaults (via `/preferences/org/:orgId`) are inherited by users who have not made an explicit choice. A user value that still equals the built-in default is treated as unset and falls through to the org default; explicit (non-default) user choices always win.
+
+### Schema migration
+
+Run `pnpm db:migrate` to apply `023_notification_preference_center.sql`, which adds `org_id`, `preferences` (JSONB), and `version` to `notification_preferences`, creates `org_notification_preferences`, and creates `preference_migrations`. The migration tool converts legacy boolean-only rows into the JSONB document and is safe to re-run.
+
 ## Permission Event Listener (Issue #57)
 
 The notifications service can subscribe to on-chain permission lifecycle

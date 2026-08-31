@@ -9,7 +9,6 @@ import { createLogger } from "@delegolabs/utils";
 import type {
   ReconciliationSLA,
   SLAStatus,
-  ReconciliationAuditEntry,
 } from "./enhancedTypes.js";
 
 const log = createLogger("payments:reconciliation-sla", process.env.LOG_LEVEL ?? "info");
@@ -97,7 +96,6 @@ export class SLATracker {
       const sla = this.slas.find((s) => s.id === status.slaId);
       if (!sla) continue;
 
-      const deadline = new Date(status.deadlineAt).getTime();
       const created = new Date(status.createdAt).getTime();
       const targetMs = sla.targetResolutionMs;
       const elapsed = now - created;

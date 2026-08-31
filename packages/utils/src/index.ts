@@ -48,6 +48,16 @@ export {
   type RegisterOptions,
   type ServiceHealth,
 } from "./health/index.js";
+
+// SLO Dashboard
+export * from "./slo/index.js";
+
+// Compression
+export * from "./compression/index.js";
+
+// Synthetic Monitoring
+export * from "./synthetic/index.js";
+
 export * from "./pentest.js";
 export * from "./coverageGate.js";
 export * from "./integrationFixtures.js";
@@ -100,6 +110,19 @@ export type {
   Serializer,
   SerializationFormat,
 } from "./redis/types.js";
+
+export {
+  RedisStreamManager,
+  createStreamManager,
+} from "./redis/index.js";
+export type {
+  StreamConfig,
+  StreamEvent,
+  ConsumerGroupState,
+  StreamProcessingResult,
+  StreamMessage,
+  ParsedStreamMessage,
+} from "./redis/streams.js";
 export {
   TaggedCache,
   type TaggedCacheEntry,
@@ -149,9 +172,9 @@ export {
   type SecurityEventType,
   type SecurityEventSeverity,
   type SecurityEvent,
-  type FileUploadValidationInput,
   type ValidationErrorList,
 } from "./securityEventDetection.js";
+export { requireAuth } from "./auth.js";
 export {
   generateApiKey,
   verifyApiKey,
@@ -201,3 +224,5 @@ export {
   type LogMetrics,
   type RetentionValidationResult,
 } from "./logAggregation.js";
+export * from "./softDelete/index.js";
+export * from "./audit/index.js";
