@@ -87,6 +87,34 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)
 
+  apps/backend/certmanager:
+    dependencies:
+      '@delegolabs/types':
+        specifier: workspace:*
+        version: link:../../../packages/types
+      '@delegolabs/utils':
+        specifier: workspace:*
+        version: link:../../../packages/utils
+      pg:
+        specifier: ^8.21.0
+        version: 8.23.0
+      sequelize:
+        specifier: ^6.37.8
+        version: 6.37.8(pg-hstore@2.3.4)(pg@8.23.0)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)
+
   apps/backend/fraud-detection:
     dependencies:
       '@delegolabs/types':
@@ -129,34 +157,6 @@ importers:
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)
-
-  apps/backend/certmanager:
-    dependencies:
-      '@delegolabs/types':
-        specifier: workspace:*
-        version: link:../../../packages/types
-      '@delegolabs/utils':
-        specifier: workspace:*
-        version: link:../../../packages/utils
-      pg:
-        specifier: ^8.21.0
-        version: 8.21.0
-      sequelize:
-        specifier: ^6.37.8
-        version: 6.37.8(pg-hstore@2.3.4)(pg@8.21.0)
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.21
-      tsx:
-        specifier: ^4.19.0
-        version: 4.22.4
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.9
-        version: 2.1.9(@types/node@22.19.21)(jsdom@25.0.1)
 
   apps/backend/gateway:
     dependencies:
@@ -3078,7 +3078,7 @@ snapshots:
   '@types/jsonwebtoken@9.0.10':
     dependencies:
       '@types/ms': 2.1.0
-      '@types/node': 22.20.1
+      '@types/node': 25.9.5
 
   '@types/luxon@3.4.2': {}
 
