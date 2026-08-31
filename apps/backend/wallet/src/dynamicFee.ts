@@ -3,6 +3,7 @@ import { createLogger } from "@delegolabs/utils";
 
 const log = createLogger("wallet:dynamic-fee", process.env.LOG_LEVEL ?? "info");
 
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

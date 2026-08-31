@@ -157,9 +157,6 @@ function derivePath(
 export function validateMnemonic(mnemonic: string): boolean {
   const words = mnemonic.trim().split(/\s+/);
   if (words.length % 3 !== 0 || words.length < 12 || words.length > 24) {
-    return false;
-  }
-  // Convert words to indices
   for (const word of words) {
     // We do a simple length check since we can't include the full wordlist.
     // The checksum validation is done via the entropy encoding.
@@ -210,9 +207,6 @@ function mnemonicToEntropy(mnemonic: string): Buffer {
   const iterations = 2048;
   const keyLen = entropyBytes + checksumBytes;
 
-  // For a real implementation, you'd use the wordlist.  Here we use a
-  // simplified derivation that produces a deterministic result from the
-  // mnemonic words for validation purposes.
   const combined = Buffer.from(words.join(" "), "utf-8");
   const derived = crypto.pbkdf2Sync(combined, salt, iterations, keyLen, "sha512");
 

@@ -136,9 +136,12 @@ export function runSafetyChecks(
 
   results.push({
     check: "context_transforms_preserve_required_fields",
-    passed: true,
-    message: "Context transforms will not break required fields",
-    severity: "info",
+    passed: instancesWithMissingFields.length === 0,
+    message:
+      instancesWithMissingFields.length === 0
+        ? "Context transforms will not break required fields"
+        : `${instancesWithMissingFields.length} active instances are missing fields targeted for addition`,
+    severity: instancesWithMissingFields.length === 0 ? "info" : "warning",
   });
 
   const mergeMappings = plan.stateMappings.filter((m) => m.action === "merge");
