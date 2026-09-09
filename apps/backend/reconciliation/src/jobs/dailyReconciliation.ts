@@ -1,9 +1,7 @@
-import { connectDb, sequelize } from "../db.js";
-import { ReconciliationJob } from "../models/ReconciliationJob.js";
+import { sequelize } from "../db.js";
 import { matcherService } from "../services/matcherService.js";
 import { resolverService } from "../services/resolverService.js";
 import { reconciliationJobService } from "../services/reconciliationJobService.js";
-import { reportingService } from "../services/reportingService.js";
 import { createLogger } from "@delegolabs/utils";
 
 const log = createLogger("reconciliation:daily", process.env.LOG_LEVEL ?? "info");
@@ -75,7 +73,7 @@ export async function runDailyReconciliation(): Promise<void> {
 /**
  * Fetch internal records
  */
-async function fetchInternalRecords(startDate: Date, endDate: Date, accounts: string[]): Promise<Array<{
+async function fetchInternalRecords(_startDate: Date, _endDate: Date, _accounts: string[]): Promise<Array<{
   id: string;
   amount: string;
   currency: string;
@@ -92,7 +90,7 @@ async function fetchInternalRecords(startDate: Date, endDate: Date, accounts: st
 /**
  * Fetch external records
  */
-async function fetchExternalRecords(startDate: Date, endDate: Date, accounts: string[]): Promise<Array<{
+async function fetchExternalRecords(_startDate: Date, _endDate: Date, _accounts: string[]): Promise<Array<{
   id?: string;
   amount: string;
   currency: string;

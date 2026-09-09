@@ -1,12 +1,27 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "./src",
+    "rootDir": "..",
     "outDir": "./dist",
+    "noEmit": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["node"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*",
+    "../gateway/middleware/auth.ts",
+    "../gateway/middleware/requestId.ts",
+    "../gateway/src/errors.ts",
+    "../gateway/src/db.ts",
+    "../gateway/src/auth/authService.ts",
+    "../gateway/src/auth/tokenBlacklist.ts",
+    "../gateway/src/auth/tokenKeys.ts",
+    "../gateway/src/auth/tokenManager.ts",
+    "../gateway/src/auth/tokenTypes.ts",
+    "../gateway/src/models/RefreshToken.ts",
+    "../gateway/src/models/User.ts",
+    "../gateway/src/rateLimit/redisClient.ts"
+  ],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
 }

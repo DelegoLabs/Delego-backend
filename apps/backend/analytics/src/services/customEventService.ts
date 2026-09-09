@@ -36,35 +36,35 @@ export class CustomEventService {
   /**
    * Get events for a user
    */
-  async getUserEvents(userId: string, limit: number = 100, offset: number = 0): Promise<CustomEvent[]> {
+  async getUserEvents(_userId: string, _limit: number = 100, _offset: number = 0): Promise<CustomEvent[]> {
     return [];
   }
 
   /**
    * Get events for a session
    */
-  async getSessionEvents(sessionId: string, eventName?: string, limit: number = 100): Promise<CustomEvent[]> {
+  async getSessionEvents(_sessionId: string, _eventName?: string, _limit: number = 100): Promise<CustomEvent[]> {
     return [];
   }
 
   /**
    * Get event counts by type
    */
-  async getEventCountsByType(eventName?: string, periodStart?: string, periodEnd?: string): Promise<Record<string, number>> {
+  async getEventCountsByType(_eventName?: string, _periodStart?: string, _periodEnd?: string): Promise<Record<string, number>> {
     return {};
   }
 
   /**
    * Get events with revenue
    */
-  async getRevenueEvents(periodStart: string, periodEnd: string): Promise<CustomEvent[]> {
+  async getRevenueEvents(_periodStart: string, _periodEnd: string): Promise<CustomEvent[]> {
     return [];
   }
 
   /**
    * Export custom events to data warehouse
    */
-  async exportEventsToWarehouse(destination: string, filters?: { eventName?: string; userId?: string; periodStart?: string; periodEnd?: string }): Promise<{ count: number }> {
+  async exportEventsToWarehouse(_destination: string, _filters?: { eventName?: string; userId?: string; periodStart?: string; periodEnd?: string }): Promise<{ count: number }> {
     return { count: 0 };
   }
 }

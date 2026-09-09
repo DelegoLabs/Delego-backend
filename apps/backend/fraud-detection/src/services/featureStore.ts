@@ -40,10 +40,10 @@ export class FeatureStore {
       const cards = await this.redis.scard(`${key}:cards`);
 
       return {
-        transactionCount: parseInt(count as string, 10),
+        transactionCount: count,
         totalAmount: parseFloat(totalAmount),
-        distinctMerchants: parseInt(merchants as string, 10),
-        distinctCards: parseInt(cards as string, 10),
+        distinctMerchants: merchants,
+        distinctCards: cards,
       };
     } catch (err) {
       log.warn("Failed to get velocity features", { error: err instanceof Error ? err.message : String(err) });
@@ -70,9 +70,9 @@ export class FeatureStore {
       const flagged = await this.redis.zcount(`${key}:flagged`, cutoff, now);
 
       return {
-        transactionCount: parseInt(count as string, 10),
-        distinctCustomers: parseInt(customers as string, 10),
-        flaggedCount: parseInt(flagged as string, 10),
+        transactionCount: count,
+        distinctCustomers: customers,
+        flaggedCount: flagged,
       };
     } catch (err) {
       log.warn("Failed to get IP velocity", { error: err instanceof Error ? err.message : String(err) });
@@ -97,8 +97,8 @@ export class FeatureStore {
       const accounts = await this.redis.scard(`${key}:accounts`);
 
       return {
-        transactionCount: parseInt(count as string, 10),
-        distinctAccounts: parseInt(accounts as string, 10),
+        transactionCount: count,
+        distinctAccounts: accounts,
       };
     } catch (err) {
       log.warn("Failed to get email velocity", { error: err instanceof Error ? err.message : String(err) });

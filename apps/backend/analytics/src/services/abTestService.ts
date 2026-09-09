@@ -1,6 +1,3 @@
-import { ABTest, ABTestAttributes } from "../models/ABTest.js";
-import { ABTestVariant } from "../models/ABTestVariant.js";
-import { NotificationEvent } from "../models/NotificationEvent.js";
 import { ABTestCreateRequest, ABTestResponse, ABTestUpdateRequest } from "../schemas.js";
 
 /**
@@ -36,35 +33,35 @@ export class ABTestService {
   /**
    * Get all A/B tests
    */
-  async listABTests(status?: string): Promise<ABTestResponse[]> {
+  async listABTests(_status?: string): Promise<ABTestResponse[]> {
     return [];
   }
 
   /**
    * Get a specific A/B test
    */
-  async getABTest(id: string): Promise<ABTestResponse | null> {
+  async getABTest(_id: string): Promise<ABTestResponse | null> {
     return null;
   }
 
   /**
    * Update an A/B test
    */
-  async updateABTest(id: string, request: ABTestUpdateRequest): Promise<ABTestResponse | null> {
+  async updateABTest(_id: string, _request: ABTestUpdateRequest): Promise<ABTestResponse | null> {
     return null;
   }
 
   /**
    * Start an A/B test
    */
-  async startABTest(id: string): Promise<ABTestResponse | null> {
+  async startABTest(_id: string): Promise<ABTestResponse | null> {
     return null;
   }
 
   /**
    * End an A/B test
    */
-  async endABTest(id: string): Promise<ABTestResponse | null> {
+  async endABTest(_id: string): Promise<ABTestResponse | null> {
     return null;
   }
 }

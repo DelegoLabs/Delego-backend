@@ -10,11 +10,9 @@ const log = createLogger("fraud-detection:retraining", process.env.LOG_LEVEL ?? 
  */
 export class RetrainingService {
   private modelPath: string;
-  private trainingDataPath: string;
 
   constructor() {
     this.modelPath = process.env.MODEL_PATH ?? path.join("models", "fraud_xgboost.json");
-    this.trainingDataPath = process.env.TRAINING_DATA_PATH ?? path.join("data", "training");
   }
 
   /**
@@ -85,7 +83,7 @@ export class RetrainingService {
   /**
    * Train model (mock implementation)
    */
-  private async trainModel(trainingData: any[]): Promise<any> {
+  private async trainModel(_trainingData: any[]): Promise<any> {
     // In production, this would use XGBoost to train the model
     // This is a mock that returns a valid model structure
 
@@ -113,7 +111,7 @@ export class RetrainingService {
   /**
    * Save trained model to disk
    */
-  private async saveModel(model: any, modelVersion: string): Promise<void> {
+  private async saveModel(model: any, _modelVersion: string): Promise<void> {
     try {
       // Ensure model directory exists
       const modelDir = path.dirname(this.modelPath);
@@ -151,7 +149,7 @@ export class RetrainingService {
   /**
    * Get model retraining history
    */
-  async getRetrainingHistory(limit: number = 10): Promise<Array<{ version: string; status: string; timestamp: string }>> {
+  async getRetrainingHistory(_limit: number = 10): Promise<Array<{ version: string; status: string; timestamp: string }>> {
     // In production, this would query a retraining history table
     return [];
   }

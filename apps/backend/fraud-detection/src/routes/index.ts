@@ -1,34 +1,34 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { route, type Route } from "@delegolabs/utils";
 import { checkFraudHandler, listRulesHandler, createRuleHandler, getRuleHandler, updateRuleHandler, deleteRuleHandler, evaluateRulesHandler, getModelVersionHandler, retrainModelHandler, getModelPerformanceHandler, listCasesHandler, createCaseHandler, getCaseHandler, updateCaseHandler, addEvidenceHandler, getFraudRateHandler, getFraudTrendsHandler, getTopFraudRulesHandler } from "./fraudRoutes.js";
 
-export function registerFraudRoutes(): Array<{ method: string; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> }> {
+export function registerFraudRoutes(): Route[] {
   return [
     // Fraud check
-    { method: "POST", path: "/api/v1/fraud/check", handler: checkFraudHandler },
+    route("POST", "/api/v1/fraud/check", checkFraudHandler),
 
     // Rules management
-    { method: "GET", path: "/api/v1/rules", handler: listRulesHandler },
-    { method: "POST", path: "/api/v1/rules", handler: createRuleHandler },
-    { method: "GET", path: "/api/v1/rules/:id", handler: getRuleHandler },
-    { method: "PATCH", path: "/api/v1/rules/:id", handler: updateRuleHandler },
-    { method: "DELETE", path: "/api/v1/rules/:id", handler: deleteRuleHandler },
-    { method: "POST", path: "/api/v1/rules/evaluate", handler: evaluateRulesHandler },
+    route("GET", "/api/v1/rules", listRulesHandler),
+    route("POST", "/api/v1/rules", createRuleHandler),
+    route("GET", "/api/v1/rules/:id", getRuleHandler),
+    route("PATCH", "/api/v1/rules/:id", updateRuleHandler),
+    route("DELETE", "/api/v1/rules/:id", deleteRuleHandler),
+    route("POST", "/api/v1/rules/evaluate", evaluateRulesHandler),
 
     // Model management
-    { method: "GET", path: "/api/v1/model/version", handler: getModelVersionHandler },
-    { method: "POST", path: "/api/v1/model/retrain", handler: retrainModelHandler },
-    { method: "GET", path: "/api/v1/model/performance", handler: getModelPerformanceHandler },
+    route("GET", "/api/v1/model/version", getModelVersionHandler),
+    route("POST", "/api/v1/model/retrain", retrainModelHandler),
+    route("GET", "/api/v1/model/performance", getModelPerformanceHandler),
 
     // Case management
-    { method: "GET", path: "/api/v1/cases", handler: listCasesHandler },
-    { method: "POST", path: "/api/v1/cases", handler: createCaseHandler },
-    { method: "GET", path: "/api/v1/cases/:id", handler: getCaseHandler },
-    { method: "PATCH", path: "/api/v1/cases/:id", handler: updateCaseHandler },
-    { method: "POST", path: "/api/v1/cases/:id/evidence", handler: addEvidenceHandler },
+    route("GET", "/api/v1/cases", listCasesHandler),
+    route("POST", "/api/v1/cases", createCaseHandler),
+    route("GET", "/api/v1/cases/:id", getCaseHandler),
+    route("PATCH", "/api/v1/cases/:id", updateCaseHandler),
+    route("POST", "/api/v1/cases/:id/evidence", addEvidenceHandler),
 
     // Analytics
-    { method: "GET", path: "/api/v1/analytics/fraud-rate", handler: getFraudRateHandler },
-    { method: "GET", path: "/api/v1/analytics/trends", handler: getFraudTrendsHandler },
-    { method: "GET", path: "/api/v1/analytics/top-fraud-rules", handler: getTopFraudRulesHandler },
+    route("GET", "/api/v1/analytics/fraud-rate", getFraudRateHandler),
+    route("GET", "/api/v1/analytics/trends", getFraudTrendsHandler),
+    route("GET", "/api/v1/analytics/top-fraud-rules", getTopFraudRulesHandler),
   ];
 }

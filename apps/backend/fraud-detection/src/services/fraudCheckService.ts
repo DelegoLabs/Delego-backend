@@ -1,6 +1,5 @@
 import { FraudCheckResult } from "../models/FraudCheckResult.js";
 import { FraudCase } from "../models/FraudCase.js";
-import { DeviceFingerprint } from "../models/DeviceFingerprint.js";
 import { FraudEventLog } from "../models/FraudEventLog.js";
 import { mlScorer } from "../mlScorer.js";
 import { ruleEngine } from "../ruleEngine.js";
@@ -56,7 +55,16 @@ export class FraudCheckService {
     await ruleEngine.loadRules();
 
     // Evaluate rules
-    const ruleResults = await ruleEngine.evaluateRules(request, mlFeatures);
+    const ruleResults = await ruleEngine.evaluateRules({
+      amount: parseFloat(request.amount),
+      customerId: request.customerId,
+      ipAddress: request.ipAddress,
+      deviceFingerprint: request.deviceFingerprint,
+      email: request.email,
+      billingAddress: request.billingAddress,
+      shippingAddress: request.shippingAddress,
+      metadata: request.metadata,
+    }, mlFeatures);
 
     // Calculate ML score
     const mlScoreResult = await mlScorer.calculateScore(mlFeatures);
@@ -96,8 +104,8 @@ export class FraudCheckService {
       request.customerId,
       request.ipAddress,
       request.email,
-      request.metadata.merchantId || "unknown",
-      request.metadata.cardLast4 || "0000",
+      (request.metadata.merchantId as string | undefined) || "unknown",
+      (request.metadata.cardLast4 as string | undefined) || "0000",
       parseFloat(request.amount),
       recommendation !== "approve",
     );
@@ -106,9 +114,9 @@ export class FraudCheckService {
     await this.featureStore.storeDeviceFingerprint(
       request.deviceFingerprint,
       request.customerId,
-      request.metadata.deviceType || "unknown",
-      request.metadata.browser || "unknown",
-      request.metadata.os || "unknown",
+      (request.metadata.deviceType as string | undefined) || "unknown",
+      (request.metadata.browser as string | undefined) || "unknown",
+      (request.metadata.os as string | undefined) || "unknown",
     );
 
     // Store region fraud data
@@ -158,6 +166,7 @@ export class FraudCheckService {
           transactionId: request.transactionId,
           status: "open",
           priority: result.riskLevel === "critical" ? "urgent" : result.riskLevel === "high" ? "high" : result.riskLevel === "medium" ? "medium" : "low",
+          evidence: [],
         });
       }
     } catch (err) {
@@ -186,7 +195,7 @@ export class FraudCheckService {
   /**
    * Get event severity
    */
-  private getEventSeverity(eventType: string, details: Record<string, unknown>): "info" | "warning" | "error" | "critical" {
+  private getEventSeverity(_eventType: string, details: Record<string, unknown>): "info" | "warning" | "error" | "critical" {
     const score = details.score as number;
     if (score >= 90) return "critical";
     if (score >= 70) return "error";
@@ -198,7 +207,7 @@ export class FraudCheckService {
    * Get check results by transaction ID
    */
   async getCheckResult(transactionId: string): Promise<FraudCheckResult | null> {
-    return FraudCheckResult.findOne({ where: { transaction_id: transactionId } });
+    return FraudCheckResult.findOne({ where: { transactionId } });
   }
 
   /**

@@ -1,11 +1,7 @@
 import { FraudCheckResult } from "../models/FraudCheckResult.js";
 import { FraudCase } from "../models/FraudCase.js";
-import { FraudEventLog } from "../models/FraudEventLog.js";
 import { AnalyticsMetrics } from "../schemas.js";
 import { Op } from "sequelize";
-import { createLogger } from "@delegolabs/utils";
-
-const log = createLogger("fraud-detection:analytics", process.env.LOG_LEVEL ?? "info");
 
 /**
  * Fraud Analytics Service
@@ -29,7 +25,7 @@ export class FraudAnalyticsService {
     // Total transactions
     const total = await FraudCheckResult.count({
       where: {
-        scored_at: {
+        scoredAt: {
           [Op.gte]: periodStart,
         },
       },
@@ -38,7 +34,7 @@ export class FraudAnalyticsService {
     // Flagged transactions (review or decline)
     const flagged = await FraudCheckResult.count({
       where: {
-        scored_at: {
+        scoredAt: {
           [Op.gte]: periodStart,
         },
         recommendation: { [Op.in]: ["review", "decline"] },
@@ -49,24 +45,24 @@ export class FraudAnalyticsService {
     const fraudConfirmed = await FraudCase.count({
       where: {
         status: "confirmed_fraud",
-        created_at: {
+        createdAt: {
           [Op.gte]: periodStart,
         },
       },
     });
 
     // Average score
-    const scoreResult = await FraudCheckResult.findOne({
+    const scoreResult = (await FraudCheckResult.findOne({
       attributes: [[FraudCheckResult.sequelize!.fn("AVG", FraudCheckResult.sequelize!.col("score")), "average"]],
       where: {
-        scored_at: {
+        scoredAt: {
           [Op.gte]: periodStart,
         },
       },
       raw: true,
-    });
+    })) as unknown as { average?: string } | null;
 
-    const averageScore = scoreResult?.average ? parseFloat(scoreResult.average as string) : 0;
+    const averageScore = scoreResult?.average ? parseFloat(scoreResult.average) : 0;
 
     // By time period (weekly)
     const byTimePeriod = await this.getFraudByTimePeriod(periodDays);
@@ -109,23 +105,21 @@ export class FraudAnalyticsService {
     const periodStart = new Date();
     periodStart.setDate(periodStart.getDate() - periodDays);
 
-    const results = await FraudCheckResult.findAll({
+    const results = (await FraudCheckResult.findAll({
       attributes: [
         [FraudCheckResult.sequelize!.fn("DATE", FraudCheckResult.sequelize!.col("scored_at")), "date"],
         [FraudCheckResult.sequelize!.fn("COUNT", FraudCheckResult.sequelize!.col("id")), "total"],
-        [FraudCheckResult.sequelize!.fn("SUM", FraudCheckResult.sequelize!.case([
-          { when: FraudCheckResult.sequelize!.col("recommendation").in(["review", "decline"]), then: 1 }],
-          0)), "flagged"],
+        [FraudCheckResult.sequelize!.literal("SUM(CASE WHEN recommendation IN ('review', 'decline') THEN 1 ELSE 0 END)"), "flagged"],
       ],
       where: {
-        scored_at: {
+        scoredAt: {
           [Op.gte]: periodStart,
         },
       },
       group: [FraudCheckResult.sequelize!.fn("DATE", FraudCheckResult.sequelize!.col("scored_at"))],
       order: [["date", "ASC"]],
       raw: true,
-    });
+    })) as unknown as Array<Record<string, unknown>>;
 
     return results.map((r) => ({
       date: r.date as string,
@@ -141,7 +135,7 @@ export class FraudAnalyticsService {
   async getTopFraudRules(limit: number = 10): Promise<Array<{ ruleName: string; triggerCount: number; avgScoreImpact: number }>> {
     // Get rules from database
     const rules = await FraudCheckResult.findAll({
-      attributes: ["rules_triggered"],
+      attributes: ["rulesTriggered"],
       limit: 1000,
       where: {
         recommendation: { [Op.in]: ["review", "decline"] },
@@ -152,8 +146,8 @@ export class FraudAnalyticsService {
     const ruleScores: Record<string, number[]> = {};
 
     for (const result of rules) {
-      const rulesTriggered = result.rules_triggered as string[];
-      const score = result.score as number;
+      const rulesTriggered = result.rulesTriggered ?? [];
+      const score = result.score;
 
       for (const rule of rulesTriggered) {
         ruleCounts[rule] = (ruleCounts[rule] || 0) + 1;
@@ -181,23 +175,21 @@ export class FraudAnalyticsService {
     const periodStart = new Date();
     periodStart.setDate(periodStart.getDate() - days);
 
-    const results = await FraudCheckResult.findAll({
+    const results = (await FraudCheckResult.findAll({
       attributes: [
         [FraudCheckResult.sequelize!.fn("DATE_TRUNC", "week", FraudCheckResult.sequelize!.col("scored_at")), "week"],
         [FraudCheckResult.sequelize!.fn("COUNT", FraudCheckResult.sequelize!.col("id")), "total"],
-        [FraudCheckResult.sequelize!.fn("SUM", FraudCheckResult.sequelize!.case([
-          { when: FraudCheckResult.sequelize!.col("recommendation").in(["review", "decline"]), then: 1 }],
-          0)), "flagged"],
+        [FraudCheckResult.sequelize!.literal("SUM(CASE WHEN recommendation IN ('review', 'decline') THEN 1 ELSE 0 END)"), "flagged"],
       ],
       where: {
-        scored_at: {
+        scoredAt: {
           [Op.gte]: periodStart,
         },
       },
       group: [FraudCheckResult.sequelize!.fn("DATE_TRUNC", "week", FraudCheckResult.sequelize!.col("scored_at"))],
       order: [["week", "DESC"]],
       raw: true,
-    });
+    })) as unknown as Array<Record<string, unknown>>;
 
     return results.map((r) => ({
       period: r.week as string,
@@ -208,22 +200,9 @@ export class FraudAnalyticsService {
   }
 
   /**
-   * Get fraud by channel
-   */
-  private async getFraudByChannel(): Promise<Array<{ channel: string; total: number; flagged: number; fraud: number }>> {
-    // This would require channel field in fraud_check_results
-    return [];
-  }
-
-  /**
    * Get false positive rate
    */
   async getFalsePositiveRate(): Promise<number> {
-    // Get confirmed fraud cases
-    const confirmedFraud = await FraudCase.count({
-      where: { status: "confirmed_fraud" },
-    });
-
     // Get cases marked as false positive
     const falsePositive = await FraudCase.count({
       where: { status: "false_positive" },

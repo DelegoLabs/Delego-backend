@@ -4,7 +4,7 @@ import { QueryInterface, Sequelize, DataTypes } from "sequelize";
  * Migration: Add campaign tracking columns to notification_events
  * Adds columns for tracking campaign information and attribution.
  */
-export async function up(queryInterface: QueryInterface, Sequelize: Sequelize): Promise<void> {
+export async function up(queryInterface: QueryInterface, _Sequelize: Sequelize): Promise<void> {
   // Add campaign_id column
   await queryInterface.addColumn("notification_events", "campaign_id", {
     type: DataTypes.STRING(100),
@@ -46,7 +46,7 @@ export async function up(queryInterface: QueryInterface, Sequelize: Sequelize): 
   await queryInterface.addIndex("notification_events", ["utm_source", "utm_medium", "utm_campaign"]);
 }
 
-export async function down(queryInterface: QueryInterface, Sequelize: Sequelize): Promise<void> {
+export async function down(queryInterface: QueryInterface, _Sequelize: Sequelize): Promise<void> {
   await queryInterface.removeColumn("notification_events", "campaign_id");
   await queryInterface.removeColumn("notification_events", "utm_source");
   await queryInterface.removeColumn("notification_events", "utm_medium");

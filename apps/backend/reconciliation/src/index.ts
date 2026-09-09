@@ -12,11 +12,6 @@ import { ReconciliationRecord } from "./models/ReconciliationRecord.js";
 import { ReconciliationReport } from "./models/ReconciliationReport.js";
 import { AuditLog } from "./models/AuditLog.js";
 import { ExchangeRateCache } from "./models/ExchangeRateCache.js";
-import { exchangeRateService } from "./services/exchangeRateService.js";
-import { reconciliationJobService } from "./services/reconciliationJobService.js";
-import { matcherService } from "./services/matcherService.js";
-import { resolverService } from "./services/resolverService.js";
-import { reportingService } from "./services/reportingService.js";
 
 const SERVICE_NAME = "reconciliation";
 const DEFAULT_PORT = 3014;

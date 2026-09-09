@@ -1,9 +1,10 @@
-import { FraudCase } from "../models/FraudCase.js";
+import { FraudCase, type FraudCaseAttributes } from "../models/FraudCase.js";
 import { FraudCheckResult } from "../models/FraudCheckResult.js";
 import { FraudEventLog } from "../models/FraudEventLog.js";
 import { CreateFraudCaseRequest, UpdateFraudCaseRequest, AddEvidenceRequest, FraudCaseResponse } from "../schemas.js";
 import { randomUUID } from "crypto";
 import { createLogger } from "@delegolabs/utils";
+import { Op } from "sequelize";
 
 const log = createLogger("fraud-detection:cases", process.env.LOG_LEVEL ?? "info");
 
@@ -20,12 +21,13 @@ export class CaseManagementService {
       status: "open",
       priority: request.priority || "medium",
       assignedTo: request.assignedTo,
+      evidence: [],
     });
 
     // Add initial evidence from fraud check result
     await this.addEvidence(caseData.id, {
       type: "fraud_check_result",
-      data: await this.getFraudCheckData(request.transactionId),
+      data: (await this.getFraudCheckData(request.transactionId)) ?? {},
       addedAt: new Date().toISOString(),
       addedBy: "system",
     });
@@ -90,7 +92,7 @@ export class CaseManagementService {
     const caseData = await FraudCase.findByPk(id);
     if (!caseData) return null;
 
-    const updateData: Partial<FraudCase> = {
+    const updateData: Partial<FraudCaseAttributes> = {
       status: outcome === "fraud" ? "confirmed_fraud" : "false_positive",
       resolution: {
         outcome,
@@ -108,7 +110,7 @@ export class CaseManagementService {
   /**
    * Add evidence to case
    */
-  async addEvidence(caseId: string, evidence: AddEvidenceRequest): Promise<FraudCaseResponse | null> {
+  async addEvidence(caseId: string, evidence: AddEvidenceRequest & { addedAt?: string }): Promise<FraudCaseResponse | null> {
     const caseData = await FraudCase.findByPk(caseId);
     if (!caseData) return null;
 
@@ -145,7 +147,7 @@ export class CaseManagementService {
 
     return FraudEventLog.findAll({
       where: {
-        transaction_id: caseData.transactionId,
+        transactionId: caseData.transactionId,
       },
       order: [["created_at", "DESC"]],
     });
@@ -155,14 +157,17 @@ export class CaseManagementService {
    * Get fraud check data for a transaction
    */
   private async getFraudCheckData(transactionId: string): Promise<Record<string, unknown> | null> {
-    const result = await FraudCheckResult.findOne({ where: { transaction_id: transactionId } });
-    return result ? result.toJSON() : null;
+    const result = await FraudCheckResult.findOne({ where: { transactionId } });
+    return result ? (result.toJSON() as unknown as Record<string, unknown>) : null;
   }
 
   /**
    * Format case for response
    */
   private formatCase(caseData: FraudCase): FraudCaseResponse {
+    const createdAt = caseData.getDataValue("createdAt") as Date | undefined;
+    const updatedAt = caseData.getDataValue("updatedAt") as Date | undefined;
+
     return {
       id: caseData.id,
       transactionId: caseData.transactionId,
@@ -171,8 +176,8 @@ export class CaseManagementService {
       priority: caseData.priority as any,
       evidence: caseData.evidence,
       resolution: caseData.resolution as any,
-      createdAt: caseData.created_at?.toISOString() || new Date().toISOString(),
-      updatedAt: caseData.updated_at?.toISOString() || new Date().toISOString(),
+      createdAt: createdAt?.toISOString() || new Date().toISOString(),
+      updatedAt: updatedAt?.toISOString() || new Date().toISOString(),
     };
   }
 
@@ -216,7 +221,7 @@ export class CaseManagementService {
   async getPendingCasesCount(): Promise<number> {
     const cases = await FraudCase.findAll({
       where: {
-        status: { [FraudCase.sequelize!.Op.in]: ["open", "investigating"] },
+        status: { [Op.in]: ["open", "investigating"] },
       },
     });
     return cases.length;

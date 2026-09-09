@@ -1,12 +1,22 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { json } from "@delegolabs/utils";
-import { extractAuth, getAuthenticatedUserContext } from "../../gateway/middleware/auth.js";
-import { sendApiError, forbidden, unauthorized } from "../../gateway/src/errors.js";
+import { json, readBodyWithLimit } from "@delegolabs/utils";
+import { extractAuth, getAuthenticatedUserContext } from "../../../gateway/middleware/auth.js";
+import { sendApiError, forbidden, unauthorized } from "../../../gateway/src/errors.js";
 import { reconciliationJobService } from "../reconciliationJobService.js";
 import { matcherService } from "../matcherService.js";
 import { resolverService } from "../resolverService.js";
 import { reportingService } from "../reportingService.js";
-import { CreateReconciliationJobRequest, ResolveDiscrepancyRequest, DiscrepancyQuery } from "../schemas.js";
+import { CreateReconciliationJobRequest, ResolveDiscrepancyRequest } from "../schemas.js";
+
+/** Read and parse the JSON request body. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const body = await readBodyWithLimit(req);
+  try {
+    return body ? (JSON.parse(body) as Record<string, unknown>) : {};
+  } catch {
+    throw new Error("Invalid JSON body");
+  }
+}
 
 /**
  * Check if user is admin
@@ -21,7 +31,7 @@ function isAdmin(req: IncomingMessage): boolean {
  *
  * List reconciliation jobs
  */
-export async function listJobsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function listJobsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -54,7 +64,7 @@ export async function listJobsHandler(req: IncomingMessage, res: ServerResponse)
  *
  * Create a new reconciliation job
  */
-export async function createJobHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function createJobHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -64,14 +74,8 @@ export async function createJobHandler(req: IncomingMessage, res: ServerResponse
   try {
     let body: CreateReconciliationJobRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as CreateReconciliationJobRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as CreateReconciliationJobRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -95,7 +99,7 @@ export async function createJobHandler(req: IncomingMessage, res: ServerResponse
  *
  * Get job details
  */
-export async function getJobHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getJobHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -103,8 +107,7 @@ export async function getJobHandler(req: IncomingMessage, res: ServerResponse): 
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Job ID required", req);
@@ -130,7 +133,7 @@ export async function getJobHandler(req: IncomingMessage, res: ServerResponse): 
  *
  * Cancel a reconciliation job
  */
-export async function cancelJobHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function cancelJobHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -143,8 +146,7 @@ export async function cancelJobHandler(req: IncomingMessage, res: ServerResponse
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Job ID required", req);
@@ -170,7 +172,7 @@ export async function cancelJobHandler(req: IncomingMessage, res: ServerResponse
  *
  * List reconciliation records
  */
-export async function listRecordsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function listRecordsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -179,7 +181,6 @@ export async function listRecordsHandler(req: IncomingMessage, res: ServerRespon
 
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const jobId = url.searchParams.get("jobId") || undefined;
     const status = url.searchParams.get("status") || undefined;
     const limit = parseInt(url.searchParams.get("limit") || "50", 10);
 
@@ -197,7 +198,7 @@ export async function listRecordsHandler(req: IncomingMessage, res: ServerRespon
  *
  * Resolve a discrepancy
  */
-export async function resolveRecordHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function resolveRecordHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -205,8 +206,7 @@ export async function resolveRecordHandler(req: IncomingMessage, res: ServerResp
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Record ID required", req);
@@ -215,14 +215,8 @@ export async function resolveRecordHandler(req: IncomingMessage, res: ServerResp
 
     let body: ResolveDiscrepancyRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as ResolveDiscrepancyRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as ResolveDiscrepancyRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -256,7 +250,7 @@ export async function resolveRecordHandler(req: IncomingMessage, res: ServerResp
  *
  * Get reconciliation report
  */
-export async function getReportHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getReportHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -264,8 +258,7 @@ export async function getReportHandler(req: IncomingMessage, res: ServerResponse
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const jobId = url.pathname.split("/").pop();
+    const jobId = params.jobId;
 
     if (!jobId) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Job ID required", req);
@@ -291,7 +284,7 @@ export async function getReportHandler(req: IncomingMessage, res: ServerResponse
  *
  * Get summary report
  */
-export async function getSummaryHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getSummaryHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -313,7 +306,7 @@ export async function getSummaryHandler(req: IncomingMessage, res: ServerRespons
  *
  * Get unresolved discrepancies
  */
-export async function getDiscrepanciesHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getDiscrepanciesHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -339,7 +332,7 @@ export async function getDiscrepanciesHandler(req: IncomingMessage, res: ServerR
  *
  * Get discrepancies grouped by type
  */
-export async function getDiscrepanciesByTypeHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getDiscrepanciesByTypeHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -361,7 +354,7 @@ export async function getDiscrepanciesByTypeHandler(req: IncomingMessage, res: S
  *
  * Get currency breakdown
  */
-export async function getCurrencyBreakdownHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getCurrencyBreakdownHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -386,7 +379,7 @@ export async function getCurrencyBreakdownHandler(req: IncomingMessage, res: Ser
  *
  * Get auto-resolution statistics
  */
-export async function getAutoResolutionStatsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getAutoResolutionStatsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
