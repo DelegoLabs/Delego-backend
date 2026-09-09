@@ -157,6 +157,8 @@ function derivePath(
 export function validateMnemonic(mnemonic: string): boolean {
   const words = mnemonic.trim().split(/\s+/);
   if (words.length % 3 !== 0 || words.length < 12 || words.length > 24) {
+    return false;
+  }
   for (const word of words) {
     // We do a simple length check since we can't include the full wordlist.
     // The checksum validation is done via the entropy encoding.
@@ -292,6 +294,7 @@ export function deriveKeyHierarchy(
   ).subarray(0, 32);
 
   const { key: masterKey, chainCode: masterChainCode } = masterKeyFromSeed(seed);
+  const masterFp = fingerprint(masterKey);
   const masterChainHex = masterChainCode.toString("hex");
 
   const masterDerived: DerivedKey = {

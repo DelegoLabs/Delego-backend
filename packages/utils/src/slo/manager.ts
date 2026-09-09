@@ -11,9 +11,6 @@ import { BurnRateCalculator, FastBurnDetector, SlowBurnDetector } from "./burnRa
 import { SLOAlertManager } from "./alertManager.js";
 import type {
   SLOConfig,
-  SLIConfig,
-  SLO,
-  SLI,
   ErrorBudgetPolicy,
   SLOMetrics,
   ServiceSLOMetrics,
@@ -147,7 +144,7 @@ export class SLOManager {
 
     // Check for alerts
     const alertThresholds = slo.alerting.burnRateThresholds;
-    const newAlerts = this.alertManager.checkThresholds(
+    this.alertManager.checkThresholds(
       sloId,
       slo.service,
       burnRates,
@@ -226,7 +223,7 @@ export class SLOManager {
       window: slo.window,
       actual: actualAvailability,
       errorBudgetRemaining: budgetState.remaining,
-      burnRate,
+      burnRate: burnRates,
       status,
       lastUpdated: now.toISOString(),
       incidents: alertStats.active,
@@ -316,7 +313,7 @@ export class SLOManager {
 
   // ─── Helper Methods ────────────────────────────────────────────────────
 
-  private getActualAvailability(sliName: string, service: string): number {
+  private getActualAvailability(sliName: string, _service: string): number {
     // In production, this would query Prometheus
     // For now, return a simulated value based on SLI type
     

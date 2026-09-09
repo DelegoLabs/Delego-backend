@@ -3,7 +3,7 @@
  */
 
 import { createLogger } from "../logger.js";
-import type { CheckResult, SyntheticMetrics } from "./types.js";
+import type { CheckResult } from "./types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // In-Memory Store
@@ -11,11 +11,11 @@ import type { CheckResult, SyntheticMetrics } from "./types.js";
 
 export class CheckResultStore {
   private results = new Map<string, CheckResult[]>();
-  private maxResultsPerCheck = 10000;
+  private maxResultsPerCheck = 1000;
   private maxAgeMs: number;
 
   constructor(options?: { maxResultsPerCheck?: number; maxAgeHours?: number }) {
-    this.maxResultsPerCheck = options?.maxResultsPerCheck ?? 10000;
+    this.maxResultsPerCheck = options?.maxResultsPerCheck ?? 1000;
     this.maxAgeMs = (options?.maxAgeHours ?? 168) * 60 * 60 * 1000; // Default 7 days
   }
 

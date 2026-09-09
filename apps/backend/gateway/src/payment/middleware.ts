@@ -131,7 +131,7 @@ export async function ensureThreeDSecureEnabled(
       return notFound(res, "Payment method not found", req);
     }
 
-    if (!paymentMethod.threeDSecureEnabled) {
+    if (!paymentMethod.threeDSecure?.enabled) {
       return forbidden(res, "3D Secure is not enabled for this payment method", req);
     }
 

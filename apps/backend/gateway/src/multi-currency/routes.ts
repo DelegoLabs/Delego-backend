@@ -1,7 +1,7 @@
 import type { RouteHandler } from "@delegolabs/utils";
-import { json } from "@delegolabs/utils";
 import { internalError, notFound, validationError, success } from "../errors.js";
-import { getAuthenticatedUserContext } from "../middleware/auth.js";
+import { getAuthenticatedUserContext } from "../../middleware/auth.js";
+import { readJsonBody } from "../request.js";
 import {
   getFXRate,
   findConversionPath,
@@ -18,20 +18,17 @@ import {
   getAutoRoute,
 } from "./paymentService.js";
 import type {
-  FXRateRequest,
-  FXRateResponse,
   MultiCurrencyPaymentRequest,
-  MultiCurrencyPaymentResponse,
-  AutoRouteRequest,
-  AutoRouteResponse,
 } from "@delegolabs/types";
 
 /**
  * Get FX rate handler
  */
-export const getFXRateHandler: RouteHandler = async (req, res) => {
+export const getFXRateHandler: RouteHandler = async (req, res, _params) => {
   try {
-    const { baseCurrency, quoteCurrency } = req.query as { baseCurrency: string; quoteCurrency: string };
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const baseCurrency = url.searchParams.get("baseCurrency") || "";
+    const quoteCurrency = url.searchParams.get("quoteCurrency") || "";
 
     if (!baseCurrency || !quoteCurrency) {
       return validationError(res, "baseCurrency and quoteCurrency are required", req);
@@ -49,9 +46,11 @@ export const getFXRateHandler: RouteHandler = async (req, res) => {
 /**
  * Find conversion path handler
  */
-export const findConversionPathHandler: RouteHandler = async (req, res) => {
+export const findConversionPathHandler: RouteHandler = async (req, res, _params) => {
   try {
-    const { fromCurrency, toCurrency } = req.query as { fromCurrency: string; toCurrency: string };
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const fromCurrency = url.searchParams.get("fromCurrency") || "";
+    const toCurrency = url.searchParams.get("toCurrency") || "";
 
     if (!fromCurrency || !toCurrency) {
       return validationError(res, "fromCurrency and toCurrency are required", req);
@@ -69,14 +68,14 @@ export const findConversionPathHandler: RouteHandler = async (req, res) => {
 /**
  * Create multi-currency payment handler
  */
-export const createMultiCurrencyPaymentHandler: RouteHandler = async (req, res) => {
+export const createMultiCurrencyPaymentHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const body: MultiCurrencyPaymentRequest = req.body;
+    const body = (await readJsonBody(req)) as MultiCurrencyPaymentRequest;
 
     // Validate required fields
     if (!body.sourceCurrency || !body.sourceAmount || !body.destinationCurrency || !body.destinationAddress) {
@@ -104,15 +103,15 @@ export const createMultiCurrencyPaymentHandler: RouteHandler = async (req, res) 
 /**
  * Execute path payment handler
  */
-export const executePathPaymentHandler: RouteHandler = async (req, res) => {
+export const executePathPaymentHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentId } = req.params as { paymentId: string };
-    const { transactionHash } = req.body as { transactionHash: string };
+    const { paymentId } = params as { paymentId: string };
+    const { transactionHash } = (await readJsonBody(req)) as { transactionHash: string };
 
     const payment = await executePathPayment(paymentId, transactionHash);
 
@@ -126,15 +125,15 @@ export const executePathPaymentHandler: RouteHandler = async (req, res) => {
 /**
  * Complete multi-currency payment handler
  */
-export const completeMultiCurrencyPaymentHandler: RouteHandler = async (req, res) => {
+export const completeMultiCurrencyPaymentHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentId } = req.params as { paymentId: string };
-    const { ledgerSequence } = req.body as { ledgerSequence: number };
+    const { paymentId } = params as { paymentId: string };
+    const { ledgerSequence } = (await readJsonBody(req)) as { ledgerSequence: number };
 
     const payment = await completeMultiCurrencyPayment(paymentId, ledgerSequence);
 
@@ -148,15 +147,15 @@ export const completeMultiCurrencyPaymentHandler: RouteHandler = async (req, res
 /**
  * Fail multi-currency payment handler
  */
-export const failMultiCurrencyPaymentHandler: RouteHandler = async (req, res) => {
+export const failMultiCurrencyPaymentHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentId } = req.params as { paymentId: string };
-    const { reason } = req.body as { reason: string };
+    const { paymentId } = params as { paymentId: string };
+    const { reason } = (await readJsonBody(req)) as { reason: string };
 
     const payment = await failMultiCurrencyPayment(paymentId, reason);
 
@@ -170,14 +169,14 @@ export const failMultiCurrencyPaymentHandler: RouteHandler = async (req, res) =>
 /**
  * Get payment handler
  */
-export const getPaymentHandler: RouteHandler = async (req, res) => {
+export const getPaymentHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentId } = req.params as { paymentId: string };
+    const { paymentId } = params as { paymentId: string };
 
     const payment = await getPayment(paymentId);
     if (!payment) {
@@ -194,19 +193,20 @@ export const getPaymentHandler: RouteHandler = async (req, res) => {
 /**
  * List payments handler
  */
-export const listPaymentsHandler: RouteHandler = async (req, res) => {
+export const listPaymentsHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
+    const url = new URL(req.url ?? "/", "http://localhost");
     const filters: any = {
-      sourceCurrency: req.query?.sourceCurrency,
-      destinationCurrency: req.query?.destinationCurrency,
-      status: req.query?.status,
-      page: Number(req.query?.page) || 1,
-      limit: Number(req.query?.limit) || 20,
+      sourceCurrency: url.searchParams.get("sourceCurrency") || undefined,
+      destinationCurrency: url.searchParams.get("destinationCurrency") || undefined,
+      status: url.searchParams.get("status") || undefined,
+      page: Number(url.searchParams.get("page")) || 1,
+      limit: Number(url.searchParams.get("limit")) || 20,
     };
 
     const result = await listPayments(filters);
@@ -221,13 +221,12 @@ export const listPaymentsHandler: RouteHandler = async (req, res) => {
 /**
  * Get auto-route handler
  */
-export const getAutoRouteHandler: RouteHandler = async (req, res) => {
+export const getAutoRouteHandler: RouteHandler = async (req, res, _params) => {
   try {
-    const { sourceCurrency, sourceAmount, destinationCurrency } = req.query as {
-      sourceCurrency: string;
-      sourceAmount: string;
-      destinationCurrency: string;
-    };
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const sourceCurrency = url.searchParams.get("sourceCurrency") || "";
+    const sourceAmount = url.searchParams.get("sourceAmount") || "";
+    const destinationCurrency = url.searchParams.get("destinationCurrency") || "";
 
     if (!sourceCurrency || !sourceAmount || !destinationCurrency) {
       return validationError(
@@ -249,7 +248,7 @@ export const getAutoRouteHandler: RouteHandler = async (req, res) => {
 /**
  * Refresh FX rates handler
  */
-export const refreshFXRatesHandler: RouteHandler = async (req, res) => {
+export const refreshFXRatesHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
@@ -273,14 +272,14 @@ export const refreshFXRatesHandler: RouteHandler = async (req, res) => {
 /**
  * Calculate account exposure handler
  */
-export const calculateAccountExposureHandler: RouteHandler = async (req, res) => {
+export const calculateAccountExposureHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId } = req.params as { accountId: string };
+    const { accountId } = params as { accountId: string };
 
     if (accountId !== userContext.userId && !userContext.roles?.includes("admin")) {
       return notFound(res, "Cannot view exposure for another account", req);

@@ -16,6 +16,7 @@ export type AlertType =
   | "burn_rate_critical"
   | "error_budget_critical"
   | "error_budget_exhausted"
+  | "error_budget_warning"
   | "fast_burn_warning"
   | "fast_burn_critical"
   | "slow_burn_warning"
@@ -211,7 +212,7 @@ export class SLOAlertManager {
   // ─── Clear Alerts for SLO ──────────────────────────────────────────────
 
   clearAlerts(sloId: string): void {
-    for (const [id, alert] of this.alerts) {
+    for (const [, alert] of this.alerts) {
       if (alert.sloId === sloId) {
         alert.active = false;
         alert.resolvedAt = new Date().toISOString();

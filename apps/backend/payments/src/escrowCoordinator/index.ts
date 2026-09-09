@@ -16,18 +16,24 @@ import {
 } from "./paymentRecordStore.js";
 import { publishPaymentStatusEvent } from "./redisEvents.js";
 import { getEscrowFundingLockManager } from "./escrowFundingLock.js";
-import type {
-  DisputeEscrowParams,
-  DisputeResult,
-  EscrowCoordinator,
-  EscrowStatusResult,
-  FundEscrowParams,
-  FundEscrowResult,
-  PaymentRecord,
-  RefundEscrowParams,
-  RefundResult,
-  ReleaseEscrowParams,
-  ReleaseResult,
+import {
+  InsufficientEscrowBalanceError,
+  type DisputeEscrowParams,
+  type DisputeResult,
+  type EscrowCoordinator,
+  type EscrowStatusResult,
+  type FundEscrowParams,
+  type FundEscrowResult,
+  type PartialRefundEscrowParams,
+  type PartialRefundResult,
+  type PartialReleaseEscrowParams,
+  type PartialReleaseResult,
+  type PaymentRecord,
+  type RefundEscrowParams,
+  type RefundResult,
+  type ReleaseEscrowParams,
+  type ReleaseResult,
+  type RemainingBalance,
 } from "./types.js";
 
 const log = createLogger("payments:escrow-coordinator", process.env.LOG_LEVEL ?? "info");

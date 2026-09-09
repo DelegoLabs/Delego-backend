@@ -671,12 +671,6 @@ export function registerRoutes(): Route[] {
       }
     }),
 
-    // ─── Issue #47 — Recurring Payment Subscriptions with Escrow ────────────
-
-    route("POST", "/subscriptions/plans", async (req, res) => {
-      try {
-        const body = await readJsonBody(req);
-        const validated = validateCreatePlanRequest(body);
     // Issue #45 — HMAC-verified delivery-confirmation webhook driving escrow auto-release.
     route("POST", "/escrow/:escrowId/delivery-confirmed", async (req, res, params) => {
       try {
@@ -712,6 +706,38 @@ export function registerRoutes(): Route[] {
         }
 
         const validated = validateDeliveryConfirmation(body, params.escrowId);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const result = await handleDeliveryConfirmation(validated.value);
+
+        if ("scheduled" in result) {
+          json(res, 202, { data: result, error: null });
+          return;
+        }
+
+        json(res, result.success ? 200 : 502, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof EscrowDisputedError) {
+          json(res, 409, { data: null, error: { code: "ESCROW_DISPUTED", message: err.message } });
+          return;
+        }
+        if (err instanceof EscrowNotReleasableError) {
+          json(res, 400, { data: null, error: { code: "ESCROW_NOT_RELEASABLE", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "DELIVERY_CONFIRMED_WEBHOOK_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #47 — Recurring Payment Subscriptions with Escrow ────────────
+
+    route("POST", "/subscriptions/plans", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateCreatePlanRequest(body);
         if (!validated.ok) {
           sendValidationError(res, validated.error);
           return;
@@ -850,25 +876,6 @@ export function registerRoutes(): Route[] {
         }
         if (sendSubscriptionError(res, err)) return;
         sendOperationError(res, "SUBSCRIPTION_RENEW_FAILED", err);
-      }
-        const result = await handleDeliveryConfirmation(validated.value);
-
-        if ("scheduled" in result) {
-          json(res, 202, { data: result, error: null });
-          return;
-        }
-
-        json(res, result.success ? 200 : 502, { data: result, error: null });
-      } catch (err) {
-        if (err instanceof EscrowDisputedError) {
-          json(res, 409, { data: null, error: { code: "ESCROW_DISPUTED", message: err.message } });
-          return;
-        }
-        if (err instanceof EscrowNotReleasableError) {
-          json(res, 400, { data: null, error: { code: "ESCROW_NOT_RELEASABLE", message: err.message } });
-          return;
-        }
-        sendOperationError(res, "DELIVERY_CONFIRMED_WEBHOOK_FAILED", err);
       }
     }),
 

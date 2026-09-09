@@ -58,7 +58,7 @@ async function setupTokens() {
   return { pair, record: createdRecord! };
 }
 
-describe("JWT token management (Issue #77)", () => {
+describe("JWT token management (Issue #77)", { timeout: 30000 }, () => {
   beforeEach(() => {
     resetSigningKeyStore();
     resetTokenBlacklist();

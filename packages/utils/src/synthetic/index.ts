@@ -13,27 +13,11 @@
  *   - Status page integration
  */
 
-export {
-  SyntheticMonitor,
-  type SyntheticCheck,
-  type CheckResult,
-  type SyntheticMetrics,
-  type CheckType,
-  type Assertion,
-  type AssertionOperator,
-  type AlertingConfig,
-} from "./monitor.js";
-
-export { CheckExecutor, type CheckOptions } from "./executor.js";
-
-export { CheckScheduler, type Schedule } from "./scheduler.js";
-
+export { SyntheticMonitor } from "./monitor.js";
+export { CheckExecutor } from "./executor.js";
+export { CheckScheduler } from "./scheduler.js";
 export { CheckResultStore, type StoreOptions } from "./store.js";
-
 export { StatusPageIntegration } from "./statusPage.js";
-
 export { PerformanceBenchmarks } from "./benchmarks.js";
-
 export { MaintenanceWindowManager } from "./maintenance.js";
-
 export * from "./types.js";

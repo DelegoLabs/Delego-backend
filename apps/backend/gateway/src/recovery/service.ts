@@ -1,24 +1,22 @@
+import { Op } from "sequelize";
 import { RecoveryConfig } from "../models/RecoveryConfig.js";
 import { RecoveryRequest } from "../models/RecoveryRequest.js";
 import { RecoveryAuditLog } from "../models/RecoveryAuditLog.js";
 import { RecoveryChallenge } from "../models/RecoveryChallenge.js";
-import { User } from "../models/User.js";
 import type {
   RecoveryConfig as RecoveryConfigType,
   RecoveryRequest as RecoveryRequestType,
-  RecoveryAudit,
   RecoveryInitiationRequest,
   GuardianApprovalRequest,
   RecoveryCompleteRequest,
   RecoveryListRequest,
   RecoveryListResponse,
-  AddGuardianRequest,
-  RemoveGuardianRequest,
-  UpdateGuardianRequest,
-  AddEmergencyContactRequest,
-  RemoveEmergencyContactRequest,
   UpdateRecoveryConfigRequest,
   RecoveryConfigResponse,
+  AddGuardianRequest,
+  RemoveGuardianRequest,
+  AddEmergencyContactRequest,
+  RemoveEmergencyContactRequest,
 } from "@delegolabs/types";
 
 const crypto = await import("crypto");
@@ -117,13 +115,8 @@ export async function getRecoveryConfig(accountId: string): Promise<RecoveryConf
     return null;
   }
 
-  const currentVerifiedWeight = calculateVerifiedWeight(
-    config as RecoveryConfigType,
-    config.guardiansApproved || []
-  );
-
   return {
-    guardians: config.guardians,
+    guardians: config.guardians as unknown as RecoveryConfigType["guardians"],
     threshold: config.threshold,
     delayHours: config.delayHours,
     emergencyContacts: config.emergencyContacts,
@@ -144,18 +137,19 @@ export async function updateRecoveryConfig(
 
   // Process guardian updates
   if (updates.guardians) {
-    const guardians = Array.isArray(updates.guardians) ? [...config.guardians] : config.guardians;
+    const guardians = [...config.guardians];
+    const guardianUpdates = (Array.isArray(updates.guardians) ? updates.guardians : [updates.guardians]) as Array<Record<string, any>>;
 
-    for (const update of updates.guardians) {
-      if ("weight" in update) {
+    for (const update of guardianUpdates) {
+      if ("weight" in update && "guardianId" in update) {
         // Update guardian weight
-        const existingGuardian = guardians.find(g => g.id === update.guardianId);
-        if (existingGuardian) {
+        const existingGuardian = guardians.find((g: any) => g.id === update.guardianId);
+        if (existingGuardian && typeof update.weight === "number") {
           existingGuardian.weight = update.weight;
         }
       } else if ("type" in update) {
         // Add new guardian
-        const newGuardian: RecoveryConfigType["guardians"][0] = {
+        const newGuardian: any = {
           id: crypto.randomUUID(),
           type: update.type,
           identifier: update.identifier,
@@ -172,12 +166,13 @@ export async function updateRecoveryConfig(
 
   // Process emergency contact updates
   if (updates.emergencyContacts) {
-    const contacts = Array.isArray(updates.emergencyContacts) ? [...config.emergencyContacts] : config.emergencyContacts;
+    const contacts = [...config.emergencyContacts];
+    const contactUpdates = (Array.isArray(updates.emergencyContacts) ? updates.emergencyContacts : [updates.emergencyContacts]) as Array<Record<string, any>>;
 
-    for (const update of updates.emergencyContacts) {
+    for (const update of contactUpdates) {
       if ("name" in update) {
         // Add new emergency contact
-        const newContact: RecoveryConfigType["emergencyContacts"][0] = {
+        const newContact: any = {
           id: crypto.randomUUID(),
           name: update.name,
           email: update.email,
@@ -355,7 +350,7 @@ export async function initiateRecovery(
   const existingRecovery = await RecoveryRequest.findOne({
     where: {
       accountId,
-      status: { [RecoveryRequest.Sequelize.Op.notIn]: ["completed", "cancelled"] },
+      status: { [Op.notIn]: ["completed", "cancelled"] },
     },
   });
 
@@ -411,7 +406,7 @@ export async function initiateRecovery(
         await challenge.save();
 
         // Store challenge info in recovery request metadata
-        const metadata = recoveryRequest.metadata || {};
+        const metadata: Record<string, any> = { ...(recoveryRequest.metadata || {}) };
         if (!metadata.challenges) metadata.challenges = {};
         metadata.challenges[guardianId] = {
           challengeId,
@@ -430,7 +425,7 @@ export async function initiateRecovery(
     // This would typically use the notification service
   }
 
-  return recoveryRequest as RecoveryRequestType;
+  return recoveryRequest as unknown as RecoveryRequestType;
 }
 
 /**
@@ -674,9 +669,11 @@ export async function completeRecovery(
  * List recovery requests for an account
  */
 export async function listRecoveryRequests(
-  accountId: string,
-  request: RecoveryListRequest
+  accountIdOrRequest: string | RecoveryListRequest,
+  maybeRequest?: RecoveryListRequest
 ): Promise<RecoveryListResponse> {
+  const request = typeof accountIdOrRequest === "string" ? (maybeRequest ?? { accountId: accountIdOrRequest }) : accountIdOrRequest;
+  const accountId = typeof accountIdOrRequest === "string" ? accountIdOrRequest : accountIdOrRequest.accountId;
   const { status, page = 1, limit = 20 } = request;
 
   const where: any = { accountId };
@@ -696,7 +693,7 @@ export async function listRecoveryRequests(
   const totalPages = Math.ceil(count / limit);
 
   return {
-    recoveryRequests: rows as RecoveryRequestType[],
+    recoveryRequests: rows as unknown as RecoveryRequestType[],
     totalCount: count,
     page,
     limit,
@@ -716,7 +713,7 @@ export async function getRecoveryRequest(
     return null;
   }
 
-  return recovery as RecoveryRequestType;
+  return recovery as unknown as RecoveryRequestType;
 }
 
 /**
@@ -732,7 +729,7 @@ export async function getRecoveryProgress(accountId: string): Promise<RecoveryCo
   const activeRecoveries = await RecoveryRequest.findAll({
     where: {
       accountId,
-      status: { [RecoveryRequest.Sequelize.Op.notIn]: ["completed", "cancelled"] },
+      status: { [Op.notIn]: ["completed", "cancelled"] },
     },
   });
 
@@ -756,7 +753,7 @@ export async function getRecoveryProgress(accountId: string): Promise<RecoveryCo
   }
 
   return {
-    guardians: config.guardians,
+    guardians: config.guardians as unknown as RecoveryConfigType["guardians"],
     threshold: config.threshold,
     delayHours: config.delayHours,
     emergencyContacts: config.emergencyContacts,

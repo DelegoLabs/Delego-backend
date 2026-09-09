@@ -28,6 +28,8 @@ export interface StreamConfig {
     consumers: number;
     claimMinIdleMs: number;
   }>;
+  serializer?: (data: unknown) => string;
+  deserializer?: (data: string) => unknown;
 }
 
 export interface StreamEvent {
@@ -87,9 +89,9 @@ export type ParsedStreamMessage<T = unknown> = {
 
 export class RedisStreamManager<T = unknown> {
   private readonly streamName: string;
-  private readonly maxLength: number;
+  private maxLength: number;
   private readonly trimStrategy: "maxlen" | "minid";
-  private readonly retentionMs: number;
+  private retentionMs: number;
   private readonly consumerGroups: StreamConfig["consumerGroups"];
   private readonly client: any;
   private readonly serializer: (data: unknown) => string;
@@ -231,11 +233,11 @@ export class RedisStreamManager<T = unknown> {
       batchSize?: number;
       blockMs?: number;
       count?: number;
+      claimMinIdleMs?: number;
     } = {}
   ): Promise<StreamProcessingResult> {
-    const batchSize = options.batchSize ?? 10;
+    const count = options.count ?? options.batchSize ?? 10;
     const blockMs = options.blockMs ?? 5000;
-    const count = options.count ?? 10;
 
     const result: StreamProcessingResult = {
       stream: this.streamName,
@@ -267,17 +269,17 @@ export class RedisStreamManager<T = unknown> {
 
       for (const msg of pendingMessages as any[]) {
         const msgId = msg[0];
-        const consumer = msg[1];
         const idleTime = parseInt(msg[2], 10);
         const deliveryCount = parseInt(msg[3], 10);
 
         // Claim idle messages that haven't been ACK'd
-        if (idleTime > options.claimMinIdleMs || deliveryCount > 1) {
+        const minIdle = options.claimMinIdleMs ?? 30000;
+        if (idleTime > minIdle || deliveryCount > 1) {
           const claimed = await this.client.xClaim(
             this.streamName,
             groupName,
             consumerName,
-            options.claimMinIdleMs ?? 30000,
+            minIdle,
             [msgId]
           );
 
@@ -314,7 +316,7 @@ export class RedisStreamManager<T = unknown> {
     );
 
     if (messages) {
-      for (const [stream, msgs] of messages) {
+      for (const [_stream, msgs] of messages) {
         for (const msg of msgs as StreamMessage[]) {
           const parsed = this.parseMessage(msg);
           if (parsed) {
@@ -377,7 +379,7 @@ export class RedisStreamManager<T = unknown> {
 
       if (!messages || messages.length === 0) break;
 
-      for (const [stream, msgs] of messages) {
+      for (const [_stream, msgs] of messages) {
         for (const msg of msgs as StreamMessage[]) {
           const parsed = this.parseMessage(msg);
           if (parsed) {
@@ -586,13 +588,3 @@ export function createStreamManager<T = unknown>(
 ): RedisStreamManager<T> {
   return new RedisStreamManager<T>(streamName, config, client);
 }
-
-// Re-export types for convenience
-export type {
-  StreamConfig,
-  StreamEvent,
-  ConsumerGroupState,
-  StreamProcessingResult,
-  StreamMessage,
-  ParsedStreamMessage,
-};

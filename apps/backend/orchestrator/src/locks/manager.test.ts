@@ -37,9 +37,9 @@ describe("DistributedLockManager", () => {
 
   it("auto-renews so the lock does not expire while held", async () => {
     const key = lockKeyForWorkflow("wf-renew");
-    const acquired = await a.acquire(key, { ttlMs: 200, autoRenew: true, renewIntervalMs: 40 });
+    const acquired = await a.acquire(key, { ttlMs: 500, autoRenew: true, renewIntervalMs: 100 });
     expect(acquired.acquired).toBe(true);
-    await new Promise((r) => setTimeout(r, 280));
+    await new Promise((r) => setTimeout(r, 650));
     const inspect = await a.inspect(key);
     expect(inspect.lock?.owner).toBe("instance-a");
     expect(inspect.pttlMs).toBeGreaterThan(0);

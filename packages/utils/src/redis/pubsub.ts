@@ -287,6 +287,7 @@ export class RedisPubSubManager {
   // ─── Message Handling ──────────────────────────────────────────────────
 
   async handleMessage(channel: string, rawMessage: string): Promise<void> {
+    const startMs = Date.now();
     let message: PubSubMessage;
 
     try {
@@ -432,11 +433,5 @@ export function getRedisPubSubManager(
 
 export function resetRedisPubSubManager(): void {
   defaultManager = null;
-}
-
-function createRequire(_importMetaUrl: string): NodeRequire {
-  return typeof require !== "undefined" ? require : (() => {
-    throw new Error("require is not available in ESM context");
-  }) as unknown as NodeRequire;
 }
 

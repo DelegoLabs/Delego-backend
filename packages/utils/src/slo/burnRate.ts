@@ -5,7 +5,7 @@
  * alert severity based on thresholds.
  */
 
-import { createLogger } from "../logger.js";
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -128,7 +128,7 @@ export class BurnRateCalculator {
     sloId: string,
     window: string,
     rate: number,
-    now: Date
+    _now: Date
   ): void {
     let windowRates = this.burnRates.get(sloId);
     if (!windowRates) {
@@ -167,15 +167,13 @@ export class FastBurnDetector {
 
   // Detect if error budget is burning fast
   detectFastBurn(
-    sloId: string,
+    _sloId: string,
     target: number,
     actualAvailability: number,
-    errorBudget: number,
-    now: Date = new Date()
+    _errorBudget: number,
+    _now: Date = new Date()
   ): boolean {
     // Fast burn = consuming more than 20% of error budget in 10 minutes
-    const fastBurnThreshold = errorBudget * 0.2;
-    
     // Calculate expected error budget consumption for 10 minutes
     const errorRate = 1 - actualAvailability;
     const targetErrorRate = 1 - target;
@@ -231,12 +229,12 @@ export class FastBurnDetector {
 export class SlowBurnDetector {
   // Detect if error budget is burning slow but consistently
   detectSlowBurn(
-    sloId: string,
+    _sloId: string,
     target: number,
     actualAvailability: number,
-    errorBudget: number,
+    _errorBudget: number,
     window: string,
-    now: Date = new Date()
+    _now: Date = new Date()
   ): boolean {
     // Slow burn = consistent error budget consumption over longer period
     const consumptionRate = this.estimateConsumptionRate(
@@ -250,7 +248,7 @@ export class SlowBurnDetector {
   }
 
   // Estimate daily consumption rate
-  private estimateConsumptionRate(
+  estimateConsumptionRate(
     actualAvailability: number,
     target: number,
     window: string
@@ -325,9 +323,3 @@ export class SlowBurnDetector {
     };
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Logger
-// ─────────────────────────────────────────────────────────────────────────────
-
-const log = createLogger("utils:slo-burnrate", process.env.LOG_LEVEL ?? "info");

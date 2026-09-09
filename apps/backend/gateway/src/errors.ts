@@ -111,8 +111,9 @@ export function internalError(
   res: ServerResponse,
   message: string,
   req?: IncomingMessage,
+  details?: unknown,
 ): void {
-  sendApiError(res, 500, "INTERNAL_ERROR", message, req);
+  sendApiError(res, 500, "INTERNAL_ERROR", message, req, { details });
 }
 
 export function success(

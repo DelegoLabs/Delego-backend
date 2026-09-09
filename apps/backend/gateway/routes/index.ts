@@ -22,7 +22,7 @@ import {
   revokeDelegationHandler,
 } from "./delegations.js";
 import { getWalletHandler } from "./wallets.js";
-import { rateLimitMetricsHandler, circuitBreakerStatusHandler } from "./admin.js";
+import { rateLimitMetricsHandler, circuitBreakerStatusHandler, tieredRateLimitMetricsHandler } from "./admin.js";
 import { auditLogQueryHandler, auditLogVerifyHandler } from "./audit.js";
 import { swaggerHandler } from "../src/swagger.js";
 import { logSearchHandler, logStatsHandler, logClearHandler } from "../src/logging/routes.js";
@@ -81,6 +81,9 @@ import {
   testTemplateHandler,
   templateDocumentationHandler,
 } from "../../orchestrator/src/templates/routes.js";
+import { registerPaymentRoutes } from "./payment.js";
+import { registerRecoveryRoutes } from "./recovery.js";
+import { registerMultiCurrencyRoutes } from "./multi-currency.js";
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
