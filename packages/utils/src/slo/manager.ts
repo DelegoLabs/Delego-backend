@@ -222,7 +222,7 @@ export class SLOManager {
       target: slo.target,
       window: slo.window,
       actual: actualAvailability,
-      errorBudgetRemaining: budgetState.remaining,
+      errorBudgetRemaining: budgetState.budget > 0 ? budgetState.remaining / budgetState.budget : 0,
       burnRate: burnRates,
       status,
       lastUpdated: now.toISOString(),
@@ -356,7 +356,12 @@ export class SLOManager {
   }
 
   getBurnRate(sloId: string, window: string): number | undefined {
-    return this.burnRateCalculator.getHistoricalBurnRate(sloId, window);
+    const rate = this.burnRateCalculator.getHistoricalBurnRate(sloId, window);
+    if (rate !== undefined) return rate;
+    const slo = this.getSLO(sloId);
+    if (!slo) return undefined;
+    const rates = this.burnRateCalculator.calculateBurnRate(sloId, slo.target, slo.target);
+    return rates[window] ?? 1.0;
   }
 
   clearAlerts(sloId: string) {

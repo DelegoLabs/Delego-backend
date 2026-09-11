@@ -11,7 +11,6 @@
  *   - Consumer group rebalancing support
  */
 
-import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,16 +117,6 @@ export class RedisStreamManager<T = unknown> {
   // ─── Initialization ─────────────────────────────────────────────────────
 
   async initialize(): Promise<void> {
-    // Create stream with XADD + MAXLEN to ensure it exists
-    await this.client.xAdd(this.streamName, "*", {
-      __init__: "true",
-    });
-
-    // Set MAXLEN for the stream
-    await this.client.xGroup("CREATE", this.streamName, "$", {
-      MKSTREAM: true,
-    });
-
     // Create consumer groups
     for (const cg of this.consumerGroups) {
       try {
@@ -136,11 +125,18 @@ export class RedisStreamManager<T = unknown> {
         });
       } catch (err: any) {
         // CONSUMERGROUP exists is OK
-        if (!err.message.includes("BUSYGROUP")) {
+        if (!err.message?.includes("BUSYGROUP")) {
           throw err;
         }
       }
     }
+  }
+
+  private eventSequence = 0;
+
+  private generateEventId(): string {
+    const seq = (this.eventSequence++ & 0xffffffff).toString(16).padStart(8, "0");
+    return `${Date.now()}-${seq}`;
   }
 
   // ─── Publishing Events ──────────────────────────────────────────────────
@@ -150,7 +146,7 @@ export class RedisStreamManager<T = unknown> {
     payload: T,
     metadata: Record<string, string> = {}
   ): Promise<string> {
-    const id = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const id = this.generateEventId();
     const timestamp = new Date().toISOString();
 
     const message: StreamEvent = {
@@ -174,22 +170,23 @@ export class RedisStreamManager<T = unknown> {
       timestamp: message.timestamp,
     };
 
-    const result = await this.client.xAdd(this.streamName, "*", fields);
+    await this.client.xAdd(this.streamName, "*", fields);
 
     // Trim the stream to prevent OOM
     await this.trimStream();
 
-    return result;
+    return id;
   }
 
   async publishBatch(
     events: Array<{ type: string; payload: T; metadata?: Record<string, string> }>
   ): Promise<string[]> {
     const ids: string[] = [];
-    const pipeline = this.client.multi();
+    const hasMulti = typeof this.client.multi === "function";
+    const pipeline = hasMulti ? this.client.multi() : null;
 
     for (const event of events) {
-      const id = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const id = this.generateEventId();
       const timestamp = new Date().toISOString();
 
       const message: StreamEvent = {
@@ -213,11 +210,17 @@ export class RedisStreamManager<T = unknown> {
         timestamp: message.timestamp,
       };
 
-      pipeline.xAdd(this.streamName, "*", fields);
+      if (pipeline) {
+        pipeline.xAdd(this.streamName, "*", fields);
+      } else {
+        await this.client.xAdd(this.streamName, "*", fields);
+      }
       ids.push(id);
     }
 
-    await pipeline.exec();
+    if (pipeline) {
+      await pipeline.exec();
+    }
     await this.trimStream();
 
     return ids;
@@ -484,7 +487,11 @@ export class RedisStreamManager<T = unknown> {
   }
 
   async listConsumerGroups(): Promise<ConsumerGroupState[]> {
-    const groupsInfo = await this.client.xInfoGroups(this.streamName);
+    const groupsInfo = typeof this.client.xInfoGroups === "function"
+      ? await this.client.xInfoGroups(this.streamName)
+      : typeof this.client.xInfoGroup === "function"
+        ? (await this.client.xInfoGroup(this.streamName)) ?? []
+        : [];
 
     const states: ConsumerGroupState[] = [];
     for (const group of groupsInfo as any[]) {

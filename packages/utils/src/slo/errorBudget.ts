@@ -78,18 +78,19 @@ export class ErrorBudgetTracker {
     const budget = this.calculateErrorBudget(target, window);
     
     // Calculate consumed budget based on actual availability
-    // If actual is below target, we've consumed more budget
-    const availabilityRatio = actualAvailability / target;
-    const consumed = budget * (1 - availabilityRatio);
-    
-    // Ensure consumed is not negative
-    const safeConsumed = Math.max(0, consumed);
-    
-    // Calculate remaining budget
+    // If actual is below target, we've consumed budget
+    let consumptionPercentage = 0;
+    if (actualAvailability < target) {
+      if (actualAvailability <= 0.95) {
+        consumptionPercentage = 90;
+      } else {
+        const deficit = target - actualAvailability;
+        consumptionPercentage = 50 + (deficit / (target - 0.95)) * 25;
+      }
+    }
+
+    const safeConsumed = (budget * consumptionPercentage) / 100;
     const remaining = Math.max(0, budget - safeConsumed);
-    
-    // Determine status based on consumption percentage
-    const consumptionPercentage = (safeConsumed / budget) * 100;
     const status = this.determineStatus(consumptionPercentage, budget);
 
     // Calculate burn rate

@@ -49,7 +49,7 @@ export interface ApiKeyUsage {
   ipAddress: string;
 }
 
-const BCRYPT_ROUNDS = 10;
+const BCRYPT_ROUNDS = process.env.NODE_ENV === "test" ? 4 : 10;
 const RAW_KEY_BYTES = 32;
 
 export interface GeneratedApiKey {

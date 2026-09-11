@@ -19,6 +19,8 @@ class MockRedisClient {
   private readonly streams = new Map<string, Map<string, Record<string, string>>>();
   private readonly consumerGroups = new Map<string, Map<string, any>>();
   private readonly streamInfo = new Map<string, any>();
+  private lastTimestamp = 0;
+  private lastSequence = 0;
 
   constructor() {
     this.streams.set("events", new Map());
@@ -29,6 +31,24 @@ class MockRedisClient {
     });
   }
 
+  multi() {
+    const ops: Array<() => Promise<any>> = [];
+    const pipeline = {
+      xAdd: (stream: string, id: string, fields: Record<string, string>) => {
+        ops.push(() => this.xAdd(stream, id, fields));
+        return pipeline;
+      },
+      exec: async () => {
+        const results = [];
+        for (const op of ops) {
+          results.push(await op());
+        }
+        return results;
+      },
+    };
+    return pipeline;
+  }
+
   async xAdd(stream: string, id: string, fields: Record<string, string>): Promise<string> {
     if (!this.streams.has(stream)) {
       this.streams.set(stream, new Map());
@@ -36,7 +56,7 @@ class MockRedisClient {
     }
 
     const streamMap = this.streams.get(stream)!;
-    const entryId = id === "*" ? `${Date.now()}-0` : id;
+    const entryId = fields?.id || (id === "*" ? `${Date.now()}-${this.lastSequence++}` : id);
     streamMap.set(entryId, fields);
     this.streamInfo.get(stream)["length"] = streamMap.size;
     this.streamInfo.get(stream)["last-entry"] = { id: entryId, fields };
@@ -252,6 +272,10 @@ class MockRedisClient {
     }));
   }
 
+  async xInfoGroups(stream: string): Promise<any[]> {
+    return this.xInfoGroup(stream);
+  }
+
   async xInfoConsumers(stream: string, group: string): Promise<any[]> {
     if (!this.consumerGroups.has(stream)) return [];
     if (!this.consumerGroups.get(stream)!.has(group)) return [];
@@ -267,6 +291,10 @@ class MockRedisClient {
 
   async xGroup(operation: string, stream: string, group: string, startId?: string, options?: any): Promise<any> {
     if (operation === "CREATE") {
+      if (!this.streams.has(stream)) {
+        this.streams.set(stream, new Map());
+        this.streamInfo.set(stream, { "length": 0, "first-entry": null, "last-entry": null });
+      }
       if (!this.consumerGroups.has(stream)) {
         this.consumerGroups.set(stream, new Map());
       }
@@ -330,6 +358,12 @@ class MockRedisClient {
     let found = 0;
 
     for (const [id, fields] of streamMap.entries()) {
+      if (start && start !== "0" && start !== "-" && id < start) {
+        continue;
+      }
+      if (end && end !== "+" && id > end) {
+        continue;
+      }
       messages.push({ id, fields });
       if (++found >= count) break;
     }

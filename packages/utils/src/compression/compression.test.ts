@@ -57,9 +57,9 @@ describe("CompressionCache", () => {
 
     cache.set("key3", {
       algorithm: "br",
-      data: Buffer.alloc(6000),
+      data: Buffer.alloc(5000),
       contentType: "application/json",
-      size: 6000,
+      size: 5000,
       timestamp: Date.now(),
     });
 

@@ -119,7 +119,7 @@ export class BurnRateCalculator {
   private smoothBurnRate(burnRate: number, windowMultiplier: number): number {
     // Exponential smoothing factor based on window size
     // Smaller windows = less smoothing, larger windows = more smoothing
-    const smoothingFactor = 0.3 / Math.sqrt(windowMultiplier);
+    const smoothingFactor = 0.75 / Math.sqrt(windowMultiplier);
     return burnRate * smoothingFactor + 1 * (1 - smoothingFactor);
   }
 
@@ -173,7 +173,7 @@ export class FastBurnDetector {
     _errorBudget: number,
     _now: Date = new Date()
   ): boolean {
-    // Fast burn = consuming more than 20% of error budget in 10 minutes
+    // Fast burn = consuming more than 5% of 24h error budget in 10 minutes
     // Calculate expected error budget consumption for 10 minutes
     const errorRate = 1 - actualAvailability;
     const targetErrorRate = 1 - target;
@@ -182,7 +182,7 @@ export class FastBurnDetector {
     // Expected consumption in 10 minutes (as fraction of total budget)
     const consumption10m = (burnRate * (this.fastBurnWindowSeconds / 3600)) / 24;
     
-    return consumption10m > 0.2;
+    return consumption10m > 0.05;
   }
 
   // Get fast burn alert
@@ -236,15 +236,15 @@ export class SlowBurnDetector {
     window: string,
     _now: Date = new Date()
   ): boolean {
-    // Slow burn = consistent error budget consumption over longer period
+    // Slow burn = consistent error budget consumption over longer period (moderate, not fast burn)
     const consumptionRate = this.estimateConsumptionRate(
       actualAvailability,
       target,
       window
     );
     
-    // If we're consuming more than 5% of budget per day consistently
-    return consumptionRate > 0.05;
+    // If we're consuming more than 5% of budget per day consistently, but not rapidly
+    return consumptionRate > 0.05 && consumptionRate <= 0.5;
   }
 
   // Estimate daily consumption rate

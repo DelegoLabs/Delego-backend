@@ -355,6 +355,17 @@ export class CompressionMiddleware {
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
     const originalSize = buffer.length;
 
+    if (originalSize === 0) {
+      return {
+        algorithm: algorithm || this.config.defaultAlgorithm,
+        originalSize: 0,
+        compressedSize: 0,
+        ratio: 1,
+        timeMs: 0,
+        fromCache: false,
+      };
+    }
+
     // Check cache first
     if (this.config.cacheEnabled) {
       const cacheKey = this.generateCacheKey(buffer, contentType, algorithm || this.config.defaultAlgorithm);

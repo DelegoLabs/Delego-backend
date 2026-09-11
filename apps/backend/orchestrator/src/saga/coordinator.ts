@@ -357,7 +357,8 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await step.execute(context);
+        const executeFn = step.execute ?? (step as any).action;
+        return await executeFn.call(step, context);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         lastError = error;
@@ -392,7 +393,9 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
       current = claimed;
 
       try {
-        const context = await step.compensate(current.context, completedStep.output);
+        const context = step.compensate
+          ? await step.compensate.call(step, current.context, completedStep.output)
+          : await (step as any).compensation.call(step, current.context, _error);
         if (this.locks?.wasStolen(lockKeyForStep(current.sagaId, completedStep.stepName))) {
           this.log.warn("Step lock stolen during compensation — not persisting rollback", {
             sagaId: current.sagaId,

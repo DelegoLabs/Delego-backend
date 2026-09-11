@@ -118,6 +118,15 @@ export class SLIRegistry {
       thresholds: { good: 0.995, excellent: 0.999, poor: 0.99 },
     });
 
+    // Fraud detection availability
+    this.registerSLI({
+      name: "fraud_detection_availability",
+      description: "HTTP request success rate for fraud detection service",
+      query: "1 - (sum(rate(http_requests_total{service=\"fraud-detection\",status=~\"5..\"}[1h])) / sum(rate(http_requests_total{service=\"fraud-detection\"}[1h])))",
+      unit: "ratio",
+      thresholds: { good: 0.999, excellent: 0.9999, poor: 0.99 },
+    });
+
     // ─── Latency SLIs ───────────────────────────────────────────────────
 
     // Gateway p95 latency
@@ -230,7 +239,8 @@ export class SLIRegistry {
     }
 
     // Replace time window placeholder if present
-    let query = sli.query.replace(/\[1h\]/g, `[${window}]`);
+    const promQLWindow = window.replace(/^rolling_/, "");
+    let query = sli.query.replace(/\[1h\]/g, `[${promQLWindow}]`);
 
     return query;
   }

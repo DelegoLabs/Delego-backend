@@ -149,16 +149,6 @@ export class SLOAlertManager {
         { burnRate24h: burnRates["24h"], window: "24h" }
       );
       newAlerts.push(alert);
-    } else if (burnRates["24h"] >= thresholds.warning) {
-      const alert = this.createAlert(
-        sloId,
-        service,
-        "slow_burn_warning",
-        "warning",
-        `Slow burn detected (24h): ${burnRates["24h"].toFixed(2)}x`,
-        { burnRate24h: burnRates["24h"], window: "24h" }
-      );
-      newAlerts.push(alert);
     }
 
     return newAlerts;
