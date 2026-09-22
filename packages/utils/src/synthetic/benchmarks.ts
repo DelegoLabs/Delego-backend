@@ -4,7 +4,6 @@
  * Tracks and analyzes performance metrics for synthetic checks.
  */
 
-import { createLogger } from "../logger.js";
 import type { CheckResult, PerformanceMetrics } from "./types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,9 +187,3 @@ export class PerformanceBenchmarks {
     return Object.fromEntries(this.metrics);
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Logger
-// ─────────────────────────────────────────────────────────────────────────────
-
-const log = createLogger("utils:synthetic-benchmarks", process.env.LOG_LEVEL ?? "info");

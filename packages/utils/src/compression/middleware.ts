@@ -4,7 +4,20 @@
  * Provides Express-compatible compression middleware wrapper.
  */
 
-import type { Request, Response, NextFunction } from "express";
+export interface Request {
+  headers: Record<string, string | string[] | undefined>;
+  [key: string]: any;
+}
+
+export interface Response {
+  writeHead(status: number, headers?: any): any;
+  write(chunk: any, encoding?: any): any;
+  end(chunk?: any, encoding?: any): any;
+  [key: string]: any;
+}
+
+export type NextFunction = (err?: any) => void;
+
 import { CompressionMiddleware } from "./compression.js";
 import type { CompressionConfig } from "./types.js";
 
@@ -26,7 +39,6 @@ export function createCompressionMiddleware(
 
     // Store original methods
     const originalWriteHead = res.writeHead.bind(res);
-    const originalWrite = res.write.bind(res);
     const originalEnd = res.end.bind(res);
 
     let contentBuffer: Buffer[] = [];
@@ -66,7 +78,8 @@ export function createCompressionMiddleware(
         fullBuffer.length >= compression["config"].minSizeBytes &&
         compression.isCompressible(contentType)
       ) {
-        const acceptEncoding = req.headers["accept-encoding"] || "";
+        const rawEncoding = req.headers["accept-encoding"] || "";
+        const acceptEncoding = Array.isArray(rawEncoding) ? rawEncoding.join(", ") : rawEncoding;
         const algorithm = compression.negotiateAlgorithm(acceptEncoding);
 
         if (compression["config"].algorithms.includes(algorithm as any)) {

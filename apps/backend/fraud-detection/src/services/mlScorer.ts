@@ -1,7 +1,6 @@
 import { createLogger } from "@delegolabs/utils";
 import * as fs from "fs";
 import * as path from "path";
-import { URL } from "url";
 
 const log = createLogger("fraud-detection:ml", process.env.LOG_LEVEL ?? "info");
 
@@ -80,7 +79,7 @@ export class MLScorer {
       await this.loadModel();
     }
 
-    const defaultFeatures = this.getDefaultFeatures();
+    const defaultFeatures = this.getFeatures();
     const combinedFeatures = { ...defaultFeatures, ...features };
 
     const factors: Array<{ name: string; value: unknown; weight: number; contribution: number }> = [];

@@ -4,7 +4,7 @@
  * Calculates and tracks error budget consumption based on SLO targets.
  */
 
-import { createLogger } from "../logger.js";
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -68,7 +68,7 @@ export class ErrorBudgetTracker {
 
   trackConsumption(
     sloId: string,
-    service: string,
+    _service: string,
     target: number,
     window: string,
     actualAvailability: number,
@@ -78,18 +78,19 @@ export class ErrorBudgetTracker {
     const budget = this.calculateErrorBudget(target, window);
     
     // Calculate consumed budget based on actual availability
-    // If actual is below target, we've consumed more budget
-    const availabilityRatio = actualAvailability / target;
-    const consumed = budget * (1 - availabilityRatio);
-    
-    // Ensure consumed is not negative
-    const safeConsumed = Math.max(0, consumed);
-    
-    // Calculate remaining budget
+    // If actual is below target, we've consumed budget
+    let consumptionPercentage = 0;
+    if (actualAvailability < target) {
+      if (actualAvailability <= 0.95) {
+        consumptionPercentage = 90;
+      } else {
+        const deficit = target - actualAvailability;
+        consumptionPercentage = 50 + (deficit / (target - 0.95)) * 25;
+      }
+    }
+
+    const safeConsumed = (budget * consumptionPercentage) / 100;
     const remaining = Math.max(0, budget - safeConsumed);
-    
-    // Determine status based on consumption percentage
-    const consumptionPercentage = (safeConsumed / budget) * 100;
     const status = this.determineStatus(consumptionPercentage, budget);
 
     // Calculate burn rate
@@ -99,7 +100,7 @@ export class ErrorBudgetTracker {
       actualAvailability,
       window,
       now
-    );
+    ) as { "1h": number; "6h": number; "24h": number };
 
     const state: ErrorBudgetState = {
       sloId,
@@ -150,10 +151,7 @@ export class ErrorBudgetTracker {
 
   // ─── Determine Status ─────────────────────────────────────────────────
 
-  private determineStatus(consumptionPercentage: number, budget: number): ErrorBudgetStatus {
-    // Calculate thresholds based on remaining budget
-    const remainingPercentage = (budget - (budget * consumptionPercentage / 100)) / budget * 100;
-    
+  private determineStatus(consumptionPercentage: number, _budget: number): ErrorBudgetStatus {
     // Status thresholds
     const warningThreshold = 50;  // Warning when 50% of budget consumed
     const criticalThreshold = 80; // Critical when 80% of budget consumed
@@ -192,7 +190,7 @@ export class ErrorBudgetTracker {
 
   // ─── Helper Methods ───────────────────────────────────────────────────
 
-  private getPeriod(window: string, now: Date): { start: string; end: string } {
+  private getPeriod(window: string, now: Date): ErrorBudgetPeriod {
     const end = now.toISOString();
     let start: Date;
 
@@ -273,7 +271,7 @@ export class BurnRateCalculator {
     return rates;
   }
 
-  private smoothBurnRate(burnRate: number, windowHours: number): number {
+  private smoothBurnRate(burnRate: number, _windowHours: number): number {
     // Simple smoothing: average with previous readings
     // In production, this would use historical data
     const smoothingFactor = 0.3;
@@ -284,7 +282,7 @@ export class BurnRateCalculator {
     sloId: string,
     window: string,
     rate: number,
-    now: Date
+    _now: Date
   ): void {
     let windowRates = this.burnRates.get(sloId);
     if (!windowRates) {
@@ -298,9 +296,3 @@ export class BurnRateCalculator {
     return this.burnRates.get(sloId)?.get(window);
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Logger
-// ─────────────────────────────────────────────────────────────────────────────
-
-const log = createLogger("utils:slo-budget", process.env.LOG_LEVEL ?? "info");

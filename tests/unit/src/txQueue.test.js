@@ -98,6 +98,22 @@ describe("Wallet Transaction Queue & Sequence Sync", () => {
 
     await closeQueue();
 
+    try {
+      const { sequelize } = await import("../../../apps/backend/wallet/dist/src/db.js");
+      await sequelize?.close();
+    } catch {
+      // Ignore
+    }
+
+    try {
+      const redis = getRedisConnection();
+      if (redis && typeof redis.quit === "function") {
+        await redis.quit();
+      }
+    } catch {
+      // Ignore
+    }
+
     // Clean up temporary vault file
     try {
       if (process.env.VAULT_FILE_PATH) {

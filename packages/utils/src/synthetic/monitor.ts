@@ -15,8 +15,8 @@ import type {
   SyntheticCheck,
   CheckResult,
   SyntheticMetrics,
-  CheckExecutionResult,
   Incident,
+  PerformanceMetrics,
 } from "./types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -320,6 +320,7 @@ export class SyntheticMonitor {
               checkId,
               location,
               startTime: result.timestamp,
+              duration: 0,
               failureCount: 1,
               status: "active",
             };
@@ -344,7 +345,7 @@ export class SyntheticMonitor {
     }
   }
 
-  private identifyIncidents(checkId: string, results: CheckResult[]): Array<{ start: string; end?: string; duration: number; locations: string[] }> {
+  private identifyIncidents(checkId: string, _results: CheckResult[]): Array<{ start: string; end?: string; duration: number; locations: string[] }> {
     const incidents: Array<{ start: string; end?: string; duration: number; locations: string[] }> = [];
 
     const checkIncidents = this.incidents.get(checkId) || [];

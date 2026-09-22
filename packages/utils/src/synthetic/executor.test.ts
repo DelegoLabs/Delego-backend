@@ -185,23 +185,26 @@ describe("CheckExecutor", () => {
   describe("SSL Check", () => {
     it("should execute SSL check successfully", async () => {
       const https = require("https");
-      vi.mocked(https.request).mockImplementation(() => {
-        return {
-          on: (event: string, callback: () => void) => {
+      vi.spyOn(https, "request").mockImplementation((_url: any, _options: any, callback?: any) => {
+        if (typeof callback === "function") {
+          callback({
+            resume: () => {},
+          });
+        }
+        const req: any = {
+          on: vi.fn((event: string, cb: any) => {
             if (event === "socket") {
-              callback({
-                on: (evt: string, cb: () => void) => {
-                  if (evt === "secureConnect") {
-                    cb();
-                  }
+              cb({
+                on: (evt: string, c: any) => {
+                  if (evt === "secureConnect") c();
                 },
               });
-            } else if (event === "error") {
-              callback(new Error("SSL error"));
             }
-          },
-          end: () => {},
+            return req;
+          }),
+          end: vi.fn(),
         };
+        return req;
       });
 
       const check = {

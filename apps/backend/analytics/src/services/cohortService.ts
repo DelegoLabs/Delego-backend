@@ -1,5 +1,3 @@
-import { CohortAnalysis } from "../models/CohortAnalysis.js";
-import { NotificationEvent } from "../models/NotificationEvent.js";
 import { CohortAnalysisResponse } from "../schemas.js";
 
 /**
@@ -22,7 +20,7 @@ export class CohortService {
   /**
    * Generate weekly cohort analysis
    */
-  async generateWeeklyCohorts(startDate: string, endDate: string): Promise<CohortAnalysisResponse[]> {
+  async generateWeeklyCohorts(_startDate: string, _endDate: string): Promise<CohortAnalysisResponse[]> {
     // Mock implementation - will generate weekly cohorts when database is connected
     return [];
   }

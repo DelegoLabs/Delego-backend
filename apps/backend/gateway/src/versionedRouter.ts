@@ -59,7 +59,7 @@ export function buildVersionedRoutes(declarations: VersionedRoute[]): Route[] {
       const resolvedPath = resolvePath(decl.path, slug);
 
       routes.push(
-        route(decl.method.toUpperCase(), resolvedPath, async (req, res, params) => {
+        route(decl.method.toUpperCase(), resolvedPath, async (req, res, _params) => {
           // Prefer the version the middleware already negotiated; fall back to
           // the slug baked into the concrete path so the handler always has one.
           const ctx = getVersionContext(req);

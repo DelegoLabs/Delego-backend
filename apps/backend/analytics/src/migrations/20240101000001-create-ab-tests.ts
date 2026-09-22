@@ -154,7 +154,7 @@ export async function up(queryInterface: QueryInterface, Sequelize: Sequelize): 
   await queryInterface.addIndex("cohort_analyses", ["cohort", "period"], { unique: true });
 }
 
-export async function down(queryInterface: QueryInterface, Sequelize: Sequelize): Promise<void> {
+export async function down(queryInterface: QueryInterface, _Sequelize: Sequelize): Promise<void> {
   await queryInterface.dropTable("ab_test_variants");
   await queryInterface.dropTable("ab_tests");
   await queryInterface.dropTable("cohort_analyses");

@@ -171,7 +171,7 @@ export async function up(queryInterface: QueryInterface, Sequelize: Sequelize): 
   await queryInterface.addIndex("data_export_logs", ["created_at"]);
 }
 
-export async function down(queryInterface: QueryInterface, Sequelize: Sequelize): Promise<void> {
+export async function down(queryInterface: QueryInterface, _Sequelize: Sequelize): Promise<void> {
   await queryInterface.dropTable("data_export_logs");
   await queryInterface.dropTable("custom_events");
   await queryInterface.dropTable("revenue_attributions");

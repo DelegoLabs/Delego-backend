@@ -5,6 +5,7 @@ import { generateFingerprint, validateCardDetails, validateBankDetails, validate
 import type { 
   PaymentMethod as PaymentMethodType,
   PaymentMethodCreate,
+  PaymentMethodVerificationMethod,
   TokenizationResponse,
   VerificationResult,
   VerificationRequest,
@@ -12,10 +13,6 @@ import type {
   VaultListMethodsResponse,
   VaultUpdateMethodRequest,
   VaultRemoveMethodRequest,
-  ThreeDSecureRequest,
-  ThreeDSecureResult,
-  NetworkTokenizationRequest,
-  NetworkTokenizationResponse,
 } from "@delegolabs/types";
 
 const crypto = await import("crypto");
@@ -133,7 +130,7 @@ export async function tokenizeCard(
     brand: paymentMethod.brand,
     verified: paymentMethod.verified,
     verificationRequired: verificationResult ? verificationResult.status === "pending" : false,
-    verificationMethod: verificationResult?.status === "pending" ? verificationResult.verificationDetails.method : undefined,
+    verificationMethod: verificationResult?.status === "pending" ? (verificationResult.verificationDetails.method as PaymentMethodVerificationMethod) : undefined,
   };
 }
 
@@ -219,7 +216,7 @@ export async function tokenizeBankAccount(
     fingerprint: paymentMethod.fingerprint,
     verified: paymentMethod.verified,
     verificationRequired: verificationResult ? verificationResult.status === "pending" : false,
-    verificationMethod: verificationResult?.status === "pending" ? verificationResult.verificationDetails.method : undefined,
+    verificationMethod: verificationResult?.status === "pending" ? (verificationResult.verificationDetails.method as PaymentMethodVerificationMethod) : undefined,
   };
 }
 
@@ -232,7 +229,7 @@ export async function tokenizeWallet(
   // Validate wallet details
   const validation = validateWalletDetails({
     walletType: request.details.walletType,
-    walletToken: request.details.walletToken,
+    walletToken: (request.details as Record<string, unknown>).walletToken as string | undefined,
     walletAddress: request.details.walletAddress,
   });
 
@@ -300,6 +297,7 @@ export async function tokenizeWallet(
     token: paymentMethod.token,
     fingerprint: paymentMethod.fingerprint,
     verified: paymentMethod.verified,
+    verificationRequired: false,
     verificationMethod: paymentMethod.verificationMethod,
   };
 }
@@ -447,7 +445,7 @@ export async function listPaymentMethods(request: VaultListMethodsRequest): Prom
   const totalPages = Math.ceil(count / limit);
 
   return {
-    paymentMethods: rows as PaymentMethodType[],
+    paymentMethods: rows as unknown as PaymentMethodType[],
     totalCount: count,
     page,
     limit,
@@ -467,7 +465,7 @@ export async function updatePaymentMethod(
     throw new Error("Payment method not found");
   }
 
-  const updates: Partial<typeof request> = {};
+  const updates: Record<string, unknown> = {};
 
   if (request.metadata !== undefined) {
     updates.metadata = { ...paymentMethod.metadata, ...request.metadata };
@@ -484,7 +482,7 @@ export async function updatePaymentMethod(
   }
 
   if (request.threeDSecure !== undefined) {
-    updates.threeDSecureEnabled = request.threeDSecure.enabled;
+    updates.threeDSecure = request.threeDSecure;
   }
 
   await paymentMethod.update(updates);
@@ -542,14 +540,14 @@ export async function getPaymentMethod(paymentMethodId: string): Promise<Payment
     return null;
   }
 
-  return paymentMethod as PaymentMethodType;
+  return paymentMethod as unknown as PaymentMethodType;
 }
 
 /**
  * Check if a payment method is expired
  */
-export function checkPaymentMethodExpiry(paymentMethodId: string): boolean {
-  const paymentMethod = PaymentMethod.findByPk(paymentMethodId);
+export async function checkPaymentMethodExpiry(paymentMethodId: string): Promise<boolean> {
+  const paymentMethod = await PaymentMethod.findByPk(paymentMethodId);
   if (!paymentMethod) {
     return false;
   }
@@ -587,8 +585,8 @@ export async function markPaymentMethodUsed(paymentMethodId: string): Promise<vo
 /**
  * Check if payment method is usable
  */
-export function isUsable(paymentMethodId: string): boolean {
-  const paymentMethod = PaymentMethod.findByPk(paymentMethodId);
+export async function isUsable(paymentMethodId: string): Promise<boolean> {
+  const paymentMethod = await PaymentMethod.findByPk(paymentMethodId);
   if (!paymentMethod) {
     return false;
   }

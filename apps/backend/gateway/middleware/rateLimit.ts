@@ -4,6 +4,8 @@ import { checkRateLimit } from "../src/rateLimit/tokenBucket/limiter.js";
 import { resolveTier } from "../src/rateLimit/tokenBucket/tierResolver.js";
 import { extractAuth } from "./auth.js";
 import type { RateLimitConfig, RateLimitKey } from "../src/rateLimit/tokenBucket/types.js";
+import type { RateLimitConfig as LegacyRateLimitConfig } from "../src/rateLimit/types.js";
+import { checkRateLimit as legacyCheckRateLimit } from "../src/rateLimit/rateLimiter.js";
 
 function getIdentifier(req: IncomingMessage): string {
   const auth = extractAuth(req);
@@ -32,7 +34,7 @@ function getEndpoint(req: IncomingMessage): { method: string; path: string } {
  * the authenticated-user context `extractAuth` populates) sees the caller's
  * verified roles rather than defaulting everyone to "free".
  */
-export function rateLimitMiddleware(overrideConfig?: RateLimitConfig) {
+export function rateLimitMiddleware(overrideConfig?: RateLimitConfig | LegacyRateLimitConfig) {
   return async (
     req: IncomingMessage,
     res: ServerResponse,
@@ -46,10 +48,38 @@ export function rateLimitMiddleware(overrideConfig?: RateLimitConfig) {
       }
 
       const identifier = getIdentifier(req);
+
+      if (overrideConfig && "maxRequests" in overrideConfig) {
+        const legacyResult = await legacyCheckRateLimit(
+          identifier,
+          `${method}:${path}`,
+          overrideConfig as LegacyRateLimitConfig,
+        );
+
+        res.setHeader("RateLimit-Limit", legacyResult.limit);
+        res.setHeader("RateLimit-Remaining", legacyResult.remaining);
+        res.setHeader("RateLimit-Reset", legacyResult.resetInSeconds);
+
+        if (!legacyResult.allowed) {
+          res.setHeader("Retry-After", legacyResult.resetInSeconds);
+          json(res, 429, {
+            data: null,
+            error: {
+              code: "RATE_LIMIT_EXCEEDED",
+              message: `Rate limit exceeded. Please retry after ${legacyResult.resetInSeconds} seconds.`,
+            },
+          });
+          return;
+        }
+
+        next();
+        return;
+      }
+
       const tier = resolveTier(req);
 
       const key: RateLimitKey = { identifier, tier, endpoint: path, method };
-      const result = await checkRateLimit(key, overrideConfig);
+      const result = await checkRateLimit(key, overrideConfig as RateLimitConfig);
 
       res.setHeader("RateLimit-Limit", result.limit);
       res.setHeader("RateLimit-Remaining", result.remaining);

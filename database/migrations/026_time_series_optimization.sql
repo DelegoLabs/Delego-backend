@@ -120,13 +120,8 @@ CREATE TABLE IF NOT EXISTS ts_audit_events (
   PRIMARY KEY (ts, action, actor)
 ) PARTITION BY RANGE (ts);
 
--- COMPRESSION / storage tuning.
---   * fillfactor < 100 leaves room for in-place updates and lowers page churn.
---   * toast_tuple_target moves wide JSONB payloads off the main page sooner,
---     so they compress (LZ4/PGLZ) via the TOAST machinery.
-ALTER TABLE ts_metrics      SET (fillfactor = 90, toast_tuple_target = 128);
-ALTER TABLE ts_events       SET (fillfactor = 90, toast_tuple_target = 128);
-ALTER TABLE ts_audit_events SET (fillfactor = 90, toast_tuple_target = 128);
+-- Storage tuning note: storage parameters like fillfactor/toast_tuple_target
+-- are set on individual leaf partitions rather than the partitioned parent table in PostgreSQL.
 
 -- BRIN indexes accelerate time-window scans over the partition space.
 CREATE INDEX IF NOT EXISTS idx_ts_metrics_ts_brin      ON ts_metrics      USING BRIN (ts);
@@ -336,9 +331,11 @@ LANGUAGE plpgsql AS $$
 DECLARE
   cfg RECORD;
 BEGIN
-  FOR cfg IN SELECT table_name FROM time_series_table_config WHERE enabled
+  FOR cfg IN SELECT c.table_name FROM time_series_table_config c WHERE c.enabled
   LOOP
-    RETURN QUERY SELECT cfg.table_name, ts_drop_expired_partitions_for_table(cfg.table_name);
+    table_name := cfg.table_name;
+    partitions_dropped := ts_drop_expired_partitions_for_table(cfg.table_name);
+    RETURN NEXT;
   END LOOP;
 END;
 $$;
@@ -348,22 +345,27 @@ RETURNS TABLE (view_name TEXT, refreshed BOOLEAN)
 LANGUAGE plpgsql AS $$
 DECLARE
   agg RECORD;
-  has_data BOOLEAN;
+  is_populated BOOLEAN;
 BEGIN
-  FOR agg IN SELECT view_name FROM continuous_aggregate_config WHERE enabled
+  FOR agg IN SELECT c.view_name FROM continuous_aggregate_config c WHERE c.enabled
   LOOP
-    -- CONCURRENTLY cannot refresh an empty materialized view (requires >= 1
-    -- row for the incremental machinery), so fall back to a full refresh when
-    -- the view has never been populated.
-    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I)', agg.view_name) INTO has_data;
+    SELECT COALESCE(cl.relispopulated, false) INTO is_populated
+    FROM pg_class cl
+    WHERE cl.relname = agg.view_name;
 
-    IF has_data THEN
-      EXECUTE format('REFRESH MATERIALIZED VIEW CONCURRENTLY %I', agg.view_name);
+    IF is_populated THEN
+      BEGIN
+        EXECUTE format('REFRESH MATERIALIZED VIEW CONCURRENTLY %I', agg.view_name);
+      EXCEPTION WHEN OTHERS THEN
+        EXECUTE format('REFRESH MATERIALIZED VIEW %I', agg.view_name);
+      END;
     ELSE
       EXECUTE format('REFRESH MATERIALIZED VIEW %I', agg.view_name);
     END IF;
 
-    RETURN QUERY SELECT agg.view_name, true;
+    view_name := agg.view_name;
+    refreshed := true;
+    RETURN NEXT;
   END LOOP;
 END;
 $$;
@@ -376,12 +378,12 @@ LANGUAGE plpgsql AS $$
 DECLARE
   cfg RECORD;
 BEGIN
-  FOR cfg IN SELECT table_name FROM time_series_table_config WHERE enabled
+  FOR cfg IN SELECT c.table_name FROM time_series_table_config c WHERE c.enabled
   LOOP
-    RETURN QUERY SELECT
-      cfg.table_name,
-      ts_create_partitions_for_table(cfg.table_name, p_lookahead),
-      ts_drop_expired_partitions_for_table(cfg.table_name);
+    table_name := cfg.table_name;
+    partitions_created := ts_create_partitions_for_table(cfg.table_name, p_lookahead);
+    partitions_dropped := ts_drop_expired_partitions_for_table(cfg.table_name);
+    RETURN NEXT;
   END LOOP;
 END;
 $$;
@@ -412,13 +414,13 @@ DECLARE
   klass TEXT;
   age INT;
 BEGIN
-  FOR pol IN SELECT * FROM data_tiering_policy WHERE enabled
+  FOR pol IN SELECT dtp.* FROM data_tiering_policy dtp WHERE dtp.enabled
   LOOP
     FOR r IN
-      SELECT partition_name, upper_bound
-      FROM ts_parts
-      WHERE table_name = pol.table_name
-      ORDER BY upper_bound
+      SELECT p.partition_name, p.upper_bound
+      FROM ts_parts p
+      WHERE p.table_name = pol.table_name
+      ORDER BY p.upper_bound
     LOOP
       age := GREATEST(0, ((EXTRACT(EPOCH FROM (NOW() - r.upper_bound)) / 86400))::INT);
 
@@ -432,15 +434,15 @@ BEGIN
 
       UPDATE ts_parts
         SET storage_class = klass
-        WHERE table_name = pol.table_name AND partition_name = r.partition_name;
+        WHERE ts_parts.table_name = pol.table_name AND ts_parts.partition_name = r.partition_name;
 
-      RETURN QUERY SELECT
-        pol.table_name,
-        r.partition_name,
-        r.upper_bound,
-        age,
-        klass,
-        CASE WHEN klass IN ('s3', 'glacier') THEN 'archive_detach' ELSE 'set_storage_class' END;
+      table_name := pol.table_name;
+      partition_name := r.partition_name;
+      upper_bound := r.upper_bound;
+      age_days := age;
+      storage_class := klass;
+      action := CASE WHEN klass IN ('s3', 'glacier') THEN 'archive_detach' ELSE 'set_storage_class' END;
+      RETURN NEXT;
     END LOOP;
   END LOOP;
 END;

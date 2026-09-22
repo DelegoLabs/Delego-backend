@@ -11,7 +11,6 @@
  *   - Consumer group rebalancing support
  */
 
-import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +27,8 @@ export interface StreamConfig {
     consumers: number;
     claimMinIdleMs: number;
   }>;
+  serializer?: (data: unknown) => string;
+  deserializer?: (data: string) => unknown;
 }
 
 export interface StreamEvent {
@@ -87,9 +88,9 @@ export type ParsedStreamMessage<T = unknown> = {
 
 export class RedisStreamManager<T = unknown> {
   private readonly streamName: string;
-  private readonly maxLength: number;
+  private maxLength: number;
   private readonly trimStrategy: "maxlen" | "minid";
-  private readonly retentionMs: number;
+  private retentionMs: number;
   private readonly consumerGroups: StreamConfig["consumerGroups"];
   private readonly client: any;
   private readonly serializer: (data: unknown) => string;
@@ -116,16 +117,6 @@ export class RedisStreamManager<T = unknown> {
   // ─── Initialization ─────────────────────────────────────────────────────
 
   async initialize(): Promise<void> {
-    // Create stream with XADD + MAXLEN to ensure it exists
-    await this.client.xAdd(this.streamName, "*", {
-      __init__: "true",
-    });
-
-    // Set MAXLEN for the stream
-    await this.client.xGroup("CREATE", this.streamName, "$", {
-      MKSTREAM: true,
-    });
-
     // Create consumer groups
     for (const cg of this.consumerGroups) {
       try {
@@ -134,11 +125,18 @@ export class RedisStreamManager<T = unknown> {
         });
       } catch (err: any) {
         // CONSUMERGROUP exists is OK
-        if (!err.message.includes("BUSYGROUP")) {
+        if (!err.message?.includes("BUSYGROUP")) {
           throw err;
         }
       }
     }
+  }
+
+  private eventSequence = 0;
+
+  private generateEventId(): string {
+    const seq = (this.eventSequence++ & 0xffffffff).toString(16).padStart(8, "0");
+    return `${Date.now()}-${seq}`;
   }
 
   // ─── Publishing Events ──────────────────────────────────────────────────
@@ -148,7 +146,7 @@ export class RedisStreamManager<T = unknown> {
     payload: T,
     metadata: Record<string, string> = {}
   ): Promise<string> {
-    const id = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const id = this.generateEventId();
     const timestamp = new Date().toISOString();
 
     const message: StreamEvent = {
@@ -172,22 +170,23 @@ export class RedisStreamManager<T = unknown> {
       timestamp: message.timestamp,
     };
 
-    const result = await this.client.xAdd(this.streamName, "*", fields);
+    await this.client.xAdd(this.streamName, "*", fields);
 
     // Trim the stream to prevent OOM
     await this.trimStream();
 
-    return result;
+    return id;
   }
 
   async publishBatch(
     events: Array<{ type: string; payload: T; metadata?: Record<string, string> }>
   ): Promise<string[]> {
     const ids: string[] = [];
-    const pipeline = this.client.multi();
+    const hasMulti = typeof this.client.multi === "function";
+    const pipeline = hasMulti ? this.client.multi() : null;
 
     for (const event of events) {
-      const id = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const id = this.generateEventId();
       const timestamp = new Date().toISOString();
 
       const message: StreamEvent = {
@@ -211,11 +210,17 @@ export class RedisStreamManager<T = unknown> {
         timestamp: message.timestamp,
       };
 
-      pipeline.xAdd(this.streamName, "*", fields);
+      if (pipeline) {
+        pipeline.xAdd(this.streamName, "*", fields);
+      } else {
+        await this.client.xAdd(this.streamName, "*", fields);
+      }
       ids.push(id);
     }
 
-    await pipeline.exec();
+    if (pipeline) {
+      await pipeline.exec();
+    }
     await this.trimStream();
 
     return ids;
@@ -231,11 +236,11 @@ export class RedisStreamManager<T = unknown> {
       batchSize?: number;
       blockMs?: number;
       count?: number;
+      claimMinIdleMs?: number;
     } = {}
   ): Promise<StreamProcessingResult> {
-    const batchSize = options.batchSize ?? 10;
+    const count = options.count ?? options.batchSize ?? 10;
     const blockMs = options.blockMs ?? 5000;
-    const count = options.count ?? 10;
 
     const result: StreamProcessingResult = {
       stream: this.streamName,
@@ -267,17 +272,17 @@ export class RedisStreamManager<T = unknown> {
 
       for (const msg of pendingMessages as any[]) {
         const msgId = msg[0];
-        const consumer = msg[1];
         const idleTime = parseInt(msg[2], 10);
         const deliveryCount = parseInt(msg[3], 10);
 
         // Claim idle messages that haven't been ACK'd
-        if (idleTime > options.claimMinIdleMs || deliveryCount > 1) {
+        const minIdle = options.claimMinIdleMs ?? 30000;
+        if (idleTime > minIdle || deliveryCount > 1) {
           const claimed = await this.client.xClaim(
             this.streamName,
             groupName,
             consumerName,
-            options.claimMinIdleMs ?? 30000,
+            minIdle,
             [msgId]
           );
 
@@ -314,7 +319,7 @@ export class RedisStreamManager<T = unknown> {
     );
 
     if (messages) {
-      for (const [stream, msgs] of messages) {
+      for (const [_stream, msgs] of messages) {
         for (const msg of msgs as StreamMessage[]) {
           const parsed = this.parseMessage(msg);
           if (parsed) {
@@ -377,7 +382,7 @@ export class RedisStreamManager<T = unknown> {
 
       if (!messages || messages.length === 0) break;
 
-      for (const [stream, msgs] of messages) {
+      for (const [_stream, msgs] of messages) {
         for (const msg of msgs as StreamMessage[]) {
           const parsed = this.parseMessage(msg);
           if (parsed) {
@@ -482,7 +487,11 @@ export class RedisStreamManager<T = unknown> {
   }
 
   async listConsumerGroups(): Promise<ConsumerGroupState[]> {
-    const groupsInfo = await this.client.xInfoGroups(this.streamName);
+    const groupsInfo = typeof this.client.xInfoGroups === "function"
+      ? await this.client.xInfoGroups(this.streamName)
+      : typeof this.client.xInfoGroup === "function"
+        ? (await this.client.xInfoGroup(this.streamName)) ?? []
+        : [];
 
     const states: ConsumerGroupState[] = [];
     for (const group of groupsInfo as any[]) {
@@ -586,13 +595,3 @@ export function createStreamManager<T = unknown>(
 ): RedisStreamManager<T> {
   return new RedisStreamManager<T>(streamName, config, client);
 }
-
-// Re-export types for convenience
-export type {
-  StreamConfig,
-  StreamEvent,
-  ConsumerGroupState,
-  StreamProcessingResult,
-  StreamMessage,
-  ParsedStreamMessage,
-};

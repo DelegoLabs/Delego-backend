@@ -83,6 +83,6 @@ export async function up(queryInterface: QueryInterface, Sequelize: Sequelize): 
   await queryInterface.addIndex("notification_events", ["template_id", "channel", "event_type"]);
 }
 
-export async function down(queryInterface: QueryInterface, Sequelize: Sequelize): Promise<void> {
+export async function down(queryInterface: QueryInterface, _Sequelize: Sequelize): Promise<void> {
   await queryInterface.dropTable("notification_events");
 }

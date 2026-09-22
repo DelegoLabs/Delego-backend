@@ -1,7 +1,7 @@
 import type { RouteHandler } from "@delegolabs/utils";
-import { json } from "@delegolabs/utils";
 import { internalError, notFound, validationError, success } from "../errors.js";
-import { getAuthenticatedUserContext } from "../middleware/auth.js";
+import { getAuthenticatedUserContext } from "../../middleware/auth.js";
+import { readJsonBody } from "../request.js";
 import {
   createRecoveryConfig,
   getRecoveryConfig,
@@ -17,7 +17,6 @@ import {
   cancelRecovery,
   completeRecovery,
   listRecoveryRequests,
-  getRecoveryRequest,
   getRecoveryProgress,
   isRecoverable,
 } from "./service.js";
@@ -28,7 +27,6 @@ import type {
   RecoveryListRequest,
   AddGuardianRequest,
   RemoveGuardianRequest,
-  UpdateGuardianRequest,
   AddEmergencyContactRequest,
   RemoveEmergencyContactRequest,
   UpdateRecoveryConfigRequest,
@@ -37,7 +35,7 @@ import type {
 /**
  * Get recovery configuration handler
  */
-export const getRecoveryConfigHandler: RouteHandler = async (req, res) => {
+export const getRecoveryConfigHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
@@ -59,32 +57,35 @@ export const getRecoveryConfigHandler: RouteHandler = async (req, res) => {
 /**
  * Create recovery configuration handler
  */
-export const createRecoveryConfigHandler: RouteHandler = async (req, res) => {
+export const createRecoveryConfigHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const body: UpdateRecoveryConfigRequest = req.body;
+    const body = (await readJsonBody(req)) as UpdateRecoveryConfigRequest;
 
     // Must have at least one verified guardian with sufficient weight
-    if (body.guardians && body.guardians.length > 0) {
-      const totalWeight = body.guardians.reduce((sum, g) => {
-        if ("weight" in g) return sum + g.weight;
-        return sum;
-      }, 0);
-      if (totalWeight < (body.threshold || 3)) {
-        return validationError(
-          res,
-          "Total guardian weight must meet or exceed threshold",
-          req,
-          { totalWeight, threshold: body.threshold || 3 }
-        );
+    if (body.guardians) {
+      const guardianList = (Array.isArray(body.guardians) ? body.guardians : [body.guardians]) as Array<Record<string, any>>;
+      if (guardianList.length > 0) {
+        const totalWeight = guardianList.reduce((sum: number, g: any) => {
+          if ("weight" in g && typeof g.weight === "number") return sum + g.weight;
+          return sum;
+        }, 0);
+        if (totalWeight < (body.threshold || 3)) {
+          return validationError(
+            res,
+            "Total guardian weight must meet or exceed threshold",
+            req,
+            { totalWeight, threshold: body.threshold || 3 }
+          );
+        }
       }
     }
 
-    const config = await createRecoveryConfig(userContext.userId, body);
+    const config = await createRecoveryConfig(userContext.userId, body as any);
 
     return success(res, config, req);
   } catch (err) {
@@ -96,19 +97,19 @@ export const createRecoveryConfigHandler: RouteHandler = async (req, res) => {
 /**
  * Update recovery configuration handler
  */
-export const updateRecoveryConfigHandler: RouteHandler = async (req, res) => {
+export const updateRecoveryConfigHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId } = req.params as { accountId: string };
+    const { accountId } = params as { accountId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot update recovery for another account", req);
     }
 
-    const body: UpdateRecoveryConfigRequest = req.body;
+    const body = (await readJsonBody(req)) as UpdateRecoveryConfigRequest;
 
     const config = await updateRecoveryConfig(accountId, body);
 
@@ -122,19 +123,19 @@ export const updateRecoveryConfigHandler: RouteHandler = async (req, res) => {
 /**
  * Add guardian handler
  */
-export const addGuardianHandler: RouteHandler = async (req, res) => {
+export const addGuardianHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId } = req.params as { accountId: string };
+    const { accountId } = params as { accountId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot add guardian for another account", req);
     }
 
-    const body: AddGuardianRequest = req.body;
+    const body = (await readJsonBody(req)) as AddGuardianRequest;
 
     const config = await addGuardian(accountId, body);
 
@@ -148,19 +149,19 @@ export const addGuardianHandler: RouteHandler = async (req, res) => {
 /**
  * Remove guardian handler
  */
-export const removeGuardianHandler: RouteHandler = async (req, res) => {
+export const removeGuardianHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId, guardianId } = req.params as { accountId: string; guardianId: string };
+    const { accountId, guardianId } = params as { accountId: string; guardianId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot remove guardian for another account", req);
     }
 
-    const body: RemoveGuardianRequest = req.body;
+    const body = ((await readJsonBody(req).catch(() => ({}))) ?? {}) as RemoveGuardianRequest;
 
     const config = await removeGuardian(accountId, { ...body, guardianId });
 
@@ -174,19 +175,19 @@ export const removeGuardianHandler: RouteHandler = async (req, res) => {
 /**
  * Verify guardian handler
  */
-export const verifyGuardianHandler: RouteHandler = async (req, res) => {
+export const verifyGuardianHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId, guardianId } = req.params as { accountId: string; guardianId: string };
+    const { accountId, guardianId } = params as { accountId: string; guardianId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot verify guardian for another account", req);
     }
 
-    const { verified } = req.body as { verified: boolean };
+    const { verified } = (await readJsonBody(req)) as { verified: boolean };
 
     const config = await verifyGuardian(accountId, guardianId, verified);
 
@@ -200,19 +201,19 @@ export const verifyGuardianHandler: RouteHandler = async (req, res) => {
 /**
  * Add emergency contact handler
  */
-export const addEmergencyContactHandler: RouteHandler = async (req, res) => {
+export const addEmergencyContactHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId } = req.params as { accountId: string };
+    const { accountId } = params as { accountId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot add emergency contact for another account", req);
     }
 
-    const body: AddEmergencyContactRequest = req.body;
+    const body = (await readJsonBody(req)) as AddEmergencyContactRequest;
 
     const config = await addEmergencyContact(accountId, body);
 
@@ -226,19 +227,19 @@ export const addEmergencyContactHandler: RouteHandler = async (req, res) => {
 /**
  * Remove emergency contact handler
  */
-export const removeEmergencyContactHandler: RouteHandler = async (req, res) => {
+export const removeEmergencyContactHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId, contactId } = req.params as { accountId: string; contactId: string };
+    const { accountId, contactId } = params as { accountId: string; contactId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot remove emergency contact for another account", req);
     }
 
-    const body: RemoveEmergencyContactRequest = req.body;
+    const body = ((await readJsonBody(req).catch(() => ({}))) ?? {}) as RemoveEmergencyContactRequest;
 
     const config = await removeEmergencyContact(accountId, { ...body, contactId });
 
@@ -252,19 +253,19 @@ export const removeEmergencyContactHandler: RouteHandler = async (req, res) => {
 /**
  * Initiate recovery handler
  */
-export const initiateRecoveryHandler: RouteHandler = async (req, res) => {
+export const initiateRecoveryHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId } = req.params as { accountId: string };
+    const { accountId } = params as { accountId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot initiate recovery for another account", req);
     }
 
-    const body: RecoveryInitiationRequest = req.body;
+    const body = (await readJsonBody(req)) as RecoveryInitiationRequest;
 
     const recovery = await initiateRecovery(accountId, userContext.userId, body);
 
@@ -278,16 +279,16 @@ export const initiateRecoveryHandler: RouteHandler = async (req, res) => {
 /**
  * Process guardian approval handler
  */
-export const processGuardianApprovalHandler: RouteHandler = async (req, res) => {
+export const processGuardianApprovalHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { recoveryId } = req.params as { recoveryId: string };
+    const { recoveryId } = params as { recoveryId: string };
 
-    const body: GuardianApprovalRequest = req.body;
+    const body = (await readJsonBody(req)) as GuardianApprovalRequest;
 
     const recovery = await processGuardianApproval(recoveryId, userContext.userId, body);
 
@@ -301,16 +302,16 @@ export const processGuardianApprovalHandler: RouteHandler = async (req, res) => 
 /**
  * Reject recovery handler
  */
-export const rejectRecoveryHandler: RouteHandler = async (req, res) => {
+export const rejectRecoveryHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { recoveryId } = req.params as { recoveryId: string };
+    const { recoveryId } = params as { recoveryId: string };
 
-    const { reason } = req.body as { reason?: string };
+    const { reason } = ((await readJsonBody(req).catch(() => ({}))) ?? {}) as { reason?: string };
 
     const recovery = await rejectRecovery(recoveryId, userContext.userId, reason);
 
@@ -324,16 +325,16 @@ export const rejectRecoveryHandler: RouteHandler = async (req, res) => {
 /**
  * Cancel recovery handler
  */
-export const cancelRecoveryHandler: RouteHandler = async (req, res) => {
+export const cancelRecoveryHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { recoveryId } = req.params as { recoveryId: string };
+    const { recoveryId } = params as { recoveryId: string };
 
-    const { reason } = req.body as { reason: string };
+    const { reason } = (await readJsonBody(req)) as { reason: string };
 
     await cancelRecovery(recoveryId, userContext.userId, reason);
 
@@ -347,16 +348,16 @@ export const cancelRecoveryHandler: RouteHandler = async (req, res) => {
 /**
  * Complete recovery handler
  */
-export const completeRecoveryHandler: RouteHandler = async (req, res) => {
+export const completeRecoveryHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { recoveryId } = req.params as { recoveryId: string };
+    const { recoveryId } = params as { recoveryId: string };
 
-    const body: RecoveryCompleteRequest = req.body;
+    const body = (await readJsonBody(req)) as RecoveryCompleteRequest;
 
     const recovery = await completeRecovery(recoveryId, userContext.userId, body);
 
@@ -370,23 +371,24 @@ export const completeRecoveryHandler: RouteHandler = async (req, res) => {
 /**
  * List recovery requests handler
  */
-export const listRecoveryRequestsHandler: RouteHandler = async (req, res) => {
+export const listRecoveryRequestsHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId } = req.params as { accountId: string };
+    const { accountId } = params as { accountId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot list recovery requests for another account", req);
     }
 
+    const url = new URL(req.url ?? "/", "http://localhost");
     const query: RecoveryListRequest = {
       accountId,
-      status: req.query?.status as any,
-      page: Number(req.query?.page) || 1,
-      limit: Number(req.query?.limit) || 20,
+      status: (url.searchParams.get("status") as any) || undefined,
+      page: Number(url.searchParams.get("page")) || 1,
+      limit: Number(url.searchParams.get("limit")) || 20,
     };
 
     const result = await listRecoveryRequests(query);
@@ -401,7 +403,7 @@ export const listRecoveryRequestsHandler: RouteHandler = async (req, res) => {
 /**
  * Get recovery progress handler
  */
-export const getRecoveryProgressHandler: RouteHandler = async (req, res) => {
+export const getRecoveryProgressHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
@@ -424,14 +426,14 @@ export const getRecoveryProgressHandler: RouteHandler = async (req, res) => {
 /**
  * Check if account is recoverable handler
  */
-export const isRecoverableHandler: RouteHandler = async (req, res) => {
+export const isRecoverableHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { accountId } = req.params as { accountId: string };
+    const { accountId } = params as { accountId: string };
     if (accountId !== userContext.userId) {
       return notFound(res, "Cannot check recoverability for another account", req);
     }

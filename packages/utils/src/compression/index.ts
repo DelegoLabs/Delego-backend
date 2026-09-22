@@ -15,9 +15,6 @@ export {
   CompressionMiddleware,
   CompressionCache,
   CompressionMetrics,
-  type CompressionConfig,
-  type CompressionResult,
-  type CompressionMetrics as CompressionMetricsType,
 } from "./compression.js";
 
 export * from "./types.js";

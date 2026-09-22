@@ -11,41 +11,12 @@
  *   - Incident management integration
  */
 
-export {
-  SLOManager,
-  type SLOConfig,
-  type SLIConfig,
-  type BurnRateThresholds,
-  type ErrorBudgetPolicy,
-  type ErrorBudgetStatus,
-  type SLOStatus,
-  type SLOReport,
-  type SLOMetrics,
-  type ServiceSLOMetrics,
-} from "./manager.js";
-
-export {
-  SLIRegistry,
-  type SLIQuery,
-  type SLIResult,
-  type SLIType,
-  type SLIUnit,
-  type SLIThresholds,
-} from "./sliRegistry.js";
-
+export { SLOManager } from "./manager.js";
+export { SLIRegistry } from "./sliRegistry.js";
 export {
   BurnRateCalculator,
-  type BurnRateResult,
   type BurnRateWindow,
-  type BurnRateSeverity,
 } from "./burnRate.js";
-
-export {
-  ErrorBudgetTracker,
-  type ErrorBudgetState,
-  type ErrorBudgetPeriod,
-} from "./errorBudget.js";
-
-export { type SLOAlert, SLOAlertManager } from "./alertManager.js";
-
+export { ErrorBudgetTracker } from "./errorBudget.js";
+export { SLOAlertManager, type AlertType } from "./alertManager.js";
 export * from "./types.js";

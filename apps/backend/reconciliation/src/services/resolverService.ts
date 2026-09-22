@@ -1,10 +1,8 @@
 import { ReconciliationRecord } from "../models/ReconciliationRecord.js";
 import { ReconciliationJob } from "../models/ReconciliationJob.js";
 import { AuditLog } from "../models/AuditLog.js";
-import { createLogger } from "@delegolabs/utils";
-import { randomUUID } from "crypto";
-
-const log = createLogger("reconciliation:resolver", process.env.LOG_LEVEL ?? "info");
+import { sequelize } from "../db.js";
+import { Op } from "sequelize";
 
 /**
  * Resolver Service - Auto-resolves discrepancies and handles manual resolution
@@ -16,10 +14,10 @@ export class ResolverService {
   async autoResolveDiscrepancies(jobId?: string): Promise<{ resolved: number; patterns: Record<string, number> }> {
     const where: any = {
       status: "discrepancy",
-      resolution: { [ReconciliationRecord.sequelize!.Op.is]: null },
+      resolution: { [Op.is]: null },
     };
 
-    if (jobId) where.job_id = jobId;
+    if (jobId) where.jobId = jobId;
 
     const discrepancies = await ReconciliationRecord.findAll({ where });
 
@@ -41,7 +39,10 @@ export class ResolverService {
   /**
    * Auto-resolve based on known patterns
    */
-  private async autoResolvePattern(record: ReconciliationRecord): Promise<{ type: string; notes: string } | null> {
+  private async autoResolvePattern(record: ReconciliationRecord): Promise<{
+    type: "auto_resolved" | "manual_resolved" | "investigating" | "write_off";
+    notes: string;
+  } | null> {
     // Pattern 1: Small amount difference (< $0.01) - rounding
     if (record.discrepancyAmount && parseFloat(record.discrepancyAmount) < 0.01) {
       return {
@@ -99,7 +100,7 @@ export class ResolverService {
    */
   private async resolveRecord(
     record: ReconciliationRecord,
-    resolution: string,
+    resolution: "auto_resolved" | "manual_resolved" | "investigating" | "write_off",
     resolvedBy: string,
     notes?: string,
   ): Promise<void> {
@@ -112,7 +113,7 @@ export class ResolverService {
     });
 
     // Update parent job discrepancy count
-    const job = await ReconciliationJob.findByPk(record.job_id);
+    const job = await ReconciliationJob.findByPk(record.jobId);
     if (job && resolution !== "investigating") {
       const discrepancies = Math.max(0, job.discrepancies - 1);
       await job.update({ discrepancies });
@@ -152,10 +153,10 @@ export class ResolverService {
   }): Promise<{ records: ReconciliationRecord[]; total: number }> {
     const where: any = {
       status: "discrepancy",
-      resolution: { [ReconciliationRecord.sequelize!.Op.is]: null },
+      resolution: { [Op.is]: sequelize.literal("NULL") },
     };
 
-    if (params?.type) where.discrepancy_type = params.type;
+    if (params?.type) where.discrepancyType = params.type;
 
     const page = params?.page || 1;
     const pageSize = params?.pageSize || 50;
@@ -185,7 +186,7 @@ export class ResolverService {
     });
 
     const autoResolved = await ReconciliationRecord.count({
-      where: { status: "discrepancy", resolution: { [ReconciliationRecord.sequelize!.Op.ne]: null } },
+      where: { status: "discrepancy", resolution: { [Op.ne]: sequelize.literal("NULL") } },
     });
 
     return {
@@ -202,7 +203,7 @@ export class ResolverService {
     const records = await ReconciliationRecord.findAll({
       where: {
         status: "discrepancy",
-        resolution: { [ReconciliationRecord.sequelize!.Op.ne]: null },
+        resolution: { [Op.ne]: sequelize.literal("NULL") },
       },
     });
 

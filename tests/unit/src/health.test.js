@@ -11,6 +11,16 @@ describe("Gateway Health Endpoint Tests", () => {
     dbModule = await import("../../../apps/backend/gateway/dist/src/db.js");
   });
 
+  after(async () => {
+    try {
+      if (dbModule?.sequelize) {
+        await dbModule.sequelize.close();
+      }
+    } catch {
+      // Ignore
+    }
+  });
+
   describe("DependencyHealth interface", () => {
     it("should have correct structure for healthy dependency", () => {
       const dependency = {

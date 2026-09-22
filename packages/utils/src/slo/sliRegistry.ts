@@ -48,7 +48,7 @@ export interface SLIThresholds {
 
 export class SLIRegistry {
   private sliDefinitions = new Map<string, SLIConfig>();
-  private defaultServices = ["gateway", "payments", "wallet", "notifications", "analytics", "fraud-detection"];
+  public defaultServices = ["gateway", "payments", "wallet", "notifications", "analytics", "fraud-detection"];
 
   constructor(defaultServices?: string[]) {
     if (defaultServices) {
@@ -116,6 +116,15 @@ export class SLIRegistry {
       query: "1 - (sum(rate(http_requests_total{service=\"notifications\",status=~\"5..\"}[1h])) / sum(rate(http_requests_total{service=\"notifications\"}[1h])))",
       unit: "ratio",
       thresholds: { good: 0.995, excellent: 0.999, poor: 0.99 },
+    });
+
+    // Fraud detection availability
+    this.registerSLI({
+      name: "fraud_detection_availability",
+      description: "HTTP request success rate for fraud detection service",
+      query: "1 - (sum(rate(http_requests_total{service=\"fraud-detection\",status=~\"5..\"}[1h])) / sum(rate(http_requests_total{service=\"fraud-detection\"}[1h])))",
+      unit: "ratio",
+      thresholds: { good: 0.999, excellent: 0.9999, poor: 0.99 },
     });
 
     // ─── Latency SLIs ───────────────────────────────────────────────────
@@ -223,21 +232,22 @@ export class SLIRegistry {
 
   // ─── Query Generation ─────────────────────────────────────────────────
 
-  generatePromQLQuery(sliName: string, service: string, window: string): string {
+  generatePromQLQuery(sliName: string, _service: string, window: string): string {
     const sli = this.getSLI(sliName);
     if (!sli) {
       throw new Error(`SLI not found: ${sliName}`);
     }
 
     // Replace time window placeholder if present
-    let query = sli.query.replace(/\[1h\]/g, `[${window}]`);
+    const promQLWindow = window.replace(/^rolling_/, "");
+    let query = sli.query.replace(/\[1h\]/g, `[${promQLWindow}]`);
 
     return query;
   }
 
   // ─── SLI Evaluation ───────────────────────────────────────────────────
 
-  evaluateSLI(sliName: string, service: string, value: number): {
+  evaluateSLI(sliName: string, _service: string, value: number): {
     status: "pass" | "warning" | "fail";
     percentage: number;
   } {
@@ -246,7 +256,7 @@ export class SLIRegistry {
       return { status: "fail", percentage: 0 };
     }
 
-    const { good, excellent, poor } = sli.thresholds;
+    const { good, poor } = sli.thresholds;
 
     if (sli.unit === "ratio" || sli.unit === "throughput") {
       if (value >= good) return { status: "pass", percentage: (value / good) * 100 };

@@ -1,5 +1,5 @@
+import { Op } from "sequelize";
 import { MultiCurrencyPayment } from "../models/MultiCurrencyPayment.js";
-import { FXRate } from "../models/FXRate.js";
 import { CurrencyExposure } from "../models/CurrencyExposure.js";
 import { CurrencySettlement } from "../models/CurrencySettlement.js";
 import { SupportedCurrency } from "../models/SupportedCurrency.js";
@@ -12,12 +12,40 @@ import type {
   ConversionPath,
 } from "@delegolabs/types";
 
+function formatPayment(p: MultiCurrencyPayment): MultiCurrencyPaymentType {
+  const fxData = (p.fxRateData as unknown as FXRateType) || {
+    baseCurrency: p.sourceCurrency,
+    quoteCurrency: p.destinationCurrency,
+    rate: "1",
+    source: "unknown",
+    timestamp: new Date().toISOString(),
+    validUntil: new Date().toISOString(),
+    spread: "0",
+  };
+  return {
+    id: p.id,
+    sourceCurrency: p.sourceCurrency,
+    sourceAmount: p.sourceAmount,
+    destinationCurrency: p.destinationCurrency,
+    destinationAmount: p.destinationAmount,
+    fxRate: fxData,
+    conversionPath: p.conversionPath,
+    settlementCurrency: p.settlementCurrency,
+    status: p.status,
+    settlementStatus: p.settlementStatus,
+    stellarTransactionHash: p.stellarTransactionHash,
+    pathPaymentId: p.pathPaymentId,
+    createdAt: p.createdAt ? (p.createdAt instanceof Date ? p.createdAt.toISOString() : String(p.createdAt)) : new Date().toISOString(),
+    completedAt: p.completedAt ? (p.completedAt instanceof Date ? p.completedAt.toISOString() : String(p.completedAt)) : undefined,
+    failedAt: p.failedAt ? (p.failedAt instanceof Date ? p.failedAt.toISOString() : String(p.failedAt)) : undefined,
+    metadata: p.metadata,
+  };
+}
+
 /**
  * Multi-Currency Payment Service
  * Handles payment creation, path payments, and settlement
  */
-
-const STELLAR_FEE_BASE = 100; // 0.00001 XLM per operation
 
 /**
  * Create a multi-currency payment
@@ -33,7 +61,7 @@ export async function createMultiCurrencyPayment(
     destinationAmount: requestedDestinationAmount,
     settlementCurrency = destinationCurrency,
     metadata = {},
-    requireFxRateLock = false,
+    requireFxRateLock: _requireFxRateLock = false,
     fxRate: providedFxRate,
   } = request;
 
@@ -90,7 +118,7 @@ export async function createMultiCurrencyPayment(
     sourceAmount: sourceAmount,
     destinationCurrency,
     destinationAmount,
-    fxRateId: fxRate.id || "manual",
+    fxRateId: (fxRate as any).id || "manual",
     fxRateData: {
       baseCurrency: fxRate.baseCurrency,
       quoteCurrency: fxRate.quoteCurrency,
@@ -138,12 +166,7 @@ export async function executePathPayment(paymentId: string, transactionHash: str
   payment.stellarTransactionHash = transactionHash;
   await payment.save();
 
-  // In a real implementation, this would:
-  // 1. Submit path payment to Stellar network
-  // 2. Wait for confirmation
-  // 3. Update status on success/failure
-
-  return payment as MultiCurrencyPaymentType;
+  return formatPayment(payment);
 }
 
 /**
@@ -176,7 +199,7 @@ export async function completeMultiCurrencyPayment(
 
   await payment.save();
 
-  return payment as MultiCurrencyPaymentType;
+  return formatPayment(payment);
 }
 
 /**
@@ -205,7 +228,7 @@ export async function failMultiCurrencyPayment(
 
   await payment.save();
 
-  return payment as MultiCurrencyPaymentType;
+  return formatPayment(payment);
 }
 
 /**
@@ -284,8 +307,8 @@ async function updateSettlement(
     where: {
       currency,
       settlementDate: {
-        [CurrencySettlement.Sequelize.Op.gte]: today,
-        [CurrencySettlement.Sequelize.Op.lt]: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+        [Op.gte]: today,
+        [Op.lt]: new Date(today.getTime() + 24 * 60 * 60 * 1000),
       },
     },
   });
@@ -331,7 +354,7 @@ export async function getPayment(paymentId: string): Promise<MultiCurrencyPaymen
   if (!payment) {
     return null;
   }
-  return payment as MultiCurrencyPaymentType;
+  return formatPayment(payment);
 }
 
 /**
@@ -371,7 +394,7 @@ export async function listPayments(
   const totalPages = Math.ceil(count / limit);
 
   return {
-    payments: rows as MultiCurrencyPaymentType[],
+    payments: rows.map(formatPayment),
     totalCount: count,
     page,
     limit,
@@ -388,11 +411,11 @@ export async function calculateAccountExposure(
   const payments = await MultiCurrencyPayment.findAll({
     where: {
       sourceAddress: accountId,
-      status: { [MultiCurrencyPayment.Sequelize.Op.notIn]: ["failed", "cancelled"] },
+      status: { [Op.notIn]: ["failed", "cancelled"] },
     },
   });
 
-  return payments as MultiCurrencyPaymentType[];
+  return payments.map(formatPayment);
 }
 
 /**
@@ -407,8 +430,18 @@ export async function getAutoRoute(
 
   const minimumRate = (parseFloat(result.totalRate) * 0.99).toString(); // 1% slippage buffer
 
+  let current = parseFloat(sourceAmount) || 1;
+  const route: ConversionPath[] = result.path.map((step) => {
+    const rateNum = parseFloat(step.rate) || 1;
+    current = current * rateNum;
+    return {
+      ...step,
+      amountOut: current.toString(),
+    };
+  });
+
   return {
-    route: result.path,
+    route,
     estimatedRate: result.totalRate,
     minimumRate,
   };

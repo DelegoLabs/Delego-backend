@@ -1,3 +1,4 @@
+import { Op } from "sequelize";
 import { FXRate } from "../models/FXRate.js";
 import { SupportedCurrency } from "../models/SupportedCurrency.js";
 import type { FXRate as FXRateType, FXRateResponse, FXRateRequest } from "@delegolabs/types";
@@ -25,30 +26,35 @@ async function fetchFromProvider(provider: string, base: string, quote: string):
       headers: {
         "Accept": "application/json",
       },
-      timeout: 5000,
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!response.ok) {
       throw new Error(`FX provider returned ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     // Parse the rate data
     const now = new Date();
     const validUntil = new Date(now.getTime() + 60 * 1000); // Valid for 1 minute
+    const rateNum = parseFloat(String(data.rate)) || 1;
+    const spreadNum = parseFloat(String(data.spread)) || 0.005;
+    const midRate = String(data.midRate || rateNum);
+    const bid = String(data.bid || (rateNum * (1 - spreadNum / 2)));
+    const ask = String(data.ask || (rateNum * (1 + spreadNum / 2)));
 
     return {
       baseCurrency: base,
       quoteCurrency: quote,
-      rate: data.rate,
+      rate: String(data.rate),
       source: provider,
       timestamp: now.toISOString(),
       validUntil: validUntil.toISOString(),
-      spread: data.spread || "0.005",
-      midRate: data.midRate || data.rate,
-      bid: data.bid || (parseFloat(data.rate) * (1 - (parseFloat(data.spread) || 0.005))).toString(),
-      ask: data.ask || (parseFloat(data.rate) * (1 + (parseFloat(data.spread) || 0.005))).toString(),
+      spread: String(data.spread || "0.005"),
+      midRate,
+      bid,
+      ask,
     };
   } catch (error) {
     console.error(`Failed to fetch FX rate from ${provider}:`, error);
@@ -67,7 +73,7 @@ export async function getFXRate(request: FXRateRequest): Promise<FXRateType> {
     where: {
       baseCurrency,
       quoteCurrency,
-      validUntil: { [FXRate.Sequelize.Op.gte]: new Date() },
+      validUntil: { [Op.gte]: new Date() },
     },
   });
 
@@ -85,8 +91,6 @@ export async function getFXRate(request: FXRateRequest): Promise<FXRateType> {
 
   // Get supported currencies to determine provider
   const baseCurrencyConfig = await SupportedCurrency.findByPk(baseCurrency);
-  const quoteCurrencyConfig = await SupportedCurrency.findByPk(quoteCurrency);
-
   const provider = baseCurrencyConfig?.fxProvider || "stellar_lumen";
 
   // Fetch new rate
@@ -128,8 +132,6 @@ export function getReverseFXRate(rate: FXRateType): FXRateType {
   const reversedMidRate = 1 / midRate;
 
   const reversedSpread = spreadNum;
-  const reversedBid = 1 / midRate * (1 - reversedSpread / 2);
-  const reversedAsk = 1 / midRate * (1 + reversedSpread / 2);
 
   return {
     baseCurrency: rate.quoteCurrency,
@@ -139,9 +141,6 @@ export function getReverseFXRate(rate: FXRateType): FXRateType {
     timestamp: rate.timestamp,
     validUntil: rate.validUntil,
     spread: reversedSpread.toString(),
-    midRate: reversedMidRate.toString(),
-    bid: reversedBid.toString(),
-    ask: reversedAsk.toString(),
   };
 }
 
@@ -167,7 +166,7 @@ export async function findConversionPath(
   // Build adjacency graph of available rates
   const rates = await FXRate.findAll({
     where: {
-      validUntil: { [FXRate.Sequelize.Op.gte]: new Date() },
+      validUntil: { [Op.gte]: new Date() },
     },
   });
 

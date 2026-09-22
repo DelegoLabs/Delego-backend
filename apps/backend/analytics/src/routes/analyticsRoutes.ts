@@ -1,22 +1,24 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { json } from "@delegolabs/utils";
-import { extractAuth, getAuthenticatedUserContext } from "../../gateway/middleware/auth.js";
-import { sendApiError, forbidden, unauthorized } from "../../gateway/src/errors.js";
+import { json, readBodyWithLimit } from "@delegolabs/utils";
+import { extractAuth } from "../../../gateway/middleware/auth.js";
+import { sendApiError, unauthorized } from "../../../gateway/src/errors.js";
 import { analyticsService } from "../services/analyticsService.js";
 import { abTestService } from "../services/abTestService.js";
 import { cohortService } from "../services/cohortService.js";
 import { revenueService } from "../services/revenueService.js";
 import { customEventService } from "../services/customEventService.js";
 import { exportService } from "../services/exportService.js";
-import { FunnelMetricsQuery, FunnelMetricsResponse, EngagementMetricsQuery, EngagementMetricsResponse } from "../schemas.js";
+import { FunnelMetricsQuery, EngagementMetricsQuery } from "../schemas.js";
 import { ABTestCreateRequest, ABTestUpdateRequest, CustomEventRequest, ExportRequest } from "../schemas.js";
 
-/**
- * Check if user is admin
- */
-function isAdmin(req: IncomingMessage): boolean {
-  const ctx = getAuthenticatedUserContext(req);
-  return ctx?.roles?.includes("admin") ?? false;
+/** Read and parse the JSON request body. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const body = await readBodyWithLimit(req);
+  try {
+    return body ? (JSON.parse(body) as Record<string, unknown>) : {};
+  } catch {
+    throw new Error("Invalid JSON body");
+  }
 }
 
 /**
@@ -31,7 +33,7 @@ function isAdmin(req: IncomingMessage): boolean {
  *   periodEnd   - End of period (ISO 8601)
  *   userId      - Filter by user ID
  */
-export async function getFunnelMetricsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getFunnelMetricsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -67,7 +69,7 @@ export async function getFunnelMetricsHandler(req: IncomingMessage, res: ServerR
  *
  * Get engagement metrics per template/channel
  */
-export async function getEngagementMetricsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getEngagementMetricsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -103,7 +105,7 @@ export async function getEngagementMetricsHandler(req: IncomingMessage, res: Ser
  *
  * List all A/B tests
  */
-export async function listABTestsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function listABTestsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -128,7 +130,7 @@ export async function listABTestsHandler(req: IncomingMessage, res: ServerRespon
  *
  * Create a new A/B test
  */
-export async function createABTestHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function createABTestHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -138,14 +140,8 @@ export async function createABTestHandler(req: IncomingMessage, res: ServerRespo
   try {
     let body: ABTestCreateRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as ABTestCreateRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as ABTestCreateRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -170,7 +166,7 @@ export async function createABTestHandler(req: IncomingMessage, res: ServerRespo
  *
  * Get a specific A/B test
  */
-export async function getABTestHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getABTestHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -178,8 +174,7 @@ export async function getABTestHandler(req: IncomingMessage, res: ServerResponse
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "AB test ID required", req);
@@ -205,7 +200,7 @@ export async function getABTestHandler(req: IncomingMessage, res: ServerResponse
  *
  * Update an A/B test
  */
-export async function updateABTestHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function updateABTestHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -213,8 +208,7 @@ export async function updateABTestHandler(req: IncomingMessage, res: ServerRespo
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "AB test ID required", req);
@@ -223,14 +217,8 @@ export async function updateABTestHandler(req: IncomingMessage, res: ServerRespo
 
     let body: ABTestUpdateRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as ABTestUpdateRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as ABTestUpdateRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -254,7 +242,7 @@ export async function updateABTestHandler(req: IncomingMessage, res: ServerRespo
  *
  * Start an A/B test
  */
-export async function startABTestHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function startABTestHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -262,8 +250,7 @@ export async function startABTestHandler(req: IncomingMessage, res: ServerRespon
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "AB test ID required", req);
@@ -289,7 +276,7 @@ export async function startABTestHandler(req: IncomingMessage, res: ServerRespon
  *
  * End an A/B test
  */
-export async function endABTestHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function endABTestHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -297,8 +284,7 @@ export async function endABTestHandler(req: IncomingMessage, res: ServerResponse
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "AB test ID required", req);
@@ -324,7 +310,7 @@ export async function endABTestHandler(req: IncomingMessage, res: ServerResponse
  *
  * Get cohort analysis
  */
-export async function getCohortAnalysisHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getCohortAnalysisHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -349,7 +335,7 @@ export async function getCohortAnalysisHandler(req: IncomingMessage, res: Server
  *
  * Track custom events
  */
-export async function trackCustomEventHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function trackCustomEventHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -359,14 +345,8 @@ export async function trackCustomEventHandler(req: IncomingMessage, res: ServerR
   try {
     let body: CustomEventRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as CustomEventRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as CustomEventRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -390,7 +370,7 @@ export async function trackCustomEventHandler(req: IncomingMessage, res: ServerR
  *
  * Export data to data warehouse
  */
-export async function exportDataHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function exportDataHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -400,14 +380,8 @@ export async function exportDataHandler(req: IncomingMessage, res: ServerRespons
   try {
     let body: ExportRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as ExportRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as ExportRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -431,7 +405,7 @@ export async function exportDataHandler(req: IncomingMessage, res: ServerRespons
  *
  * Get revenue attribution metrics
  */
-export async function getRevenueMetricsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getRevenueMetricsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);

@@ -379,7 +379,9 @@ async function run() {
   }
 }
 
-run();
+if (require.main === module) {
+  run();
+}
 
 module.exports = {
   DATABASE_URL,

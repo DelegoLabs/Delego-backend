@@ -162,7 +162,10 @@ suite("saga crash recovery against real Postgres (#36)", () => {
 
     const finalRecord = await store.get(sagaId);
     assert.equal(finalRecord.status, "completed");
-    assert.deepEqual(finalRecord.completedSteps, ["reserve-inventory", "charge-payment", "confirm-order"]);
+    assert.deepEqual(
+      finalRecord.completedSteps.map((s) => (typeof s === "string" ? s : s.stepName)),
+      ["reserve-inventory", "charge-payment", "confirm-order"]
+    );
     assert.equal(finalRecord.context.reserved, true);
     assert.equal(finalRecord.context.charged, true);
     assert.equal(finalRecord.context.confirmed, true);

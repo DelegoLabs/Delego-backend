@@ -16,6 +16,7 @@ export type AlertType =
   | "burn_rate_critical"
   | "error_budget_critical"
   | "error_budget_exhausted"
+  | "error_budget_warning"
   | "fast_burn_warning"
   | "fast_burn_critical"
   | "slow_burn_warning"
@@ -148,16 +149,6 @@ export class SLOAlertManager {
         { burnRate24h: burnRates["24h"], window: "24h" }
       );
       newAlerts.push(alert);
-    } else if (burnRates["24h"] >= thresholds.warning) {
-      const alert = this.createAlert(
-        sloId,
-        service,
-        "slow_burn_warning",
-        "warning",
-        `Slow burn detected (24h): ${burnRates["24h"].toFixed(2)}x`,
-        { burnRate24h: burnRates["24h"], window: "24h" }
-      );
-      newAlerts.push(alert);
     }
 
     return newAlerts;
@@ -211,7 +202,7 @@ export class SLOAlertManager {
   // ─── Clear Alerts for SLO ──────────────────────────────────────────────
 
   clearAlerts(sloId: string): void {
-    for (const [id, alert] of this.alerts) {
+    for (const [, alert] of this.alerts) {
       if (alert.sloId === sloId) {
         alert.active = false;
         alert.resolvedAt = new Date().toISOString();

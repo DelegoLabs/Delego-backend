@@ -1,4 +1,3 @@
-import { NotificationEvent } from "../models/NotificationEvent.js";
 import { FunnelMetricsQuery, FunnelMetricsResponse, EngagementMetricsQuery, EngagementMetricsResponse } from "../schemas.js";
 
 /**
@@ -9,7 +8,7 @@ export class AnalyticsService {
    * Calculate delivery funnel metrics for a given template/channel and period
    */
   async getFunnelMetrics(query: FunnelMetricsQuery): Promise<FunnelMetricsResponse> {
-    const { templateId, channel, periodStart, periodEnd, userId } = query;
+    const { templateId, channel, periodStart, periodEnd } = query;
 
     // Build where clause - using mock data for now
     const funnelCounts = {
@@ -56,7 +55,7 @@ export class AnalyticsService {
   /**
    * Get engagement metrics
    */
-  async getEngagementStats(query: FunnelMetricsQuery): Promise<FunnelMetricsResponse["engagement"]> {
+  async getEngagementStats(_query: FunnelMetricsQuery): Promise<FunnelMetricsResponse["engagement"]> {
     // Mock engagement stats
     return {
       avgTimeToOpen: 120,

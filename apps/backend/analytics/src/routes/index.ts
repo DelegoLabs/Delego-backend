@@ -1,30 +1,43 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { getFunnelMetricsHandler, getEngagementMetricsHandler, listABTestsHandler, createABTestHandler, getABTestHandler, updateABTestHandler, startABTestHandler, endABTestHandler, getCohortAnalysisHandler, trackCustomEventHandler, exportDataHandler, getRevenueMetricsHandler } from "./analyticsRoutes.js";
+import { route, type Route } from "@delegolabs/utils";
+import {
+  getFunnelMetricsHandler,
+  getEngagementMetricsHandler,
+  listABTestsHandler,
+  createABTestHandler,
+  getABTestHandler,
+  updateABTestHandler,
+  startABTestHandler,
+  endABTestHandler,
+  getCohortAnalysisHandler,
+  trackCustomEventHandler,
+  exportDataHandler,
+  getRevenueMetricsHandler,
+} from "./analyticsRoutes.js";
 
-export function registerAnalyticsRoutes(): Array<{ method: string; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> }> {
+export function registerAnalyticsRoutes(): Route[] {
   return [
     // Funnel metrics
-    { method: "GET", path: "/api/v1/analytics/funnel", handler: getFunnelMetricsHandler },
-    { method: "GET", path: "/api/v1/analytics/engagement", handler: getEngagementMetricsHandler },
+    route("GET", "/api/v1/analytics/funnel", getFunnelMetricsHandler),
+    route("GET", "/api/v1/analytics/engagement", getEngagementMetricsHandler),
 
     // A/B tests
-    { method: "GET", path: "/api/v1/analytics/ab-tests", handler: listABTestsHandler },
-    { method: "POST", path: "/api/v1/analytics/ab-tests", handler: createABTestHandler },
-    { method: "GET", path: "/api/v1/analytics/ab-tests/:id", handler: getABTestHandler },
-    { method: "PATCH", path: "/api/v1/analytics/ab-tests/:id", handler: updateABTestHandler },
-    { method: "POST", path: "/api/v1/analytics/ab-tests/:id/start", handler: startABTestHandler },
-    { method: "POST", path: "/api/v1/analytics/ab-tests/:id/end", handler: endABTestHandler },
+    route("GET", "/api/v1/analytics/ab-tests", listABTestsHandler),
+    route("POST", "/api/v1/analytics/ab-tests", createABTestHandler),
+    route("GET", "/api/v1/analytics/ab-tests/:id", getABTestHandler),
+    route("PATCH", "/api/v1/analytics/ab-tests/:id", updateABTestHandler),
+    route("POST", "/api/v1/analytics/ab-tests/:id/start", startABTestHandler),
+    route("POST", "/api/v1/analytics/ab-tests/:id/end", endABTestHandler),
 
     // Cohort analysis
-    { method: "GET", path: "/api/v1/analytics/cohorts", handler: getCohortAnalysisHandler },
+    route("GET", "/api/v1/analytics/cohorts", getCohortAnalysisHandler),
 
     // Custom events
-    { method: "POST", path: "/api/v1/analytics/events", handler: trackCustomEventHandler },
+    route("POST", "/api/v1/analytics/events", trackCustomEventHandler),
 
     // Revenue attribution
-    { method: "GET", path: "/api/v1/analytics/revenue", handler: getRevenueMetricsHandler },
+    route("GET", "/api/v1/analytics/revenue", getRevenueMetricsHandler),
 
     // Data export
-    { method: "POST", path: "/api/v1/analytics/export", handler: exportDataHandler },
+    route("POST", "/api/v1/analytics/export", exportDataHandler),
   ];
 }

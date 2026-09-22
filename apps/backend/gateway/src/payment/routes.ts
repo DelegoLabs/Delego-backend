@@ -1,7 +1,7 @@
 import type { RouteHandler } from "@delegolabs/utils";
-import { json } from "@delegolabs/utils";
-import { internalError, notFound, validationError, success } from "../errors.js";
-import { getAuthenticatedUserContext } from "../middleware/auth.js";
+import { internalError, notFound, success } from "../errors.js";
+import { getAuthenticatedUserContext } from "../../middleware/auth.js";
+import { readJsonBody } from "../request.js";
 import {
   tokenizeCard,
   tokenizeBankAccount,
@@ -20,21 +20,19 @@ import type {
   VaultListMethodsRequest,
   VaultUpdateMethodRequest,
   VaultRemoveMethodRequest,
-  ThreeDSecureRequest,
-  ThreeDSecureResult,
 } from "@delegolabs/types";
 
 /**
  * Create card payment method handler
  */
-export const createCardPaymentMethodHandler: RouteHandler = async (req, res) => {
+export const createCardPaymentMethodHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const body: PaymentMethodCreate = req.body;
+    const body = (await readJsonBody(req)) as PaymentMethodCreate;
 
     // Verify customer ID matches authenticated user
     if (body.customerId !== userContext.userId) {
@@ -56,14 +54,14 @@ export const createCardPaymentMethodHandler: RouteHandler = async (req, res) => 
 /**
  * Create bank account payment method handler
  */
-export const createBankAccountPaymentMethodHandler: RouteHandler = async (req, res) => {
+export const createBankAccountPaymentMethodHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const body: PaymentMethodCreate = req.body;
+    const body = (await readJsonBody(req)) as PaymentMethodCreate;
 
     // Verify customer ID matches authenticated user
     if (body.customerId !== userContext.userId) {
@@ -85,14 +83,14 @@ export const createBankAccountPaymentMethodHandler: RouteHandler = async (req, r
 /**
  * Create wallet payment method handler
  */
-export const createWalletPaymentMethodHandler: RouteHandler = async (req, res) => {
+export const createWalletPaymentMethodHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const body: PaymentMethodCreate = req.body;
+    const body = (await readJsonBody(req)) as PaymentMethodCreate;
 
     // Verify customer ID matches authenticated user
     if (body.customerId !== userContext.userId) {
@@ -114,15 +112,15 @@ export const createWalletPaymentMethodHandler: RouteHandler = async (req, res) =
 /**
  * Verify payment method handler
  */
-export const verifyPaymentMethodHandler: RouteHandler = async (req, res) => {
+export const verifyPaymentMethodHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentMethodId } = req.params as { paymentMethodId: string };
-    const body: VerificationRequest = req.body;
+    const { paymentMethodId } = params as { paymentMethodId: string };
+    const body = (await readJsonBody(req)) as VerificationRequest;
 
     // Verify customer owns this payment method
     const userPaymentMethod = await getPaymentMethod(paymentMethodId);
@@ -133,7 +131,7 @@ export const verifyPaymentMethodHandler: RouteHandler = async (req, res) => {
     const result = await verifyPaymentMethod(
       paymentMethodId,
       body.method,
-      body
+      body as unknown as Record<string, unknown>
     );
 
     return success(res, result, req);
@@ -146,14 +144,15 @@ export const verifyPaymentMethodHandler: RouteHandler = async (req, res) => {
 /**
  * List payment methods handler
  */
-export const listPaymentMethodsHandler: RouteHandler = async (req, res) => {
+export const listPaymentMethodsHandler: RouteHandler = async (req, res, _params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { customerId } = req.params as { customerId: string };
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const customerId = url.searchParams.get("customerId") || userContext.userId;
 
     // Verify customer ID matches authenticated user
     if (customerId !== userContext.userId) {
@@ -162,10 +161,10 @@ export const listPaymentMethodsHandler: RouteHandler = async (req, res) => {
 
     const query: VaultListMethodsRequest = {
       customerId,
-      status: req.query?.status as any,
-      type: req.query?.type as any,
-      page: Number(req.query?.page) || 1,
-      limit: Number(req.query?.limit) || 20,
+      status: (url.searchParams.get("status") as any) || undefined,
+      type: (url.searchParams.get("type") as any) || undefined,
+      page: Number(url.searchParams.get("page")) || 1,
+      limit: Number(url.searchParams.get("limit")) || 20,
     };
 
     const result = await listPaymentMethods(query);
@@ -180,14 +179,14 @@ export const listPaymentMethodsHandler: RouteHandler = async (req, res) => {
 /**
  * Get payment method by ID handler
  */
-export const getPaymentMethodHandler: RouteHandler = async (req, res) => {
+export const getPaymentMethodHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentMethodId } = req.params as { paymentMethodId: string };
+    const { paymentMethodId } = params as { paymentMethodId: string };
 
     const paymentMethod = await getPaymentMethod(paymentMethodId);
     if (!paymentMethod) {
@@ -209,15 +208,15 @@ export const getPaymentMethodHandler: RouteHandler = async (req, res) => {
 /**
  * Update payment method handler
  */
-export const updatePaymentMethodHandler: RouteHandler = async (req, res) => {
+export const updatePaymentMethodHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentMethodId } = req.params as { paymentMethodId: string };
-    const body: VaultUpdateMethodRequest = req.body;
+    const { paymentMethodId } = params as { paymentMethodId: string };
+    const body = (await readJsonBody(req)) as VaultUpdateMethodRequest;
 
     // Verify customer owns this payment method
     const userPaymentMethod = await getPaymentMethod(paymentMethodId);
@@ -237,15 +236,15 @@ export const updatePaymentMethodHandler: RouteHandler = async (req, res) => {
 /**
  * Remove payment method handler
  */
-export const removePaymentMethodHandler: RouteHandler = async (req, res) => {
+export const removePaymentMethodHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentMethodId } = req.params as { paymentMethodId: string };
-    const body: VaultRemoveMethodRequest = req.body;
+    const { paymentMethodId } = params as { paymentMethodId: string };
+    const body = ((await readJsonBody(req).catch(() => ({}))) ?? {}) as VaultRemoveMethodRequest;
 
     // Verify customer owns this payment method
     const userPaymentMethod = await getPaymentMethod(paymentMethodId);
@@ -265,14 +264,14 @@ export const removePaymentMethodHandler: RouteHandler = async (req, res) => {
 /**
  * Mark payment method as used handler
  */
-export const markPaymentMethodUsedHandler: RouteHandler = async (req, res) => {
+export const markPaymentMethodUsedHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentMethodId } = req.params as { paymentMethodId: string };
+    const { paymentMethodId } = params as { paymentMethodId: string };
 
     // Verify customer owns this payment method
     const userPaymentMethod = await getPaymentMethod(paymentMethodId);
@@ -292,14 +291,14 @@ export const markPaymentMethodUsedHandler: RouteHandler = async (req, res) => {
 /**
  * Check if payment method is usable handler
  */
-export const checkPaymentMethodUsableHandler: RouteHandler = async (req, res) => {
+export const checkPaymentMethodUsableHandler: RouteHandler = async (req, res, params) => {
   try {
     const userContext = getAuthenticatedUserContext(req);
     if (!userContext) {
       return notFound(res, "User not authenticated", req);
     }
 
-    const { paymentMethodId } = req.params as { paymentMethodId: string };
+    const { paymentMethodId } = params as { paymentMethodId: string };
 
     // Verify customer owns this payment method
     const userPaymentMethod = await getPaymentMethod(paymentMethodId);
@@ -307,7 +306,7 @@ export const checkPaymentMethodUsableHandler: RouteHandler = async (req, res) =>
       return notFound(res, "Payment method not found or access denied", req);
     }
 
-    const usable = isUsable(paymentMethodId);
+    const usable = await isUsable(paymentMethodId);
 
     return success(res, { usable }, req);
   } catch (err) {

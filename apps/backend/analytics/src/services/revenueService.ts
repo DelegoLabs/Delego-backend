@@ -1,5 +1,4 @@
 import { RevenueAttribution } from "../models/RevenueAttribution.js";
-import { NotificationEvent } from "../models/NotificationEvent.js";
 import { CustomEvent } from "../models/CustomEvent.js";
 
 /**
@@ -25,14 +24,14 @@ export class RevenueService {
   /**
    * Get revenue attributed to a notification
    */
-  async getRevenueByNotification(notificationId: string): Promise<number> {
+  async getRevenueByNotification(_notificationId: string): Promise<number> {
     return 0;
   }
 
   /**
    * Get total revenue for a template
    */
-  async getRevenueByTemplate(templateId: string, periodStart: string, periodEnd: string): Promise<number> {
+  async getRevenueByTemplate(_templateId: string, _periodStart: string, _periodEnd: string): Promise<number> {
     return 0;
   }
 
@@ -45,7 +44,7 @@ export class RevenueService {
     amount: number = 0,
     currency: string = "USD",
     category?: string,
-    metadata?: Record<string, unknown>
+    _metadata?: Record<string, unknown>
   ): Promise<CustomEvent> {
     return {
       id: "event-id",
@@ -60,14 +59,14 @@ export class RevenueService {
   /**
    * Get revenue attribution breakdown
    */
-  async getRevenueBreakdown(templateId?: string, periodStart?: string, periodEnd?: string): Promise<Array<{ channel: string; revenue: number; count: number }>> {
+  async getRevenueBreakdown(_templateId?: string, _periodStart?: string, _periodEnd?: string): Promise<Array<{ channel: string; revenue: number; count: number }>> {
     return [];
   }
 
   /**
    * Get cohort revenue analysis
    */
-  async getCohortRevenue(cohort: string, weeks: number = 12): Promise<Array<{ period: number; revenue: number; revenuePerUser: number }>> {
+  async getCohortRevenue(_cohort: string, _weeks: number = 12): Promise<Array<{ period: number; revenue: number; revenuePerUser: number }>> {
     return [];
   }
 }

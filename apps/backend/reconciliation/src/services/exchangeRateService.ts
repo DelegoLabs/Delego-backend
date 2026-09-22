@@ -1,5 +1,6 @@
 import { ExchangeRateCache } from "../models/ExchangeRateCache.js";
 import { createLogger } from "@delegolabs/utils";
+import { Op } from "sequelize";
 
 const log = createLogger("reconciliation:exchange", process.env.LOG_LEVEL ?? "info");
 
@@ -29,20 +30,20 @@ export class ExchangeRateService {
   private async getRateFromCache(from: string, to: string, date?: string): Promise<number | null> {
     try {
       const query: any = {
-        from_currency: from,
-        to_currency: to,
+        fromCurrency: from,
+        toCurrency: to,
       };
 
       if (date) {
-        query.validFrom = { [ExchangeRateCache.sequelize!.Op.lte]: new Date(date) };
-        query.validTo = { [ExchangeRateCache.sequelize!.Op.gte]: new Date(date) };
+        query.validFrom = { [Op.lte]: new Date(date) };
+        query.validTo = { [Op.gte]: new Date(date) };
       } else {
-        query.validTo = { [ExchangeRateCache.sequelize!.Op.or]: [null, { [ExchangeRateCache.sequelize!.Op.gte]: new Date() }] };
+        query.validTo = { [Op.or]: [null, { [Op.gte]: new Date() }] };
       }
 
       const cache = await ExchangeRateCache.findOne({
         where: query,
-        order: [["valid_from", "DESC"]],
+        order: [["validFrom", "DESC"]],
       });
 
       return cache?.rate || null;
@@ -68,8 +69,8 @@ export class ExchangeRateService {
         return null;
       }
 
-      const data = await response.json();
-      return data.rate || null;
+      const data = (await response.json()) as { rate?: number };
+      return data.rate ?? null;
     } catch (err) {
       log.error("Failed to fetch exchange rate", { error: err instanceof Error ? err.message : String(err) });
       return null;
@@ -113,9 +114,9 @@ export class ExchangeRateService {
   async getRatesForDate(date: string): Promise<Array<{ from: string; to: string; rate: number }>> {
     const rates = await ExchangeRateCache.findAll({
       where: {
-        validFrom: { [ExchangeRateCache.sequelize!.Op.lte]: new Date(date) },
-        validTo: { [ExchangeRateCache.sequelize!.Op.or]: [null, { [ExchangeRateCache.sequelize!.Op.gte]: new Date(date) }] },
-      },
+        validFrom: { [Op.lte]: new Date(date) },
+        validTo: { [Op.or]: [null, { [Op.gte]: new Date(date) }] },
+      } as any,
     });
 
     return rates.map((r) => ({
@@ -132,7 +133,7 @@ export class ExchangeRateService {
     try {
       const expired = await ExchangeRateCache.findAll({
         where: {
-          validTo: { [ExchangeRateCache.sequelize!.Op.lt]: new Date() },
+          validTo: { [Op.lt]: new Date() },
         },
       });
 

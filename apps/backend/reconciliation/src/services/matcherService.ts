@@ -1,6 +1,5 @@
 import { ReconciliationRecord } from "../models/ReconciliationRecord.js";
 import { createLogger } from "@delegolabs/utils";
-import { randomUUID } from "crypto";
 
 const log = createLogger("reconciliation:matcher", process.env.LOG_LEVEL ?? "info");
 
@@ -65,7 +64,7 @@ export class MatcherService {
     }
 
     // Remaining external records are unmatched
-    for (const [key, external] of externalMap.entries()) {
+    for (const external of externalMap.values()) {
       unmatchedExternal.push({ id: external.id, amount: external.amount, currency: external.currency });
     }
 
@@ -172,7 +171,7 @@ export class MatcherService {
     jobId: string,
     internal: any,
     external: any,
-    isFuzzyMatch: boolean = false,
+    _isFuzzyMatch: boolean = false,
   ): ReconciliationRecord {
     const internalAmount = parseFloat(internal.amount);
     const externalAmount = parseFloat(external.amount);
@@ -239,6 +238,7 @@ export class MatcherService {
         recordsToSave.push(
           ReconciliationRecord.build({
             jobId,
+            internalRecordId: record.id ?? `ext-${record.amount}-${record.currency}`,
             externalRecordId: record.id,
             status: "unmatched_external",
             internalAmount: "0",
@@ -249,7 +249,7 @@ export class MatcherService {
       }
 
       if (recordsToSave.length > 0) {
-        await ReconciliationRecord.bulkCreate(recordsToSave);
+        await ReconciliationRecord.bulkCreate(recordsToSave.map((r) => r.get()));
       }
     } catch (err) {
       log.error("Failed to save records", { error: err instanceof Error ? err.message : String(err) });
@@ -261,7 +261,7 @@ export class MatcherService {
    * Get records by job ID
    */
   async getRecordsByJob(jobId: string): Promise<ReconciliationRecord[]> {
-    return ReconciliationRecord.findAll({ where: { job_id: jobId } });
+    return ReconciliationRecord.findAll({ where: { jobId } });
   }
 
   /**

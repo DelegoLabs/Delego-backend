@@ -38,25 +38,26 @@ export class StatusPageIntegration {
   // ─── Status Update ──────────────────────────────────────────────────────
 
   async updateStatus(checkId: string, results: CheckResult[]): Promise<void> {
+    if (results.length === 0) return;
     const check = this.checks.get(checkId);
-    if (!check) return;
+    const componentName = check?.name || checkId;
 
     // Determine status based on results
     const successRate = results.filter((r) => r.status === "success").length / results.length;
     
     let status: "operational" | "degraded_performance" | "partial_outage" | "major_outage" = "operational";
 
-    if (successRate < 0.99) {
+    if (successRate === 0) {
       status = "major_outage";
-    } else if (successRate < 0.999) {
+    } else if (successRate < 0.5) {
       status = "partial_outage";
     } else if (successRate < 1) {
       status = "degraded_performance";
     }
 
     // Update component status
-    await this.updateComponentStatus(check.id, check.name, status);
-    this.componentStatuses.set(check.id, status);
+    await this.updateComponentStatus(checkId, componentName, status);
+    this.componentStatuses.set(checkId, status);
 
     log.info("Status page updated", {
       checkId,
@@ -195,7 +196,7 @@ export class StatusPageIntegration {
 
   // ─── Utility Methods ────────────────────────────────────────────────────
 
-  getStatus(pageId?: string): Map<string, "operational" | "degraded_performance" | "partial_outage" | "major_outage"> {
+  getStatus(_pageId?: string): Map<string, "operational" | "degraded_performance" | "partial_outage" | "major_outage"> {
     return this.componentStatuses;
   }
 

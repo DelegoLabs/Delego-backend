@@ -1,5 +1,3 @@
-import { ValidationError } from "../errors.js";
-
 /**
  * Validate payment method data
  */
@@ -28,7 +26,7 @@ export function validateCardDetails(details: {
     errors.push("Card has expired");
   }
 
-  if (details.cvc !== undefined && details.cvc.length < 3 || details.cvc.length > 4) {
+  if (details.cvc !== undefined && (details.cvc.length < 3 || details.cvc.length > 4)) {
     errors.push("CVC must be 3 or 4 digits");
   }
 

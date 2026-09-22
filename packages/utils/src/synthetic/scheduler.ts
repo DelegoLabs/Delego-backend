@@ -10,13 +10,15 @@ import type { SyntheticCheck, Schedule } from "./types.js";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class CheckScheduler {
-  private checks = new Map<string, SyntheticCheck>();
+  public checks = new Map<string, SyntheticCheck>();
   private schedules = new Map<string, Schedule>();
   private runningTasks = new Map<string, NodeJS.Timeout | number>();
   private defaultFrequency = 60; // 1 minute
 
-  constructor() {
-    this.setupDefaultSchedule();
+  constructor(setupDefaults = false) {
+    if (setupDefaults) {
+      this.setupDefaultSchedule();
+    }
   }
 
   private setupDefaultSchedule(): void {
@@ -149,6 +151,12 @@ export class CheckScheduler {
 
     const [minute, hour, day, month, weekday] = parts;
 
+    // Calculate based on minute interval
+    if (minute.includes("/")) {
+      const interval = parseInt(minute.split("/")[1], 10);
+      return interval * 60;
+    }
+
     // Check for common patterns
     if (minute === "*" && hour === "*" && day === "*" && month === "*" && weekday === "*") {
       return 60; // Every minute
@@ -158,12 +166,6 @@ export class CheckScheduler {
     }
     if (day === "*" && month === "*" && weekday === "*") {
       return 24 * 60 * 60; // Every day
-    }
-
-    // Calculate based on minute interval
-    if (minute.includes("/")) {
-      const interval = parseInt(minute.split("/")[1], 10);
-      return interval * 60;
     }
 
     return null;

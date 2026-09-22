@@ -4,16 +4,21 @@
  * Provides Brotli, Zstandard compression with automatic negotiation and caching.
  */
 
-import { createGzip, createBrotliCompress, createZstdCompress, type Gzip, type BrotliCompress, type ZstdCompress } from "zlib";
+import zlib, {
+  createGzip,
+  createBrotliCompress,
+  createDeflate,
+} from "zlib";
 import { Readable, type Transform } from "stream";
-import { createLogger } from "../logger.js";
+import { createHash } from "crypto";
 import { ServiceMetricsRegistry } from "../metrics/serviceMetrics.js";
 import type {
   CompressionConfig,
   CompressionResult,
-  CompressionMetrics,
+  CompressionMetrics as CompressionMetricsData,
   CompressionMetricsState,
   CompressionCacheEntry,
+  StreamCompressionResult,
 } from "./types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,9 +84,12 @@ export class CompressionCache {
     // Evict old entries if cache is full
     while (this.totalSize + entry.size > this.maxSize && this.entries.size > 0) {
       const oldestKey = this.entries.keys().next().value;
-      const oldest = this.entries.get(oldestKey)!;
-      this.entries.delete(oldestKey);
-      this.totalSize -= oldest.size;
+      if (!oldestKey) break;
+      const oldest = this.entries.get(oldestKey);
+      if (oldest) {
+        this.entries.delete(oldestKey);
+        this.totalSize -= oldest.size;
+      }
     }
 
     this.entries.set(key, entry);
@@ -146,6 +154,7 @@ export class CompressionMetrics {
   }
 
   private initMetrics(): void {
+    if (!this.metricsRegistry) return;
     // Compression ratio histogram
     this.metricsRegistry.histogram("compression_ratio");
 
@@ -206,7 +215,7 @@ export class CompressionMetrics {
     }
   }
 
-  getMetrics(): CompressionMetrics {
+  getMetrics(): CompressionMetricsData {
     const { ratios, times, byAlgorithm } = this.state;
 
     const avgRatio = ratios.length > 0 ? ratios.reduce((a, b) => a + b, 0) / ratios.length : 1;
@@ -247,7 +256,7 @@ export class CompressionMetrics {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class CompressionMiddleware {
-  private config: CompressionConfig;
+  public readonly config: CompressionConfig;
   private cache: CompressionCache;
   private metrics: CompressionMetrics;
 
@@ -257,7 +266,7 @@ export class CompressionMiddleware {
     this.metrics = new CompressionMetrics();
   }
 
-  getMetrics(): CompressionMetrics {
+  getMetrics(): CompressionMetricsData {
     const metrics = this.metrics.getMetrics();
     metrics.cacheHitRate = this.cache.getHitRate();
     return metrics;
@@ -285,13 +294,32 @@ export class CompressionMiddleware {
 
     switch (algorithm) {
       case "br":
-        return createBrotliCompress({ quality: level });
-      case "zstd":
-        return createZstdCompress({ level });
+        return createBrotliCompress({
+          params: {
+            [zlib.constants.BROTLI_PARAM_QUALITY]: level,
+          },
+        });
+      case "zstd": {
+        const createZstd = (zlib as any).createZstdCompress;
+        if (typeof createZstd === "function") {
+          return createZstd({
+            params: {
+              ...(zlib.constants && (zlib.constants as any).ZSTD_c_compressionLevel !== undefined
+                ? { [(zlib.constants as any).ZSTD_c_compressionLevel]: level }
+                : {}),
+            },
+          });
+        }
+        return createBrotliCompress({
+          params: {
+            [zlib.constants.BROTLI_PARAM_QUALITY]: level,
+          },
+        });
+      }
       case "gzip":
         return createGzip({ level });
       case "deflate":
-        return new (require("zlib").Deflate)({ level });
+        return createDeflate({ level });
       default:
         throw new Error(`Unsupported algorithm: ${algorithm}`);
     }
@@ -336,6 +364,17 @@ export class CompressionMiddleware {
 
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
     const originalSize = buffer.length;
+
+    if (originalSize === 0) {
+      return {
+        algorithm: algorithm || this.config.defaultAlgorithm,
+        originalSize: 0,
+        compressedSize: 0,
+        ratio: 1,
+        timeMs: 0,
+        fromCache: false,
+      };
+    }
 
     // Check cache first
     if (this.config.cacheEnabled) {
@@ -418,7 +457,7 @@ export class CompressionMiddleware {
 
   async compressStream(
     readable: Readable,
-    contentType: string,
+    _contentType: string,
     algorithm?: string
   ): Promise<StreamCompressionResult> {
     const algo = algorithm || this.negotiateAlgorithm("br, zstd, gzip, deflate");
@@ -428,31 +467,39 @@ export class CompressionMiddleware {
     let originalSize = 0;
 
     return new Promise((resolve, reject) => {
-      readable.on("data", (chunk: Buffer) => {
-        originalSize += chunk.length;
-        chunks.push(chunk);
+      readable.on("data", (chunk: Buffer | string) => {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        originalSize += buf.length;
+        chunks.push(buf);
       });
 
       readable.on("end", () => {
         const fullBuffer = Buffer.concat(chunks);
-        resolve({ readable: fullBuffer, compression: { algorithm: algo, originalSize } });
+        resolve({
+          readable: fullBuffer as any,
+          compression: {
+            algorithm: algo,
+            originalSize,
+            compressedSize: fullBuffer.length,
+          },
+        });
       });
 
       readable.on("error", reject);
+      readable.pipe(compressor);
     });
   }
 
   // ─── Cache Key Generation ───────────────────────────────────────────────
 
-  private generateCacheKey(data: Buffer, contentType: string, algorithm: string): string {
-    // Simple hash-based key
-    const crypto = require("crypto");
-    return `compression:${crypto.createHash("md5").update(data).digest("hex")}:${algorithm}`;
+  private generateCacheKey(data: Buffer, _contentType: string, algorithm: string): string {
+    return `compression:${createHash("md5").update(data).digest("hex")}:${algorithm}`;
   }
 
   // ─── Middleware Handler ─────────────────────────────────────────────────
 
   handler(req: any, res: any, next?: (err?: any) => void) {
+    const self = this;
     return async (err?: any) => {
       if (err) {
         next?.(err);
@@ -464,7 +511,6 @@ export class CompressionMiddleware {
       const originalWrite = res.write.bind(res);
       const originalEnd = res.end.bind(res);
 
-      let compressed = false;
       let contentType = "text/plain";
       let contentBuffer: Buffer | null = null;
 
@@ -500,16 +546,15 @@ export class CompressionMiddleware {
 
         // Check if compression should be applied
         if (
-          contentBuffer.length >= this.config.minSizeBytes &&
-          this.isCompressible(contentType)
+          contentBuffer.length >= self.config.minSizeBytes &&
+          self.isCompressible(contentType)
         ) {
           const acceptEncoding = req.headers["accept-encoding"] || "";
-          const algorithm = this.negotiateAlgorithm(acceptEncoding);
+          const algorithm = self.negotiateAlgorithm(acceptEncoding);
 
-          if (this.config.algorithms.includes(algorithm as any)) {
-            this.compress(contentBuffer, contentType, algorithm)
-              .then((result) => {
-                compressed = true;
+          if (self.config.algorithms.includes(algorithm as any)) {
+            self.compress(contentBuffer, contentType, algorithm)
+              .then((result: CompressionResult) => {
                 const headers: Record<string, string> = {
                   "Content-Encoding": algorithm,
                   "Vary": "Accept-Encoding",
@@ -553,9 +598,3 @@ export class CompressionMiddleware {
     this.metrics.reset();
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Logger
-// ─────────────────────────────────────────────────────────────────────────────
-
-const log = createLogger("utils:compression", process.env.LOG_LEVEL ?? "info");

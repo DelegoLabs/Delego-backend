@@ -1,14 +1,24 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { json } from "@delegolabs/utils";
-import { extractAuth, getAuthenticatedUserContext } from "../../gateway/middleware/auth.js";
-import { sendApiError, forbidden, unauthorized } from "../../gateway/src/errors.js";
+import { json, readBodyWithLimit } from "@delegolabs/utils";
+import { extractAuth, getAuthenticatedUserContext } from "../../../gateway/middleware/auth.js";
+import { sendApiError, forbidden, unauthorized } from "../../../gateway/src/errors.js";
 import { fraudCheckService } from "../fraudCheckService.js";
 import { ruleEngine } from "../ruleEngine.js";
 import { mlScorer } from "../mlScorer.js";
 import { caseManagementService } from "../caseManagementService.js";
 import { fraudAnalyticsService } from "../analyticsService.js";
 import { retrainingService } from "../retrainingService.js";
-import { FraudCheckRequest, FraudCheckResponse, CreateFraudRuleRequest, UpdateFraudRuleRequest, CreateFraudCaseRequest, UpdateFraudCaseRequest, AddEvidenceRequest, ModelPerformance, RetrainModelResponse } from "../schemas.js";
+import { FraudCheckRequest, CreateFraudRuleRequest, UpdateFraudRuleRequest, CreateFraudCaseRequest, UpdateFraudCaseRequest, AddEvidenceRequest } from "../schemas.js";
+
+/** Read and parse the JSON request body. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const body = await readBodyWithLimit(req);
+  try {
+    return body ? (JSON.parse(body) as Record<string, unknown>) : {};
+  } catch {
+    throw new Error("Invalid JSON body");
+  }
+}
 
 /**
  * Check if user is admin
@@ -23,7 +33,7 @@ function isAdmin(req: IncomingMessage): boolean {
  *
  * Check a transaction for fraud
  */
-export async function checkFraudHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function checkFraudHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -33,14 +43,8 @@ export async function checkFraudHandler(req: IncomingMessage, res: ServerRespons
   try {
     let body: FraudCheckRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as FraudCheckRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as FraudCheckRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -64,7 +68,7 @@ export async function checkFraudHandler(req: IncomingMessage, res: ServerRespons
  *
  * List all fraud rules
  */
-export async function listRulesHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function listRulesHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -86,7 +90,7 @@ export async function listRulesHandler(req: IncomingMessage, res: ServerResponse
  *
  * Create a new fraud rule
  */
-export async function createRuleHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function createRuleHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -101,14 +105,8 @@ export async function createRuleHandler(req: IncomingMessage, res: ServerRespons
   try {
     let body: CreateFraudRuleRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as CreateFraudRuleRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as CreateFraudRuleRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -132,7 +130,7 @@ export async function createRuleHandler(req: IncomingMessage, res: ServerRespons
  *
  * Get rule details
  */
-export async function getRuleHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getRuleHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -140,8 +138,7 @@ export async function getRuleHandler(req: IncomingMessage, res: ServerResponse):
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Rule ID required", req);
@@ -167,7 +164,7 @@ export async function getRuleHandler(req: IncomingMessage, res: ServerResponse):
  *
  * Update a rule
  */
-export async function updateRuleHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function updateRuleHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -180,8 +177,7 @@ export async function updateRuleHandler(req: IncomingMessage, res: ServerRespons
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Rule ID required", req);
@@ -190,14 +186,8 @@ export async function updateRuleHandler(req: IncomingMessage, res: ServerRespons
 
     let body: UpdateFraudRuleRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as UpdateFraudRuleRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as UpdateFraudRuleRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -221,7 +211,7 @@ export async function updateRuleHandler(req: IncomingMessage, res: ServerRespons
  *
  * Delete a rule
  */
-export async function deleteRuleHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function deleteRuleHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -234,8 +224,7 @@ export async function deleteRuleHandler(req: IncomingMessage, res: ServerRespons
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Rule ID required", req);
@@ -261,7 +250,7 @@ export async function deleteRuleHandler(req: IncomingMessage, res: ServerRespons
  *
  * Evaluate rules against a transaction
  */
-export async function evaluateRulesHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function evaluateRulesHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -269,20 +258,6 @@ export async function evaluateRulesHandler(req: IncomingMessage, res: ServerResp
   }
 
   try {
-    let body: FraudCheckRequest;
-    try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as FraudCheckRequest;
-    } catch (err) {
-      sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
-      return;
-    }
-
     const rules = await ruleEngine.loadRules();
 
     json(res, 200, { data: { rulesTriggered: rules.map((r) => r.name) }, error: null });
@@ -297,7 +272,7 @@ export async function evaluateRulesHandler(req: IncomingMessage, res: ServerResp
  *
  * Get current model version
  */
-export async function getModelVersionHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getModelVersionHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -320,7 +295,7 @@ export async function getModelVersionHandler(req: IncomingMessage, res: ServerRe
  *
  * Trigger model retraining
  */
-export async function retrainModelHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function retrainModelHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -351,7 +326,7 @@ export async function retrainModelHandler(req: IncomingMessage, res: ServerRespo
  *
  * Get model performance metrics
  */
-export async function getModelPerformanceHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getModelPerformanceHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -373,7 +348,7 @@ export async function getModelPerformanceHandler(req: IncomingMessage, res: Serv
  *
  * List fraud cases
  */
-export async function listCasesHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function listCasesHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -408,7 +383,7 @@ export async function listCasesHandler(req: IncomingMessage, res: ServerResponse
  *
  * Create a fraud case
  */
-export async function createCaseHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function createCaseHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -418,14 +393,8 @@ export async function createCaseHandler(req: IncomingMessage, res: ServerRespons
   try {
     let body: CreateFraudCaseRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as CreateFraudCaseRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as CreateFraudCaseRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -449,7 +418,7 @@ export async function createCaseHandler(req: IncomingMessage, res: ServerRespons
  *
  * Get case details
  */
-export async function getCaseHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getCaseHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -457,8 +426,7 @@ export async function getCaseHandler(req: IncomingMessage, res: ServerResponse):
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Case ID required", req);
@@ -484,7 +452,7 @@ export async function getCaseHandler(req: IncomingMessage, res: ServerResponse):
  *
  * Update case status
  */
-export async function updateCaseHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function updateCaseHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -492,8 +460,7 @@ export async function updateCaseHandler(req: IncomingMessage, res: ServerRespons
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Case ID required", req);
@@ -502,14 +469,8 @@ export async function updateCaseHandler(req: IncomingMessage, res: ServerRespons
 
     let body: UpdateFraudCaseRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as UpdateFraudCaseRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as UpdateFraudCaseRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -533,7 +494,7 @@ export async function updateCaseHandler(req: IncomingMessage, res: ServerRespons
  *
  * Add evidence to case
  */
-export async function addEvidenceHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function addEvidenceHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -541,8 +502,7 @@ export async function addEvidenceHandler(req: IncomingMessage, res: ServerRespon
   }
 
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const id = url.pathname.split("/").pop();
+    const id = params.id;
 
     if (!id) {
       sendApiError(res, 400, "VALIDATION_ERROR", "Case ID required", req);
@@ -551,14 +511,8 @@ export async function addEvidenceHandler(req: IncomingMessage, res: ServerRespon
 
     let body: AddEvidenceRequest;
     try {
-      const rawBody = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-      body = JSON.parse(rawBody) as AddEvidenceRequest;
-    } catch (err) {
+      body = (await readJsonBody(req)) as unknown as AddEvidenceRequest;
+    } catch {
       sendApiError(res, 400, "VALIDATION_ERROR", "Invalid JSON body", req);
       return;
     }
@@ -587,7 +541,7 @@ export async function addEvidenceHandler(req: IncomingMessage, res: ServerRespon
  *
  * Get fraud rate metrics
  */
-export async function getFraudRateHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getFraudRateHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -612,7 +566,7 @@ export async function getFraudRateHandler(req: IncomingMessage, res: ServerRespo
  *
  * Get fraud trends
  */
-export async function getFraudTrendsHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getFraudTrendsHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);
@@ -637,7 +591,7 @@ export async function getFraudTrendsHandler(req: IncomingMessage, res: ServerRes
  *
  * Get top fraud-triggering rules
  */
-export async function getTopFraudRulesHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function getTopFraudRulesHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) {
     unauthorized(res, "Authentication required", req);

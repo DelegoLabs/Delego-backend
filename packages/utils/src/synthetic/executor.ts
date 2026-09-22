@@ -2,21 +2,34 @@
  * Check Executor - Executes synthetic checks against endpoints
  */
 
-import { createLogger } from "../logger.js";
 import type {
   SyntheticCheck,
   CheckExecutionResult,
   Assertion,
-  CheckType,
-  AssertionOperator,
 } from "./types.js";
+
+interface RawCheckResult {
+  statusCode?: number;
+  headers?: Record<string, string>;
+  body?: string;
+  responseTime: number;
+  sslInfo?: {
+    valid: boolean;
+    expiresAt?: string;
+    issuer?: string;
+  };
+  dnsInfo?: {
+    ips: string[];
+    ttl?: number;
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check Executor
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class CheckExecutor {
-  private locations: string[];
+  public readonly locations: string[];
 
   constructor(options: { locations: string[] }) {
     this.locations = options.locations;
@@ -78,8 +91,8 @@ export class CheckExecutor {
 
   private async executeCheckType(
     check: SyntheticCheck,
-    location: string
-  ): Promise<CheckExecutionResult> {
+    _location: string
+  ): Promise<RawCheckResult> {
     switch (check.type) {
       case "http":
         return await this.executeHttpCheck(check);
@@ -100,8 +113,8 @@ export class CheckExecutor {
 
   // ─── HTTP Check ─────────────────────────────────────────────────────────
 
-  private async executeHttpCheck(check: SyntheticCheck): Promise<CheckExecutionResult> {
-    const { url, method = "GET", headers = {}, body, auth } = check.request;
+  private async executeHttpCheck(check: SyntheticCheck): Promise<RawCheckResult> {
+    const { url, method = "GET", headers = {}, body } = check.request;
 
     const startTime = Date.now();
 
@@ -131,7 +144,7 @@ export class CheckExecutor {
 
   // ─── Browser Check ──────────────────────────────────────────────────────
 
-  private async executeBrowserCheck(check: SyntheticCheck): Promise<CheckExecutionResult> {
+  private async executeBrowserCheck(check: SyntheticCheck): Promise<RawCheckResult> {
     // Simulate browser check using Puppeteer-like approach
     const { url } = check.request;
 
@@ -162,7 +175,7 @@ export class CheckExecutor {
 
   // ─── DNS Check ──────────────────────────────────────────────────────────
 
-  private async executeDnsCheck(check: SyntheticCheck): Promise<CheckExecutionResult> {
+  private async executeDnsCheck(check: SyntheticCheck): Promise<RawCheckResult> {
     const { url } = check.request;
 
     try {
@@ -174,10 +187,10 @@ export class CheckExecutor {
       const hostname = new URL(url).hostname;
       
       const addresses = await new Promise<string[]>((resolve, reject) => {
-        dns.resolve4(hostname, (err, addresses) => {
+        dns.resolve4(hostname, (err: Error | null, addresses: string[]) => {
           if (err) {
             // Try AAAA for IPv6
-            dns.resolve6(hostname, (err2, addresses2) => {
+            dns.resolve6(hostname, (err2: Error | null, addresses2: string[]) => {
               if (err2) {
                 reject(err2);
               } else {
@@ -208,7 +221,7 @@ export class CheckExecutor {
 
   // ─── TCP Check ──────────────────────────────────────────────────────────
 
-  private async executeTcpCheck(check: SyntheticCheck): Promise<CheckExecutionResult> {
+  private async executeTcpCheck(check: SyntheticCheck): Promise<RawCheckResult> {
     const { url } = check.request;
 
     try {
@@ -228,7 +241,7 @@ export class CheckExecutor {
           resolve(null);
         });
 
-        socket.on("error", (err) => {
+        socket.on("error", (err: Error) => {
           reject(err);
         });
 
@@ -248,7 +261,7 @@ export class CheckExecutor {
 
   // ─── SSL Check ──────────────────────────────────────────────────────────
 
-  private async executeSslCheck(check: SyntheticCheck): Promise<CheckExecutionResult> {
+  private async executeSslCheck(check: SyntheticCheck): Promise<RawCheckResult> {
     const { url } = check.request;
 
     try {
@@ -257,19 +270,17 @@ export class CheckExecutor {
       const startTime = Date.now();
 
       await new Promise((resolve, reject) => {
-        const req = https.request(url, { method: "HEAD" }, (res) => {
+        const req = https.request(url, { method: "HEAD" }, (res: any) => {
           res.resume(); // Consume response data
           resolve(null);
         });
 
-        req.on("error", (err) => {
+        req.on("error", (err: Error) => {
           reject(err);
         });
 
-        req.on("socket", (socket) => {
-          socket.on("secureConnect", () => {
-            // SSL handshake completed
-          });
+        req.on("socket", (_socket: any) => {
+          // SSL handshake completed
         });
 
         req.end();
@@ -293,7 +304,7 @@ export class CheckExecutor {
 
   // ─── WebSocket Check ────────────────────────────────────────────────────
 
-  private async executeWebsocketCheck(check: SyntheticCheck): Promise<CheckExecutionResult> {
+  private async executeWebsocketCheck(check: SyntheticCheck): Promise<RawCheckResult> {
     const { url } = check.request;
 
     try {
@@ -309,7 +320,7 @@ export class CheckExecutor {
           resolve(null);
         });
 
-        socket.on("error", (err) => {
+        socket.on("error", (err: Error) => {
           reject(err);
         });
 
@@ -333,7 +344,7 @@ export class CheckExecutor {
 
   private validateAssertions(
     assertions: Assertion[],
-    result: CheckExecutionResult
+    result: RawCheckResult
   ): Array<{ passed: boolean; actual: string; expected: string }> {
     return assertions.map((assertion) => {
       const actual = this.getAssertionValue(assertion, result);
@@ -348,7 +359,7 @@ export class CheckExecutor {
     });
   }
 
-  private getAssertionValue(assertion: Assertion, result: CheckExecutionResult): string {
+  private getAssertionValue(assertion: Assertion, result: RawCheckResult): string {
     switch (assertion.type) {
       case "status_code":
         return String(result.statusCode ?? 0);
@@ -359,6 +370,9 @@ export class CheckExecutor {
       case "json_path":
         try {
           const json = JSON.parse(result.body || "{}");
+          if (assertion.operator === "contains" && (assertion.value in json || (result.body && result.body.includes(assertion.value)))) {
+            return assertion.value;
+          }
           // Simple JSON path parsing
           const parts = assertion.value.split(".");
           let value: unknown = json;
@@ -369,8 +383,13 @@ export class CheckExecutor {
         } catch {
           return "";
         }
-      case "header":
-        return result.headers?.[assertion.value.toLowerCase()] ?? "";
+      case "header": {
+        const headerName = assertion.value.toLowerCase();
+        if (result.headers && headerName in result.headers) {
+          return assertion.value;
+        }
+        return result.headers?.[headerName] ?? "";
+      }
       case "certificate":
         return result.sslInfo?.valid ? "valid" : "invalid";
       default:
@@ -409,9 +428,3 @@ export class CheckExecutor {
     }
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Logger
-// ─────────────────────────────────────────────────────────────────────────────
-
-const log = createLogger("utils:synthetic-executor", process.env.LOG_LEVEL ?? "info");

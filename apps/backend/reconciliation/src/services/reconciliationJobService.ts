@@ -3,7 +3,8 @@ import { ReconciliationRecord } from "../models/ReconciliationRecord.js";
 import { ReconciliationReport } from "../models/ReconciliationReport.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { createLogger } from "@delegolabs/utils";
-import { randomUUID } from "crypto";
+import { sequelize } from "../db.js";
+import { Op } from "sequelize";
 
 const log = createLogger("reconciliation:job", process.env.LOG_LEVEL ?? "info");
 
@@ -67,7 +68,7 @@ export class ReconciliationJobService {
       where,
       limit: params?.limit || 50,
       offset: params?.offset || 0,
-      order: [["started_at", "DESC"]],
+      order: [["startedAt", "DESC"]],
     });
   }
 
@@ -142,7 +143,7 @@ export class ReconciliationJobService {
    * Generate reconciliation report
    */
   async generateReport(job: ReconciliationJob): Promise<ReconciliationReport | null> {
-    const records = await ReconciliationRecord.findAll({ where: { job_id: job.id } });
+    const records = await ReconciliationRecord.findAll({ where: { jobId: job.id } });
 
     const summary = {
       total: records.length,
@@ -247,7 +248,7 @@ export class ReconciliationJobService {
     const totalDiscrepancies = jobs.reduce((sum, j) => sum + j.discrepancies, 0);
     const totalRecords = jobs.reduce((sum, j) => sum + j.totalRecords, 0);
 
-    const lastRun = jobs[0]?.started_at?.toISOString() || new Date().toISOString();
+    const lastRun = jobs[0]?.startedAt?.toISOString() || new Date().toISOString();
 
     return {
       totalJobs: jobs.length,
@@ -268,7 +269,7 @@ export class ReconciliationJobService {
     return ReconciliationRecord.findAll({
       where: {
         status: "discrepancy",
-        resolution: { [ReconciliationRecord.sequelize!.Op.is]: null },
+        resolution: { [Op.is]: sequelize.literal("NULL") },
       },
     });
   }

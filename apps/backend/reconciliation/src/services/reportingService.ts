@@ -1,10 +1,8 @@
 import { ReconciliationRecord } from "../models/ReconciliationRecord.js";
 import { ReconciliationReport } from "../models/ReconciliationReport.js";
 import { ReconciliationJob } from "../models/ReconciliationJob.js";
-import { exchangeRateService } from "./exchangeRateService.js";
-import { createLogger } from "@delegolabs/utils";
-
-const log = createLogger("reconciliation:reporting", process.env.LOG_LEVEL ?? "info");
+import { sequelize } from "../db.js";
+import { Op } from "sequelize";
 
 /**
  * Reporting Service - Generates reconciliation reports
@@ -14,7 +12,7 @@ export class ReportingService {
    * Get reconciliation report for a job
    */
   async getReport(jobId: string): Promise<ReconciliationReport | null> {
-    return ReconciliationReport.findOne({ where: { job_id: jobId } });
+    return ReconciliationReport.findOne({ where: { jobId } });
   }
 
   /**
@@ -40,7 +38,7 @@ export class ReportingService {
     const totalDiscrepancies = jobs.reduce((sum, j) => sum + j.discrepancies, 0);
     const totalRecords = jobs.reduce((sum, j) => sum + j.totalRecords, 0);
 
-    const lastRun = jobs[0]?.started_at?.toISOString() || new Date().toISOString();
+    const lastRun = jobs[0]?.startedAt?.toISOString() || new Date().toISOString();
 
     return {
       totalJobs: jobs.length,
@@ -62,7 +60,7 @@ export class ReportingService {
     report: ReconciliationReport | null;
   }> {
     const [records, report] = await Promise.all([
-      ReconciliationRecord.findAll({ where: { job_id: jobId } }),
+      ReconciliationRecord.findAll({ where: { jobId } }),
       this.getReport(jobId),
     ]);
 
@@ -89,7 +87,7 @@ export class ReportingService {
     const records = await ReconciliationRecord.findAll({
       where: {
         status: "discrepancy",
-        resolution: { [ReconciliationRecord.sequelize!.Op.is]: null },
+        resolution: { [Op.is]: sequelize.literal("NULL") },
       },
       limit: pageSize,
       offset,
@@ -99,7 +97,7 @@ export class ReportingService {
     const total = await ReconciliationRecord.count({
       where: {
         status: "discrepancy",
-        resolution: { [ReconciliationRecord.sequelize!.Op.is]: null },
+        resolution: { [Op.is]: sequelize.literal("NULL") },
       },
     });
 
@@ -146,7 +144,7 @@ export class ReportingService {
    */
   async getCurrencyBreakdown(jobId?: string): Promise<Record<string, { count: number; amount: string }>> {
     const where: any = {};
-    if (jobId) where.job_id = jobId;
+    if (jobId) where.jobId = jobId;
 
     const records = await ReconciliationRecord.findAll({
       where,
@@ -186,7 +184,7 @@ export class ReportingService {
       where: {
         status: "discrepancy",
       },
-      attributes: ["discrepancyType", "job_id", "discrepancyAmount"],
+      attributes: ["discrepancyType", "jobId", "discrepancyAmount"],
     });
 
     const byType: Record<string, { count: number; totalAmount: number; jobs: Set<string> }> = {};
@@ -200,7 +198,7 @@ export class ReportingService {
       if (record.discrepancyAmount) {
         byType[type].totalAmount += parseFloat(record.discrepancyAmount);
       }
-      byType[type].jobs.add(record.job_id);
+      byType[type].jobs.add(record.jobId);
     }
 
     return Object.entries(byType)
@@ -225,16 +223,16 @@ export class ReportingService {
   }> {
     const jobs = await ReconciliationJob.findAll({
       where: {
-        started_at: {
-          [ReconciliationJob.sequelize!.Op.gte]: new Date(startDate),
-          [ReconciliationJob.sequelize!.Op.lte]: new Date(endDate),
+        startedAt: {
+          [Op.gte]: new Date(startDate),
+          [Op.lte]: new Date(endDate),
         },
       },
     });
 
     const recordIds = jobs.map((j) => j.id);
     const records = await ReconciliationRecord.findAll({
-      where: { job_id: recordIds },
+      where: { jobId: recordIds },
     });
 
     const discrepancies = records.filter((r) => r.status === "discrepancy").length;

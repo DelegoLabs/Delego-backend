@@ -111,7 +111,6 @@ export type {
   PubSubConfig,
   DeadLetterMessage,
   MessageHandler,
-<<<<<<< HEAD
   Serializer,
   SerializationFormat,
 } from "./redis/types.js";
@@ -237,4 +236,3 @@ export {
 } from "./logAggregation.js";
 export * from "./softDelete/index.js";
 export * from "./audit/index.js";
->>>>>>> upstream/main

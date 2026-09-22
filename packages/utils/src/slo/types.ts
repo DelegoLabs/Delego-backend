@@ -61,6 +61,12 @@ export interface SLOReport {
 // Internal types for implementation
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface SLIThresholds {
+  good: number;
+  excellent?: number;
+  poor?: number;
+}
+
 export interface SLIConfig {
   name: string;
   description: string;
@@ -162,12 +168,22 @@ export interface SLOAlert {
   id: string;
   sloId: string;
   service: string;
-  type: "burn_rate_warning" | "burn_rate_critical" | "error_budget_critical" | "error_budget_exhausted";
+  type:
+    | "burn_rate_warning"
+    | "burn_rate_critical"
+    | "error_budget_critical"
+    | "error_budget_exhausted"
+    | "error_budget_warning"
+    | "fast_burn_warning"
+    | "fast_burn_critical"
+    | "slow_burn_warning"
+    | "slow_burn_critical";
   severity: "warning" | "critical";
   message: string;
   active: boolean;
   createdAt: string;
   resolvedAt?: string;
+  updatedAt?: string;
   metadata: Record<string, unknown>;
 }
 

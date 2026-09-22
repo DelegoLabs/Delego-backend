@@ -35,12 +35,12 @@ describe("SagaCoordinator distributed locks", () => {
 
     const step = {
       name: "work",
-      async action(context: Record<string, unknown>) {
+      async execute(context: Record<string, unknown>) {
         entered += 1;
         await gate;
         return { ...context, done: true };
       },
-      async compensation(context: Record<string, unknown>) {
+      async compensate(context: Record<string, unknown>) {
         return context;
       },
     };

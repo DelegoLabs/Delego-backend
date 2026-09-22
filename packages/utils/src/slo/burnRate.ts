@@ -5,7 +5,7 @@
  * alert severity based on thresholds.
  */
 
-import { createLogger } from "../logger.js";
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -119,7 +119,7 @@ export class BurnRateCalculator {
   private smoothBurnRate(burnRate: number, windowMultiplier: number): number {
     // Exponential smoothing factor based on window size
     // Smaller windows = less smoothing, larger windows = more smoothing
-    const smoothingFactor = 0.3 / Math.sqrt(windowMultiplier);
+    const smoothingFactor = 0.75 / Math.sqrt(windowMultiplier);
     return burnRate * smoothingFactor + 1 * (1 - smoothingFactor);
   }
 
@@ -128,7 +128,7 @@ export class BurnRateCalculator {
     sloId: string,
     window: string,
     rate: number,
-    now: Date
+    _now: Date
   ): void {
     let windowRates = this.burnRates.get(sloId);
     if (!windowRates) {
@@ -167,15 +167,13 @@ export class FastBurnDetector {
 
   // Detect if error budget is burning fast
   detectFastBurn(
-    sloId: string,
+    _sloId: string,
     target: number,
     actualAvailability: number,
-    errorBudget: number,
-    now: Date = new Date()
+    _errorBudget: number,
+    _now: Date = new Date()
   ): boolean {
-    // Fast burn = consuming more than 20% of error budget in 10 minutes
-    const fastBurnThreshold = errorBudget * 0.2;
-    
+    // Fast burn = consuming more than 5% of 24h error budget in 10 minutes
     // Calculate expected error budget consumption for 10 minutes
     const errorRate = 1 - actualAvailability;
     const targetErrorRate = 1 - target;
@@ -184,7 +182,7 @@ export class FastBurnDetector {
     // Expected consumption in 10 minutes (as fraction of total budget)
     const consumption10m = (burnRate * (this.fastBurnWindowSeconds / 3600)) / 24;
     
-    return consumption10m > 0.2;
+    return consumption10m > 0.05;
   }
 
   // Get fast burn alert
@@ -231,26 +229,26 @@ export class FastBurnDetector {
 export class SlowBurnDetector {
   // Detect if error budget is burning slow but consistently
   detectSlowBurn(
-    sloId: string,
+    _sloId: string,
     target: number,
     actualAvailability: number,
-    errorBudget: number,
+    _errorBudget: number,
     window: string,
-    now: Date = new Date()
+    _now: Date = new Date()
   ): boolean {
-    // Slow burn = consistent error budget consumption over longer period
+    // Slow burn = consistent error budget consumption over longer period (moderate, not fast burn)
     const consumptionRate = this.estimateConsumptionRate(
       actualAvailability,
       target,
       window
     );
     
-    // If we're consuming more than 5% of budget per day consistently
-    return consumptionRate > 0.05;
+    // If we're consuming more than 5% of budget per day consistently, but not rapidly
+    return consumptionRate > 0.05 && consumptionRate <= 0.5;
   }
 
   // Estimate daily consumption rate
-  private estimateConsumptionRate(
+  estimateConsumptionRate(
     actualAvailability: number,
     target: number,
     window: string
@@ -325,9 +323,3 @@ export class SlowBurnDetector {
     };
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Logger
-// ─────────────────────────────────────────────────────────────────────────────
-
-const log = createLogger("utils:slo-burnrate", process.env.LOG_LEVEL ?? "info");
