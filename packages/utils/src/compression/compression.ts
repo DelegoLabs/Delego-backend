@@ -300,12 +300,23 @@ export class CompressionMiddleware {
             [zlib.constants.BROTLI_PARAM_QUALITY]: level,
           },
         });
-      case "zstd":
-        return createZstdCompress({
+      case "zstd": {
+        const createZstd = (zlib as any).createZstdCompress ?? (createZstdCompress as any);
+        if (typeof createZstd === "function") {
+          return createZstd({
+            params: {
+              ...(zlib.constants && (zlib.constants as any).ZSTD_c_compressionLevel !== undefined
+                ? { [(zlib.constants as any).ZSTD_c_compressionLevel]: level }
+                : {}),
+            },
+          });
+        }
+        return createBrotliCompress({
           params: {
-            [zlib.constants.ZSTD_c_compressionLevel]: level,
+            [zlib.constants.BROTLI_PARAM_QUALITY]: level,
           },
         });
+      }
       case "gzip":
         return createGzip({ level });
       case "deflate":

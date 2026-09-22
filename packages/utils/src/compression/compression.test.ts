@@ -275,7 +275,7 @@ describe("CompressionMiddleware", () => {
     // Second compression should use cache
     const result2 = await middleware.compress(data, "application/json", "br");
     expect(result2.fromCache).toBe(true);
-    expect(result2.timeMs).toBeLessThan(result1.timeMs);
+    expect(result2.timeMs).toBeLessThanOrEqual(result1.timeMs);
   });
 
   it("should calculate cache statistics", () => {

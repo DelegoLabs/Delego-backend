@@ -120,13 +120,8 @@ CREATE TABLE IF NOT EXISTS ts_audit_events (
   PRIMARY KEY (ts, action, actor)
 ) PARTITION BY RANGE (ts);
 
--- COMPRESSION / storage tuning.
---   * fillfactor < 100 leaves room for in-place updates and lowers page churn.
---   * toast_tuple_target moves wide JSONB payloads off the main page sooner,
---     so they compress (LZ4/PGLZ) via the TOAST machinery.
-ALTER TABLE ts_metrics      SET (fillfactor = 90, toast_tuple_target = 128);
-ALTER TABLE ts_events       SET (fillfactor = 90, toast_tuple_target = 128);
-ALTER TABLE ts_audit_events SET (fillfactor = 90, toast_tuple_target = 128);
+-- Storage tuning note: storage parameters like fillfactor/toast_tuple_target
+-- are set on individual leaf partitions rather than the partitioned parent table in PostgreSQL.
 
 -- BRIN indexes accelerate time-window scans over the partition space.
 CREATE INDEX IF NOT EXISTS idx_ts_metrics_ts_brin      ON ts_metrics      USING BRIN (ts);
