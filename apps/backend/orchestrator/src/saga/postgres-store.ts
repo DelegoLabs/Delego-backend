@@ -161,7 +161,11 @@ function toRecord(row: SagaExecutionModel): SagaRecord {
     workflowType: row.workflowType,
     status: row.status,
     currentStep: row.currentStep,
-    completedSteps: row.completedSteps.map((step) => ({ ...step, output: { ...step.output } })),
+    completedSteps: (row.completedSteps || []).map((step: any) =>
+      typeof step === "string"
+        ? { stepName: step, status: "completed", output: {} }
+        : { ...step, output: { ...(step?.output || {}) } }
+    ),
     context: row.context,
     version: row.version,
     correlationId: row.correlationId ?? "",

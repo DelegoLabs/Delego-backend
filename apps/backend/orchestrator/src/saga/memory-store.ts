@@ -8,7 +8,11 @@ import {
 function clone(record: SagaRecord): SagaRecord {
   return {
     ...record,
-    completedSteps: record.completedSteps.map((step) => ({ ...step, output: { ...step.output } })),
+    completedSteps: (record.completedSteps || []).map((step: any) =>
+      typeof step === "string"
+        ? { stepName: step, status: "completed", output: {} }
+        : { ...step, output: { ...(step?.output || {}) } }
+    ),
     context: structuredClone(record.context),
     correlationId: record.correlationId,
     error: record.error,

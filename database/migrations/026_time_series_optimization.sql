@@ -345,17 +345,20 @@ RETURNS TABLE (view_name TEXT, refreshed BOOLEAN)
 LANGUAGE plpgsql AS $$
 DECLARE
   agg RECORD;
-  has_data BOOLEAN;
+  is_populated BOOLEAN;
 BEGIN
   FOR agg IN SELECT c.view_name FROM continuous_aggregate_config c WHERE c.enabled
   LOOP
-    -- CONCURRENTLY cannot refresh an empty materialized view (requires >= 1
-    -- row for the incremental machinery), so fall back to a full refresh when
-    -- the view has never been populated.
-    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I)', agg.view_name) INTO has_data;
+    SELECT COALESCE(cl.relispopulated, false) INTO is_populated
+    FROM pg_class cl
+    WHERE cl.relname = agg.view_name;
 
-    IF has_data THEN
-      EXECUTE format('REFRESH MATERIALIZED VIEW CONCURRENTLY %I', agg.view_name);
+    IF is_populated THEN
+      BEGIN
+        EXECUTE format('REFRESH MATERIALIZED VIEW CONCURRENTLY %I', agg.view_name);
+      EXCEPTION WHEN OTHERS THEN
+        EXECUTE format('REFRESH MATERIALIZED VIEW %I', agg.view_name);
+      END;
     ELSE
       EXECUTE format('REFRESH MATERIALIZED VIEW %I', agg.view_name);
     END IF;
