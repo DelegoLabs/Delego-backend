@@ -173,4 +173,4 @@ COMMENT ON TABLE currency_settlements IS 'Currency settlement records';
 
 COMMENT ON COLUMN supported_currencies.compliance_flags IS 'Compliance requirements (KYC, AML, etc.)';
 COMMENT ON COLUMN fx_rates.spread IS 'Spread applied to the rate';
-COMMENT ON COLUMN fx_rates.conversion_path IS 'Path payment route';
+COMMENT ON COLUMN multi_currency_payments.conversion_path IS 'Path payment route';

@@ -7,7 +7,6 @@
 import zlib, {
   createGzip,
   createBrotliCompress,
-  createZstdCompress,
   createDeflate,
 } from "zlib";
 import { Readable, type Transform } from "stream";
@@ -301,7 +300,7 @@ export class CompressionMiddleware {
           },
         });
       case "zstd": {
-        const createZstd = (zlib as any).createZstdCompress ?? (createZstdCompress as any);
+        const createZstd = (zlib as any).createZstdCompress;
         if (typeof createZstd === "function") {
           return createZstd({
             params: {
