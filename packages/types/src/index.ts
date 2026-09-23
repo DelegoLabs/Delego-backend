@@ -43,3 +43,4 @@ export * from "./human-task.js";
 export * from "./workflow-template.js";
 export * from "./cdc.js";
 export * from "./certificate.js";
+export * from "./schemas.js";

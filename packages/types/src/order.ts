@@ -2,29 +2,78 @@
 
 export type OrderStatus =
   | "draft"
+  | "pending"
   | "pending_approval"
   | "approved"
+  | "rejected"
   | "escrowed"
   | "fulfilled"
   | "settled"
+  | "completed"
+  | "failed"
+  | "canceled"
   | "cancelled"
-  | "disputed";
+  | "disputed"
+  /** Dual-control (#574): first approval recorded, waiting on a second signer. */
+  | "awaiting_countersign";
 
 export interface OrderLineItem {
-  productId: string;
+  name?: string;
+  productId?: string;
+  price?: number;
+  unitPriceStroops?: any;
   quantity: number;
-  unitPriceStroops: bigint;
 }
+
+export type OrderItem = OrderLineItem;
+
+/** A single approve/countersign signature captured for an order (#574). */
+export interface ApprovalSignature {
+  approverId: string;
+  approverAddress?: string;
+  /** ISO-8601 timestamp, server-issued. */
+  timestamp: string;
+}
+
+/**
+ * Dual-control approval state for a single order (#574).
+ */
+export interface DualControlState {
+  required: boolean;
+  status: "single" | "awaiting_countersign" | "completed";
+  delegationOwners?: string[];
+  firstApproval?: ApprovalSignature;
+  secondApproval?: ApprovalSignature;
+}
+
+/**
+ * Structured reason recorded when a pending order is rejected (#567).
+ */
+export type RejectionReasonCode =
+  | "too_expensive"
+  | "wrong_item"
+  | "wrong_merchant"
+  | "wrong_time"
+  | "other";
 
 export interface Order {
   id: string;
-  userId: string;
+  userId?: string;
   delegationId: string;
-  merchantId: string;
+  merchantId?: string;
+  merchantName?: string;
+  amount?: any;
+  totalStroops?: any;
+  currency?: string;
   status: OrderStatus;
-  lineItems: OrderLineItem[];
-  totalStroops: bigint;
-  escrowContractId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+  lineItems?: OrderLineItem[];
+  items?: OrderLineItem[];
+  escrowContractId?: string | null;
+  rejectionReason?: RejectionReasonCode | null;
+  rejectionNote?: string | null;
+  dualControl?: DualControlState;
+  approvalNote?: string | null;
+  createdAt: Date | string;
+  updatedAt?: Date | string;
 }
+
