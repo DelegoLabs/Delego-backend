@@ -29,3 +29,11 @@ export interface HealthCheckResponse {
   version: string;
   timestamp: string;
 }
+
+export type DisputeStatus = string;
+export type DisputeReason = string;
+export type ContractName = string;
+export type ContractVersionInfo = any;
+export type CreateDisputeInput = any;
+export type Dispute = any;
+
