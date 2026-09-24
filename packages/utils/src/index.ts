@@ -236,3 +236,4 @@ export {
 } from "./logAggregation.js";
 export * from "./softDelete/index.js";
 export * from "./audit/index.js";
+export * from "./encryption/index.js";

@@ -27,6 +27,7 @@
     "db:ts-maintain:once": "node scripts/time-series/maintain.js --once",
     "db:ts-maintain": "node scripts/time-series/maintain.js --interval 60",
     "db:ts-benchmark": "node scripts/time-series/benchmark.js",
+    "db:encryption-benchmark": "pnpm --filter @delegolabs/utils ts-benchmark:encryption",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "clean": "pnpm -r exec rm -rf dist .next node_modules",

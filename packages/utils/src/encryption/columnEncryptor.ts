@@ -1,0 +1,210 @@
+/**
+ * ColumnEncryptor — application-layer column-level encryption for PII (#68).
+ *
+ * The single entry point services use to encrypt a PII value before writing
+ * it and decrypt it after reading:
+ *
+ *   const encrypted = await encryptor.encrypt("users", "email", "alice@x.com", context, "system");
+ *   const plain     = await encryptor.decrypt("users", "email", encrypted, context, role);
+ *
+ * It composes the four concerns from issue #68:
+ *   - cipher primitives  (AES-256-GCM / CBC, context-bound via AAD)
+ *   - key management      (local / aws_kms / vault providers, versioned)
+ *   - field access control (only permitted roles can decrypt)
+ *   - key-access audit    (every encrypt/decrypt is recorded)
+ *
+ * Data keys are cached in-process so the hot path is a single synchronous
+ * AES round-trip — the <2ms acceptance criterion is met and measured by
+ * benchmark.ts.
+ */
+
+import type {
+  EncryptedField,
+  EncryptionConfig,
+  FieldAccessRole,
+  PiiColumn,
+} from "@delegolabs/types";
+import { decryptField, encryptField, blindIndex, EncryptionError } from "./cipher.js";
+import type { KeyProvider } from "./keyProvider.js";
+import { KeyAccessAuditor } from "./audit.js";
+import { FieldAccessController } from "./accessControl.js";
+
+export interface EncryptOptions {
+  /** Encryption context / AAD — bind ciphertext to a record, e.g. { userId } or { email }. */
+  context?: Record<string, string>;
+  /** Decryption role of the calling actor (audit + access control). */
+  actorRole?: FieldAccessRole;
+  /** Override the configured key version for this write (dual-write during rotation). */
+  keyVersion?: number;
+}
+
+export interface DecryptOptions {
+  context?: Record<string, string>;
+  actorRole?: FieldAccessRole;
+}
+
+export interface ColumnEncryptorConfig {
+  keyProvider: KeyProvider;
+  /** Most recent key version = active. Older versions remain decryptable. */
+  config: EncryptionConfig;
+  access?: FieldAccessController;
+  audit?: KeyAccessAuditor;
+}
+
+export interface FieldIndex {
+  /** Blind (deterministic) index for equality lookups; only for `indexed` columns. */
+  blind: string;
+}
+
+/**
+ * Builds an encryptor from a provider + config, resolving the active key
+ * version the first time it's needed.
+ */
+export class ColumnEncryptor {
+  readonly keyProvider: KeyProvider;
+  readonly config: EncryptionConfig;
+  readonly access: FieldAccessController;
+  readonly audit: KeyAccessAuditor;
+
+  constructor(options: ColumnEncryptorConfig) {
+    this.keyProvider = options.keyProvider;
+    this.config = options.config;
+    this.access = options.access ?? new FieldAccessController();
+    this.audit = options.audit ?? new KeyAccessAuditor();
+  }
+
+  /**
+   * The active key version new writes use. Resolved from the provider on
+   * every call (a cheap in-memory read) so a rotation that promotes a new
+   * version takes effect for writes immediately.
+   */
+  async activeVersion(): Promise<number> {
+    return this.keyProvider.activeVersion();
+  }
+
+  /**
+   * Encrypt a PII value for storage. Returns the EncryptedField (write the
+   * .ciphertext/.iv/.authTag into the DB column, plus for `indexed` columns
+   * the blind index into the companion lookup column).
+   */
+  async encrypt(
+    table: string,
+    column: string,
+    plaintext: string,
+    options: EncryptOptions = {}
+  ): Promise<EncryptedField & { blindIndex?: string }> {
+    this.assertRegistry(table, column);
+    const version = options.keyVersion ?? (await this.activeVersion());
+    const dataKey = await this.keyProvider.getDataKey(version);
+    const context = options.context ?? {};
+
+    const field = encryptField(plaintext, dataKey.key, this.config.algorithm, context);
+
+    await this.audit.record({
+      operation: "encrypt",
+      keyId: dataKey.keyId,
+      keyVersion: version,
+      table,
+      column,
+      context,
+      actorRole: options.actorRole ?? "system",
+      success: true,
+    });
+
+    const result: EncryptedField & { blindIndex?: string } = {
+      ...field,
+      keyVersion: version,
+    };
+    const piiColumn = this.access.lookupFor(table, column);
+    if (piiColumn?.indexed) {
+      result.blindIndex = blindIndex(plaintext, dataKey.key, `${table}.${column}`);
+    }
+    return result;
+  }
+
+  /**
+   * Decrypt a stored field. Enforces field-level access control (authorized
+   * roles only) and records the key use in the audit log.
+   */
+  async decrypt(
+    table: string,
+    column: string,
+    field: EncryptedField,
+    options: DecryptOptions = {}
+  ): Promise<{ plaintext: string; index?: string }> {
+    const role = options.actorRole ?? "system";
+    const decision = this.access.decide(table, column, role);
+    if (!decision.allowed) {
+      await this.audit.record({
+        operation: "decrypt",
+        keyId: this.config.keyId,
+        keyVersion: field.keyVersion,
+        table,
+        column,
+        context: options.context ?? {},
+        actorRole: role,
+        success: false,
+        error: decision.reason,
+      });
+      throw new EncryptionError(
+        `Access denied decrypting ${table}.${column} for role '${role}': ${decision.reason}`
+      );
+    }
+
+    const dataKey = await this.keyProvider.getDataKey(field.keyVersion);
+    const context = options.context ?? {};
+
+    let plaintext: string;
+    try {
+      plaintext = decryptField(field, dataKey.key, context);
+      await this.audit.record({
+        operation: "decrypt",
+        keyId: dataKey.keyId,
+        keyVersion: field.keyVersion,
+        table,
+        column,
+        context,
+        actorRole: role,
+        success: true,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.audit.record({
+        operation: "decrypt",
+        keyId: dataKey.keyId,
+        keyVersion: field.keyVersion,
+        table,
+        column,
+        context,
+        actorRole: role,
+        success: false,
+        error: message,
+      });
+      throw err;
+    }
+
+    const entry = this.access.lookupFor(table, column);
+    const result: { plaintext: string; index?: string } = { plaintext };
+    if (entry?.indexed) {
+      result.index = blindIndex(plaintext, dataKey.key, `${table}.${column}`);
+    }
+    return result;
+  }
+
+  /** Compute the blind index for an equality lookup without decrypting. */
+  async computeIndex(table: string, column: string, value: string): Promise<string> {
+    const version = await this.activeVersion();
+    const dataKey = await this.keyProvider.getDataKey(version);
+    return blindIndex(value, dataKey.key, `${table}.${column}`);
+  }
+
+  private assertRegistry(table: string, column: string): PiiColumn {
+    const entry = this.access.lookupFor(table, column);
+    if (!entry) {
+      throw new EncryptionError(
+        `${table}.${column} is not a registered PII column (see pii-registry.ts) — refusing to encrypt`
+      );
+    }
+    return entry;
+  }
+}

@@ -124,6 +124,8 @@ pnpm test:e2e                # end-to-end tests
 - [Architecture](./ARCHITECTURE.md)
 - [Operational runbook (DLQ)](./OPERATIONAL_RUNBOOK_DLQ.md)
 - [Email retry DLQ design](./DEPLOYMENT_EMAIL_RETRY_DLQ.md)
+- [Operational runbook (encryption)](./OPERATIONAL_RUNBOOK_ENCRYPTION.md)
+- [PII data catalog](./docs/PII_CATALOG.md)
 
 ## 🤝 Contributing
 
@@ -131,4 +133,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). Commits follow [Conventional Commits](
 
 ---
 
-**Last Updated**: August 2026
+**Last Updated**: September 2026
