@@ -84,6 +84,9 @@ import {
 import { registerPaymentRoutes } from "./payment.js";
 import { registerRecoveryRoutes } from "./recovery.js";
 import { registerMultiCurrencyRoutes } from "./multi-currency.js";
+import { registerStorefrontRoutes } from "./storefront.js";
+import { registerStorageRoutes } from "./storage.js";
+import { registerDisputeRoutes } from "./disputes.js";
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
@@ -186,5 +189,11 @@ export function registerRoutes(): Route[] {
     route("POST", "/api/v1/templates/:id/rate", rateTemplateHandler),
     route("POST", "/api/v1/templates/:id/test", testTemplateHandler),
     route("GET", "/api/v1/templates/:id/docs", templateDocumentationHandler),
+    // Storefront - merchant product catalog (Issue #112)
+    ...registerStorefrontRoutes(),
+    // Storage - pre-signed URLs for uploads (Issue #112)
+    ...registerStorageRoutes(),
+    // Disputes - merchant response endpoint (Issue #112)
+    ...registerDisputeRoutes(),
   ];
 }

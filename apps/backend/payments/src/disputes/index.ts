@@ -8,10 +8,11 @@ export {
   openDispute,
   submitEvidence,
   submitMediationDecision,
+  submitMerchantResponse,
   type OpenDisputeParams,
 } from "./mediation.js";
 
-export { InvalidPartialRefundAmountError, executePartialRefund, type PartialRefundOutcome } from "./partialRefund.js";
+export { InvalidPartialRefundAmountError, executePartialRefund, type PartialRefundOutcome, type PartialRefundRequest } from "./partialRefund.js";
 
 export { findAndEscalateBreachedDisputes, startSlaEscalationScheduler, type SlaEscalationResult } from "./slaEscalation.js";
 
