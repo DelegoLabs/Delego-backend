@@ -1,32 +1,90 @@
-/** Shared types for LLM client runtimes (issue #9). */
+/**
+ * Shared types for LLM client runtimes.
+ * Issues #9, #261: unified interface supporting streaming, function calling, and multi-provider.
+ */
 
-export type LLMProvider = "openai" | "anthropic";
+export type LLMProviderName = "openai" | "anthropic" | "gemini";
 
-export type MessageRole = "system" | "user" | "assistant";
+/** @deprecated Use LLMProviderName */
+export type LLMProvider = LLMProviderName;
 
-export interface ChatMessage {
+export type MessageRole = "system" | "user" | "assistant" | "tool";
+
+export interface LLMMessage {
   role: MessageRole;
   content: string;
+  toolCallId?: string;
+  name?: string;
 }
+
+/** @deprecated Use LLMMessage */
+export type ChatMessage = LLMMessage;
+
+/** JSON Schema–based tool definition passed to the LLM. */
+export interface LLMToolDefinition {
+  name: string;
+  description: string;
+  /** JSON Schema for the tool parameters. */
+  parameters: Record<string, unknown>;
+}
+
+/** Represents a single tool-call decision emitted by the model. */
+export interface LLMToolCallResponse {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/** Options forwarded to the provider for a completion request. */
+export interface LLMCompletionOptions {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  /** Tool definitions exposed to the model for function calling. */
+  tools?: LLMToolDefinition[];
+  /** Enable server-sent-events streaming (provider must support it). */
+  stream?: boolean;
+}
+
+/** Token usage counters returned with every completion. */
+export interface LLMUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+/** Result of a non-streaming completion call. */
+export interface LLMCompletionResult {
+  content: string;
+  toolCalls?: LLMToolCallResponse[];
+  usage: LLMUsage;
+  finishReason?: "stop" | "length" | "tool_calls" | "error";
+}
+
+// ---------------------------------------------------------------------------
+// Legacy types kept for backward compatibility with existing clients
+// ---------------------------------------------------------------------------
 
 export interface LLMRequestOptions {
   model: string;
-  messages: ChatMessage[];
+  messages: LLMMessage[];
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;
-  /** Hard cap on tokens that can be spent across this request (budget enforcement). */
   tokenBudget?: number;
+  tools?: LLMToolDefinition[];
+  stream?: boolean;
 }
 
 export interface LLMResponse {
-  provider: LLMProvider;
+  provider: LLMProviderName;
   model: string;
   content: string;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  finishReason: "stop" | "length" | "error";
+  finishReason: "stop" | "length" | "tool_calls" | "error";
+  toolCalls?: LLMToolCallResponse[];
 }
 
 export interface TokenUsage {
@@ -46,6 +104,6 @@ export interface LLMClientConfig {
 }
 
 export interface LLMClient {
-  provider: LLMProvider;
+  provider: LLMProviderName;
   chat(options: LLMRequestOptions): Promise<LLMResponse>;
 }
