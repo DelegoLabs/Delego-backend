@@ -1,10 +1,14 @@
-/** OpenAI GPT-4 client runtime (issue #9). */
+/**
+ * OpenAI GPT client runtime.
+ * Issues #9, #261: supports chat completions, function/tool calling, and exponential backoff.
+ */
 
 import type {
   LLMClient,
   LLMClientConfig,
   LLMRequestOptions,
   LLMResponse,
+  LLMToolCallResponse,
 } from "./types.js";
 
 const DEFAULT_MODEL = "gpt-4o";
@@ -15,18 +19,21 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** Rate-limit and server-error status codes that warrant a retry. */
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
-interface OpenAIChatCompletionUsage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
+interface OpenAIToolCall {
+  id: string;
+  function: { name: string; arguments: string };
 }
 
 interface OpenAIChatCompletionChoice {
-  message?: { content?: string };
+  message?: {
+    content?: string | null;
+    tool_calls?: OpenAIToolCall[];
+  };
   finish_reason?: string;
 }
 
 interface OpenAIChatCompletionResponse {
-  usage?: OpenAIChatCompletionUsage;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
   choices?: OpenAIChatCompletionChoice[];
 }
 
@@ -52,17 +59,29 @@ export class OpenAIClient implements LLMClient {
       ? [{ role: "system", content: options.systemPrompt }, ...options.messages]
       : options.messages;
 
-    const body = {
+    const body: Record<string, unknown> = {
       model,
       messages,
       max_tokens: options.maxTokens ?? 1024,
       temperature: options.temperature ?? 0.7,
     };
 
-    const response = (await this.requestWithRetry(
+    // Attach tool definitions for function calling (#261)
+    if (options.tools && options.tools.length > 0) {
+      body["tools"] = options.tools.map((t) => ({
+        type: "function",
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        },
+      }));
+    }
+
+    const response = await this.requestWithRetry(
       "https://api.openai.com/v1/chat/completions",
       body
-    )) as OpenAIChatCompletionResponse;
+    ) as OpenAIChatCompletionResponse;
 
     const inputTokens = response.usage?.prompt_tokens ?? 0;
     const outputTokens = response.usage?.completion_tokens ?? 0;
@@ -74,10 +93,22 @@ export class OpenAIClient implements LLMClient {
       );
     }
 
-    const choice = (response.choices as Array<{
-      message?: { content?: string };
-      finish_reason?: string;
-    }>)?.[0];
+    const choice = response.choices?.[0];
+    const rawFinish = choice?.finish_reason ?? "stop";
+    const finishReason = rawFinish === "length"
+      ? "length"
+      : rawFinish === "tool_calls"
+        ? "tool_calls"
+        : "stop";
+
+    // Parse tool calls if present
+    const toolCalls: LLMToolCallResponse[] | undefined =
+      choice?.message?.tool_calls?.map((tc) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: safeParseJson(tc.function.arguments),
+      }));
+
     return {
       provider: "openai",
       model,
@@ -85,7 +116,8 @@ export class OpenAIClient implements LLMClient {
       inputTokens,
       outputTokens,
       totalTokens,
-      finishReason: choice?.finish_reason === "length" ? "length" : "stop",
+      finishReason,
+      ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
     };
   }
 
@@ -93,11 +125,7 @@ export class OpenAIClient implements LLMClient {
     url: string,
     body: unknown,
     attempt = 1
-  ): Promise<{
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
-    [key: string]: unknown;
-  }> {
+  ): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -127,6 +155,14 @@ export class OpenAIClient implements LLMClient {
     }
 
     return res.json() as Promise<Record<string, unknown>>;
+  }
+}
+
+function safeParseJson(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { _raw: raw };
   }
 }
 

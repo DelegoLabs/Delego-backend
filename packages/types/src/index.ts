@@ -43,5 +43,7 @@ export * from "./human-task.js";
 export * from "./workflow-template.js";
 export * from "./cdc.js";
 export * from "./certificate.js";
+export * from "./encryption.js";
+export * from "./pii-registry.js";
 export * from "./schemas.js";
 export * from "./storefront.js";
