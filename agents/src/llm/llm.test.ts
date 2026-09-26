@@ -3,7 +3,7 @@
  * Issue #261: verifies tool call argument parsing and provider switching.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { OpenAIClient } from "./openai.js";
 import { AnthropicClient } from "./anthropic.js";
 import { GeminiClient } from "./gemini.js";
