@@ -1,10 +1,14 @@
-/** Anthropic Claude client runtime (issue #9). */
+/**
+ * Anthropic Claude client runtime.
+ * Issues #9, #261: supports chat, tool use (function calling), and exponential backoff.
+ */
 
 import type {
   LLMClient,
   LLMClientConfig,
   LLMRequestOptions,
   LLMResponse,
+  LLMToolCallResponse,
 } from "./types.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
@@ -15,6 +19,15 @@ const DEFAULT_BASE_DELAY_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+interface AnthropicContentBlock {
+  type: string;
+  text?: string;
+  // tool_use block fields
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
 
 export class AnthropicClient implements LLMClient {
   readonly provider = "anthropic" as const;
@@ -49,6 +62,15 @@ export class AnthropicClient implements LLMClient {
     if (systemPrompt) body["system"] = systemPrompt;
     if (options.temperature !== undefined) body["temperature"] = options.temperature;
 
+    // Attach tool definitions for function calling (#261)
+    if (options.tools && options.tools.length > 0) {
+      body["tools"] = options.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parameters,
+      }));
+    }
+
     const response = await this.requestWithRetry(body);
 
     const inputTokens: number =
@@ -63,11 +85,28 @@ export class AnthropicClient implements LLMClient {
       );
     }
 
-    const contentBlock = (response.content as Array<{ type: string; text?: string }>)?.[0];
-    const content = contentBlock?.text ?? "";
+    const contentBlocks = (response.content as AnthropicContentBlock[]) ?? [];
+
+    // Extract text content
+    const textBlock = contentBlocks.find((b) => b.type === "text");
+    const content = textBlock?.text ?? "";
+
+    // Extract tool-use blocks (#261)
+    const toolCalls: LLMToolCallResponse[] = contentBlocks
+      .filter((b) => b.type === "tool_use" && b.id && b.name)
+      .map((b) => ({
+        id: b.id!,
+        name: b.name!,
+        arguments: b.input ?? {},
+      }));
 
     const stopReason = response.stop_reason as string | null;
-    const finishReason = stopReason === "max_tokens" ? "length" : "stop";
+    const finishReason =
+      stopReason === "max_tokens"
+        ? "length"
+        : stopReason === "tool_use"
+          ? "tool_calls"
+          : "stop";
 
     return {
       provider: "anthropic",
@@ -77,6 +116,7 @@ export class AnthropicClient implements LLMClient {
       outputTokens,
       totalTokens,
       finishReason,
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
     };
   }
 
