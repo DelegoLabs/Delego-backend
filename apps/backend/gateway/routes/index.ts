@@ -84,6 +84,7 @@ import {
 import { registerPaymentRoutes } from "./payment.js";
 import { registerRecoveryRoutes } from "./recovery.js";
 import { registerMultiCurrencyRoutes } from "./multi-currency.js";
+import { searchProductsHandler } from "../src/search/routes.js";
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
@@ -173,6 +174,8 @@ export function registerRoutes(): Route[] {
     // Swagger UI (#352)
     route("GET", "/api/docs", swaggerHandler),
     route("GET", "/api/docs/openapi.json", swaggerHandler),
+    // Semantic product search (#263)
+    route("POST", "/api/v1/search/products", searchProductsHandler),
     // Workflow template system
     route("GET", "/api/v1/templates/catalog", catalogHandler),
     route("GET", "/api/v1/templates/categories", categoriesHandler),
