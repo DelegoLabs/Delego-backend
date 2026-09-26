@@ -12,12 +12,13 @@
 
 import { InvalidStateTransitionError, type DisputeStatus } from "./types.js";
 
-const ORDER: DisputeStatus[] = ["open", "evidence_collection", "negotiation", "decided", "resolved"];
+const ORDER: DisputeStatus[] = ["open", "evidence_collection", "negotiation", "merchant_responded", "decided", "resolved"];
 
 const ALLOWED_TRANSITIONS: Record<DisputeStatus, DisputeStatus[]> = {
   open: ["open", "evidence_collection"],
   evidence_collection: ["evidence_collection", "negotiation"],
-  negotiation: ["negotiation", "decided"],
+  negotiation: ["negotiation", "merchant_responded"],
+  merchant_responded: ["merchant_responded", "decided"],
   decided: ["decided", "resolved"],
   resolved: ["resolved"],
 };

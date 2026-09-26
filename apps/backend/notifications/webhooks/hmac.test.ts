@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { signWebhookPayload } from "./hmac.js";
+import { signWebhookPayload, WEBHOOK_SIGNATURE_HEADER } from "./hmac.js";
 import { createHmac } from "node:crypto";
 
 describe("signWebhookPayload", () => {
   it("produces a sha256=<hex> formatted signature", () => {
     const signature = signWebhookPayload("body", "secret");
     expect(signature).toMatch(/^sha256=[a-f0-9]{64}$/);
+  });
+
+  it("uses X-Delego-Signature header", () => {
+    expect(WEBHOOK_SIGNATURE_HEADER).toBe("X-Delego-Signature");
   });
 
   it("matches an independently computed HMAC-SHA256 digest", () => {

@@ -1,10 +1,15 @@
 /**
- * Outbound webhook event dispatch (Issue #102).
+ * Outbound webhook event dispatch (Issue #102, #112).
  *
  * Fans an event out to every active, matching webhook subscriber, signs
  * each payload, and records the delivery outcome via the tracker. The HTTP
  * transport is injected so this stays unit-testable without a real network
  * call, matching the sender-injection pattern in ../src/retryWorker.ts.
+ *
+ * With BullMQ integration:
+ * - Uses "merchant-webhooks" queue with exponential backoff (1m, 5m, 30m, 2h, 24h)
+ * - Moves failed deliveries to DLQ after 5 attempts
+ * - Uses X-Delego-Signature header for HMAC-SHA256 verification
  */
 
 import { createLogger } from "@delegolabs/utils";
@@ -12,7 +17,8 @@ import { randomUUID } from "node:crypto";
 import { signWebhookPayload, WEBHOOK_SIGNATURE_HEADER } from "./hmac.js";
 import type { WebhookDeliveryTracker } from "./deliveryTracker.js";
 import type { WebhookRegistry } from "./registry.js";
-import type { Webhook } from "./types.js";
+import type { Webhook, DeliveryStatus } from "./types.js";
+import type { WebhookBullQueue, WebhookPayload } from "./bullQueue.js";
 
 const log = createLogger("notifications:webhooks:dispatcher", process.env.LOG_LEVEL ?? "info");
 
@@ -35,11 +41,16 @@ export interface DispatchSummary {
   failed: number;
 }
 
+/**
+ * Webhook dispatcher that can work with either direct HTTP calls (for testing)
+ * or BullMQ queue (for production).
+ */
 export class WebhookDispatcher {
   constructor(
     private registry: WebhookRegistry,
     private tracker: WebhookDeliveryTracker,
     private sender: WebhookSender,
+    private queue?: WebhookBullQueue,
   ) {}
 
   /**
@@ -47,6 +58,9 @@ export class WebhookDispatcher {
    * whose filters match. Each delivery is attempted once here; failures are
    * left in the tracker as "failed" (with a scheduled nextRetryAt) for the
    * retry worker to pick up.
+   *
+   * When BullMQ queue is configured, failures are enqueued with exponential
+   * backoff delays (1m, 5m, 30m, 2h, 24h) instead of using in-memory scheduling.
    */
   async dispatch(
     eventType: string,
@@ -74,7 +88,11 @@ export class WebhookDispatcher {
     return { eventId, eventType, matchedWebhooks: subscribers.length, delivered, failed };
   }
 
-  /** Re-attempt a previously failed delivery (used by the retry worker). */
+  /**
+   * Retry a previously failed delivery. This method is used both for:
+   * - In-memory retry worker (when queue is not configured)
+   * - BullMQ queue jobs (when queue is configured)
+   */
   async retry(deliveryId: string): Promise<boolean> {
     const delivery = this.tracker.getDelivery(deliveryId);
     if (!delivery) {
@@ -89,6 +107,30 @@ export class WebhookDispatcher {
     return this.send(webhook, delivery.eventType, delivery.payload as Record<string, unknown>, deliveryId);
   }
 
+  /**
+   * Enqueue a failed delivery to the BullMQ queue with exponential backoff.
+   * Only called when BullMQ queue is configured.
+   */
+  async enqueueWithBackoff(webhook: Webhook, eventType: string, payload: unknown, deliveryId: string, attempt: number): Promise<void> {
+    if (!this.queue) {
+      throw new Error("BullMQ queue not configured");
+    }
+
+    const webhookPayload: WebhookPayload = {
+      id: deliveryId,
+      event: eventType as WebhookPayload["event"],
+      timestamp: new Date().toISOString(),
+      data: payload,
+    };
+
+    await this.queue.enqueueWithBackoff(webhook.id, webhookPayload, attempt);
+    log.info("Webhook delivery enqueued with backoff", {
+      webhookId: webhook.id,
+      eventId: deliveryId,
+      attempt,
+    });
+  }
+
   private async deliverOnce(
     webhook: Webhook,
     eventType: string,
@@ -96,7 +138,25 @@ export class WebhookDispatcher {
     eventId: string,
   ): Promise<boolean> {
     const delivery = this.tracker.recordAttempt(webhook.id, eventId, eventType, payload);
-    return this.send(webhook, eventType, payload, delivery.id);
+    const ok = await this.send(webhook, eventType, payload, delivery.id);
+
+    // When BullMQ queue is configured, enqueue failed deliveries for retry
+    if (!ok && this.queue) {
+      const updatedDelivery = this.tracker.getDelivery(delivery.id);
+      if (updatedDelivery && updatedDelivery.status === "failed") {
+        try {
+          await this.enqueueWithBackoff(webhook, eventType, payload, delivery.id, updatedDelivery.attempt);
+        } catch (err) {
+          log.error("Failed to enqueue webhook for retry", {
+            webhookId: webhook.id,
+            eventId: delivery.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
+    return ok;
   }
 
   private async send(
@@ -105,7 +165,12 @@ export class WebhookDispatcher {
     payload: Record<string, unknown>,
     deliveryId: string,
   ): Promise<boolean> {
-    const body = JSON.stringify({ eventId: deliveryId, eventType, data: payload });
+    const body = JSON.stringify({
+      eventId: deliveryId,
+      event: eventType,
+      timestamp: new Date().toISOString(),
+      data: payload,
+    });
     const headers = {
       "Content-Type": "application/json",
       [WEBHOOK_SIGNATURE_HEADER]: signWebhookPayload(body, webhook.secret),

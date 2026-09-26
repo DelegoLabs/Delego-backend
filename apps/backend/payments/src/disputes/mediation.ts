@@ -244,6 +244,100 @@ function validateResolutionAmounts(decision: MediationDecision, remainingAmount:
  * succeeded) — transitions to `decided` and immediately attempts on-chain
  * execution via {@link executeDecision}.
  */
+// ---------------------------------------------------------------------------
+// Merchant dispute response
+// ---------------------------------------------------------------------------
+
+/**
+ * Merchant submits a response to a dispute with optional evidence attachments
+ * and a partial refund counter-offer. This transitions the dispute from
+ * `negotiation` to `merchant_responded`, making it ready for buyer response
+ * or mediator escalation.
+ */
+export async function submitMerchantResponse(
+  disputeId: string,
+  party: string,
+  responseStatement: string,
+  evidenceFiles?: string[],
+  partialRefundAmountStroops?: string,
+): Promise<Dispute> {
+  const dispute = await getDisputeStore().findById(disputeId);
+  if (!dispute) throw new DisputeNotFoundError(disputeId);
+
+  if (dispute.status !== "negotiation") {
+    throw new InvalidStateTransitionError(dispute.status, "merchant_responded");
+  }
+
+  // Validate party is the merchant
+  const balance = await safeGetBalance(dispute.escrowId);
+  if (!balance) {
+    throw new Error("Unable to retrieve escrow balance");
+  }
+
+  // The party submitting the response should be the merchant (seller)
+  const isMerchant = party === balance.sellerAddress;
+  if (!isMerchant) {
+    throw new Error("Only the merchant can submit a merchant response");
+  }
+
+  // If partial refund is provided, validate it against remaining balance
+  if (partialRefundAmountStroops) {
+    const requested = parseRefundAmount(partialRefundAmountStroops);
+    const remaining = BigInt(balance.remainingAmount);
+
+    if (requested > remaining) {
+      throw new Error(`Partial refund amount ${partialRefundAmountStroops} exceeds remaining balance ${balance.remainingAmount}`);
+    }
+  }
+
+  // Add the response as evidence
+  const evidenceEntry: DisputeEvidenceEntry = {
+    party,
+    description: responseStatement,
+    files: evidenceFiles ?? [],
+    submittedAt: new Date().toISOString(),
+  };
+
+  let updated = await getDisputeStore().addEvidence(disputeId, evidenceEntry);
+
+  // Transition to merchant_responded
+  if (updated.status === "negotiation") {
+    assertTransition("negotiation", "merchant_responded");
+    updated = await getDisputeStore().update(disputeId, { status: "merchant_responded" });
+  }
+
+  await recordAuditEvent({
+    disputeId,
+    escrowId: dispute.escrowId,
+    eventType: "dispute_merchant_response_submitted",
+    actor: party,
+    details: { responseStatement, evidenceFiles, partialRefundAmountStroops },
+  });
+
+  // Notify the buyer about the merchant's response
+  if (balance) {
+    await notifyDisputeParties("dispute_merchant_response_submitted", balance.orderId, updated, {
+      party,
+      responseStatement,
+      evidenceFiles,
+      partialRefundAmountStroops,
+    });
+  }
+
+  return updated;
+}
+
+function parseRefundAmount(amount: string): bigint {
+  if (!/^[0-9]+$/.test(amount)) {
+    throw new Error(`Invalid amount format: ${amount}`);
+  }
+  const value = BigInt(amount);
+  if (value <= 0n) {
+    throw new Error(`Amount must be positive: ${amount}`);
+  }
+  return value;
+}
+
 export async function submitMediationDecision(decision: MediationDecision): Promise<Dispute> {
   const dispute = await getDisputeStore().findById(decision.disputeId);
   if (!dispute) throw new DisputeNotFoundError(decision.disputeId);

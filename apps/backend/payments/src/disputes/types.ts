@@ -16,7 +16,7 @@ export interface PartialRefundRequest {
   evidence?: string[];
 }
 
-export type DisputeStatus = "open" | "evidence_collection" | "negotiation" | "decided" | "resolved";
+export type DisputeStatus = "open" | "evidence_collection" | "negotiation" | "merchant_responded" | "decided" | "resolved";
 
 export type ResolutionType = "full_refund" | "partial_refund" | "release_to_seller" | "split";
 

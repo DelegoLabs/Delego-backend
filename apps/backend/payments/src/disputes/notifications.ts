@@ -18,6 +18,7 @@ export type DisputeEventType =
   | "dispute_opened"
   | "dispute_evidence_submitted"
   | "dispute_mediator_assigned"
+  | "dispute_merchant_response_submitted"
   | "dispute_status_changed"
   | "dispute_decided"
   | "dispute_resolved"

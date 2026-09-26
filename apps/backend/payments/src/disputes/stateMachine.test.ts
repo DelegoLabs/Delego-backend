@@ -6,7 +6,8 @@ describe("dispute state machine", () => {
   it("allows each forward step in the documented lifecycle", () => {
     expect(canTransition("open", "evidence_collection")).toBe(true);
     expect(canTransition("evidence_collection", "negotiation")).toBe(true);
-    expect(canTransition("negotiation", "decided")).toBe(true);
+    expect(canTransition("negotiation", "merchant_responded")).toBe(true);
+    expect(canTransition("merchant_responded", "decided")).toBe(true);
     expect(canTransition("decided", "resolved")).toBe(true);
   });
 
@@ -18,8 +19,10 @@ describe("dispute state machine", () => {
 
   it("rejects skipping a stage", () => {
     expect(canTransition("open", "negotiation")).toBe(false);
+    expect(canTransition("open", "merchant_responded")).toBe(false);
     expect(canTransition("open", "decided")).toBe(false);
     expect(canTransition("evidence_collection", "decided")).toBe(false);
+    expect(canTransition("evidence_collection", "merchant_responded")).toBe(false);
     expect(canTransition("evidence_collection", "resolved")).toBe(false);
   });
 
@@ -51,7 +54,8 @@ describe("dispute state machine", () => {
   it("stageIndex orders the lifecycle stages", () => {
     expect(stageIndex("open")).toBeLessThan(stageIndex("evidence_collection"));
     expect(stageIndex("evidence_collection")).toBeLessThan(stageIndex("negotiation"));
-    expect(stageIndex("negotiation")).toBeLessThan(stageIndex("decided"));
+    expect(stageIndex("negotiation")).toBeLessThan(stageIndex("merchant_responded"));
+    expect(stageIndex("merchant_responded")).toBeLessThan(stageIndex("decided"));
     expect(stageIndex("decided")).toBeLessThan(stageIndex("resolved"));
   });
 
@@ -65,6 +69,12 @@ describe("dispute state machine", () => {
       expect(steps).toEqual([
         { from: "open", to: "evidence_collection" },
         { from: "evidence_collection", to: "negotiation" },
+      ]);
+
+      const stepsToResolved = planAdvance("merchant_responded", "resolved");
+      expect(stepsToResolved).toEqual([
+        { from: "merchant_responded", to: "decided" },
+        { from: "decided", to: "resolved" },
       ]);
     });
 
