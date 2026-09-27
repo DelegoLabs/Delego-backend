@@ -25,6 +25,8 @@ import {
 } from "./validation.js";
 import { InsufficientEscrowBalanceError } from "./escrowCoordinator/index.js";
 import { assignMediator, executeDecision, openDispute, submitEvidence, submitMediationDecision } from "./disputes/mediation.js";
+import { runAutoMediation, type AutoMediationInput } from "./disputes/mediator.js";
+import { runTimeoutRefundSweep } from "./workers/timeoutRefund.js";
 import { executePartialRefund, InvalidPartialRefundAmountError } from "./disputes/partialRefund.js";
 import { getDisputeStore } from "./disputes/disputeStore.js";
 import { listAuditLogForDispute } from "./disputes/auditLog.js";
@@ -671,6 +673,33 @@ export function registerRoutes(): Route[] {
       }
     }),
 
+    // Issue #296 — Automated Dispute Mediation & Rule-Based Arbitration Engine
+    // POST /disputes/:disputeId/auto-mediate
+    // Runs the rule engine on the dispute and auto-executes if confident,
+    // or escalates to human arbitration when evidence is ambiguous.
+    route("POST", "/disputes/:disputeId/auto-mediate", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const tracking = body.tracking as AutoMediationInput["tracking"] | undefined;
+        const partialRefundOffer = body.partialRefundOffer as AutoMediationInput["partialRefundOffer"] | undefined;
+
+        const decision = await runAutoMediation({
+          disputeId: params.disputeId,
+          tracking,
+          partialRefundOffer,
+        });
+
+        json(res, 200, { data: decision, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "DISPUTE_AUTO_MEDIATION_FAILED", err);
+      }
+    }),
+
     // Issue #45 — HMAC-verified delivery-confirmation webhook driving escrow auto-release.
     route("POST", "/escrow/:escrowId/delivery-confirmed", async (req, res, params) => {
       try {
@@ -897,6 +926,23 @@ export function registerRoutes(): Route[] {
       const lockManager = getEscrowFundingLockManager();
       const optimization = lockManager.optimizeConfig();
       json(res, 200, { data: optimization, error: null });
+    }),
+
+    // ─── Issue #297 — Timeout Refund Worker for Stalled Escrows ─────────────
+    // POST /workers/timeout-refund/sweep
+    // Triggers an on-demand sweep of timed-out funded escrows and submits
+    // Soroban refund() transactions. Idempotent — skips disputed/released escrows.
+    route("POST", "/workers/timeout-refund/sweep", async (_req, res) => {
+      try {
+        const result = await runTimeoutRefundSweep();
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Timeout refund sweep failed";
+        json(res, 503, {
+          data: null,
+          error: { code: "TIMEOUT_REFUND_SWEEP_FAILED", message },
+        });
+      }
     }),
   ];
 }

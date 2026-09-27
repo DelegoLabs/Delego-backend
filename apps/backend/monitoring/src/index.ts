@@ -35,3 +35,13 @@ export {
   evaluateSLOHandler,
   getBudgetStateHandler,
 } from "./routes.js";
+
+// Issue #299 — Delivery Oracle Health Check & Heartbeat Monitor
+export {
+  checkOracleHealth,
+  oracleHealthHandler,
+  recordWebhookReceived,
+  setPendingDeliveriesCount,
+  type OracleHealthReport,
+  type OracleHealthStatus,
+} from "./oracleHealth.js";

@@ -5,7 +5,6 @@
  * and optional partial refund counter-offers.
  */
 
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Route, RouteHandler } from "@delegolabs/utils";
 import { json, createLogger, route } from "@delegolabs/utils";
 import { submitMerchantResponse } from "@delegolabs/payments";
