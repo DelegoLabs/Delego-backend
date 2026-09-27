@@ -65,6 +65,17 @@ import {
   validateCreateSubscriptionRequest,
   validateRenewRequest,
 } from "./subscriptions/validation.js";
+import { registerShipment, getShipment, type RegisterShipmentDTO, RegisterShipmentResponse } from "./shipping/service.js";
+import { validateRegisterShipment } from "./shipping/validation.js";
+import {
+  reserveStock,
+  releaseReservation,
+  getAvailableStock,
+  validateReserveStockRequest,
+  validateReservationId,
+  type InsufficientStockError,
+} from "./inventory/index.js";
+import { initiatePayout, validateInitiatePayoutRequest, type InitiatePayoutResponse } from "./payouts/index.js";
 
 const paymentsHealthRegistry = createPaymentsHealthRegistry();
 
@@ -897,6 +908,260 @@ export function registerRoutes(): Route[] {
       const lockManager = getEscrowFundingLockManager();
       const optimization = lockManager.optimizeConfig();
       json(res, 200, { data: optimization, error: null });
+    }),
+
+    // ─── Shipment Registration Endpoint (Issue #XX) ─────────────────────────
+    // POST /api/v1/merchant/orders/:orderId/shipment
+    // Accepts merchant-submitted tracking numbers and registers with EasyPost/carrier
+    route("POST", "/api/v1/merchant/orders/:orderId/shipment", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        
+        // Validate request body
+        const validated = validateRegisterShipment(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const dto: RegisterShipmentDTO = {
+          orderId: params.orderId,
+          carrier: validated.value.carrier,
+          trackingNumber: validated.value.trackingNumber,
+        };
+
+        // Register the shipment
+        const result = await registerShipment(dto);
+
+        if (!result.ok) {
+          // Handle carrier-specific validation errors
+          if (result.error.code === "INVALID_TRACKING_NUMBER") {
+            json(res, 400, {
+              data: null,
+              error: {
+                code: "INVALID_TRACKING_NUMBER",
+                message: result.error.message,
+                details: result.error.details,
+              },
+            });
+            return;
+          }
+          // Handle EasyPost/Carrier API errors
+          json(res, 502, {
+            data: null,
+            error: {
+              code: result.error.code,
+              message: result.error.message,
+              details: result.error.details,
+            },
+          });
+          return;
+        }
+
+        json(res, 201, {
+          data: result.response,
+          error: null,
+        });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+          });
+          return;
+        }
+        sendOperationError(res, "SHIPPING_REGISTRATION_FAILED", err);
+      }
+    }),
+
+    // GET /api/v1/merchant/orders/:orderId/shipment
+    // Retrieve shipment registration status
+    route("GET", "/api/v1/merchant/orders/:orderId/shipment", async (_req, res, params) => {
+      try {
+        const shipment = getShipment(params.orderId);
+        if (!shipment) {
+          json(res, 404, {
+            data: null,
+            error: {
+              code: "SHIPMENT_NOT_FOUND",
+              message: `No shipment found for order ${params.orderId}`,
+            },
+          });
+          return;
+        }
+
+        json(res, 200, {
+          data: shipment,
+          error: null,
+        });
+      } catch (err) {
+        sendOperationError(res, "SHIPPING_FETCH_FAILED", err);
+      }
+    }),
+
+    // ─── Inventory Reservation Endpoints (Issue #XX) ────────────────────────
+
+    // POST /api/v1/inventory/reserve
+    // Reserve stock for an order (escrow is proposed/funding is expected)
+    route("POST", "/api/v1/inventory/reserve", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+
+        const validated = validateReserveStockRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const { productId, quantity, orderId, ttlMs } = validated.value;
+
+        // Seed stock if not exists (optional, for demo purposes)
+        // await seedStock(productId, 1000);
+
+        const result = await reserveStock(productId, quantity, orderId, ttlMs);
+
+        json(res, 201, {
+          data: result,
+          error: null,
+        });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+          });
+          return;
+        }
+        // InsufficientStockError maps to 409 Conflict
+        if (err instanceof Error && (err as any).name === "InsufficientStockError") {
+          json(res, 409, {
+            data: null,
+            error: {
+              code: "INSUFFICIENT_STOCK",
+              message: err instanceof Error ? err.message : "Insufficient stock",
+            },
+          });
+          return;
+        }
+        sendOperationError(res, "INVENTORY_RESERVE_FAILED", err);
+      }
+    }),
+
+    // POST /api/v1/inventory/reservations/:reservationId/release
+    // Explicitly release a reservation (called after escrow is funded)
+    route("POST", "/api/v1/inventory/reservations/:reservationId/release", async (_req, res, params) => {
+      try {
+        const { ok: idOk, value: reservationId, error: idError } = validateReservationId(params.reservationId);
+        if (!idOk) {
+          sendValidationError(res, idError as any);
+          return;
+        }
+
+        const result = await releaseReservation(reservationId, { strict: false });
+
+        if (result.quantityRestored === 0) {
+          json(res, 200, {
+            data: result,
+            error: null,
+          });
+        } else {
+          json(res, 200, {
+            data: result,
+            error: null,
+          });
+        }
+      } catch (err) {
+        if (err instanceof Error && (err as any).name === "ReservationNotFoundError") {
+          json(res, 404, {
+            data: null,
+            error: {
+              code: "RESERVATION_NOT_FOUND",
+              message: err instanceof Error ? err.message : "Reservation not found",
+            },
+          });
+          return;
+        }
+        sendOperationError(res, "INVENTORY_RELEASE_FAILED", err);
+      }
+    }),
+
+    // GET /api/v1/inventory/stock/:productId
+    // Check current available stock
+    route("GET", "/api/v1/inventory/stock/:productId", async (_req, res, params) => {
+      try {
+        const available = await getAvailableStock(params.productId);
+        json(res, 200, {
+          data: { productId: params.productId, available },
+          error: null,
+        });
+      } catch (err) {
+        sendOperationError(res, "INVENTORY_FETCH_FAILED", err);
+      }
+    }),
+
+    // ─── Payout Endpoint (Issue #XX) ────────────────────────────────────────
+
+    // POST /api/v1/payouts/initiate
+    // Calculate platform commission and initiate escrow release
+    route("POST", "/api/v1/payouts/initiate", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+
+        const validated = validateInitiatePayoutRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const result = await initiatePayout(validated.value);
+
+        json(res, 201, {
+          data: result,
+          error: null,
+        });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+          });
+          return;
+        }
+        // Check for common error patterns
+        if (err instanceof Error && err.message.includes("not found")) {
+          json(res, 404, {
+            data: null,
+            error: {
+              code: "ESCROW_NOT_FOUND",
+              message: err.message,
+            },
+          });
+          return;
+        }
+        if (err instanceof Error && err.message.includes("not in funded status")) {
+          json(res, 400, {
+            data: null,
+            error: {
+              code: "INVALID_ESCROW_STATUS",
+              message: err.message,
+            },
+          });
+          return;
+        }
+        sendOperationError(res, "PAYOUT_INITIATION_FAILED", err);
+      }
     }),
   ];
 }
