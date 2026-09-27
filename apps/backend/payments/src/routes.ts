@@ -26,6 +26,7 @@ import {
 import { InsufficientEscrowBalanceError } from "./escrowCoordinator/index.js";
 import { assignMediator, executeDecision, openDispute, submitEvidence, submitMediationDecision } from "./disputes/mediation.js";
 import { runAutoMediation, type AutoMediationInput } from "./disputes/mediator.js";
+import { runTimeoutRefundSweep } from "./workers/timeoutRefund.js";
 import { executePartialRefund, InvalidPartialRefundAmountError } from "./disputes/partialRefund.js";
 import { getDisputeStore } from "./disputes/disputeStore.js";
 import { listAuditLogForDispute } from "./disputes/auditLog.js";
@@ -925,6 +926,23 @@ export function registerRoutes(): Route[] {
       const lockManager = getEscrowFundingLockManager();
       const optimization = lockManager.optimizeConfig();
       json(res, 200, { data: optimization, error: null });
+    }),
+
+    // ─── Issue #297 — Timeout Refund Worker for Stalled Escrows ─────────────
+    // POST /workers/timeout-refund/sweep
+    // Triggers an on-demand sweep of timed-out funded escrows and submits
+    // Soroban refund() transactions. Idempotent — skips disputed/released escrows.
+    route("POST", "/workers/timeout-refund/sweep", async (_req, res) => {
+      try {
+        const result = await runTimeoutRefundSweep();
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Timeout refund sweep failed";
+        json(res, 503, {
+          data: null,
+          error: { code: "TIMEOUT_REFUND_SWEEP_FAILED", message },
+        });
+      }
     }),
   ];
 }

@@ -8,6 +8,7 @@ import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
 import { startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
+import { startTimeoutRefundScheduler } from "./workers/timeoutRefund.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -180,6 +181,17 @@ if (process.env.ENABLE_SUBSCRIPTION_BILLING !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping subscription billing scheduler");
     stopBillingScheduler();
+  });
+}
+
+// ─── #297 Timeout Refund Worker for Stalled Escrows ─────────────────────────
+
+if (process.env.ENABLE_TIMEOUT_REFUND_WORKER !== "false") {
+  const timeoutRefundScheduler = startTimeoutRefundScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping timeout refund scheduler");
+    timeoutRefundScheduler.stop();
   });
 }
 
