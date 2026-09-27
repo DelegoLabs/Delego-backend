@@ -81,6 +81,7 @@ import {
   testTemplateHandler,
   templateDocumentationHandler,
 } from "../../orchestrator/src/templates/routes.js";
+import { oracleHealthHandler } from "../../monitoring/src/oracleHealth.js";
 import { registerPaymentRoutes } from "./payment.js";
 import { registerRecoveryRoutes } from "./recovery.js";
 import { registerMultiCurrencyRoutes } from "./multi-currency.js";
@@ -180,6 +181,8 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/docs/openapi.json", swaggerHandler),
     // Semantic product search (#263)
     route("POST", "/api/v1/search/products", searchProductsHandler),
+    // Issue #299 — Delivery Oracle Health Check & Heartbeat Monitor
+    route("GET", "/health/oracle", oracleHealthHandler),
     // Workflow template system
     route("GET", "/api/v1/templates/catalog", catalogHandler),
     route("GET", "/api/v1/templates/categories", categoriesHandler),
