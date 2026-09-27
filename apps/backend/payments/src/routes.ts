@@ -25,6 +25,7 @@ import {
 } from "./validation.js";
 import { InsufficientEscrowBalanceError } from "./escrowCoordinator/index.js";
 import { assignMediator, executeDecision, openDispute, submitEvidence, submitMediationDecision } from "./disputes/mediation.js";
+import { runAutoMediation, type AutoMediationInput } from "./disputes/mediator.js";
 import { executePartialRefund, InvalidPartialRefundAmountError } from "./disputes/partialRefund.js";
 import { getDisputeStore } from "./disputes/disputeStore.js";
 import { listAuditLogForDispute } from "./disputes/auditLog.js";
@@ -668,6 +669,33 @@ export function registerRoutes(): Route[] {
       } catch (err) {
         if (sendDisputeError(res, err)) return;
         sendOperationError(res, "DISPUTE_DECISION_RETRY_FAILED", err);
+      }
+    }),
+
+    // Issue #296 — Automated Dispute Mediation & Rule-Based Arbitration Engine
+    // POST /disputes/:disputeId/auto-mediate
+    // Runs the rule engine on the dispute and auto-executes if confident,
+    // or escalates to human arbitration when evidence is ambiguous.
+    route("POST", "/disputes/:disputeId/auto-mediate", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const tracking = body.tracking as AutoMediationInput["tracking"] | undefined;
+        const partialRefundOffer = body.partialRefundOffer as AutoMediationInput["partialRefundOffer"] | undefined;
+
+        const decision = await runAutoMediation({
+          disputeId: params.disputeId,
+          tracking,
+          partialRefundOffer,
+        });
+
+        json(res, 200, { data: decision, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        if (sendDisputeError(res, err)) return;
+        sendOperationError(res, "DISPUTE_AUTO_MEDIATION_FAILED", err);
       }
     }),
 
