@@ -7,6 +7,17 @@ export {
 
 export { computeEntryHash, verifyChain, type HashableAuditFields } from "./hashChain.js";
 
+export {
+  computeCurrentHash,
+  buildEntry,
+  verifyChain as verifyAuditChain,
+  verifyChainOnStartup,
+  computeMerkleRoot,
+  verifyEntry,
+} from "./auditChain.js";
+
+export { StellarMerklePublisher, createStellarPublisherFromEnv } from "./stellarPublisher.js";
+
 export type {
   AuditOperation,
   AuditLogEntry,
