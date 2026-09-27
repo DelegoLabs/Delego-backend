@@ -52,6 +52,17 @@ export {
 
 export { assertTransition, canTransition, isTerminal, planAdvance } from "./stateMachine.js";
 
+// Issue #296 — Automated Dispute Mediation & Rule-Based Arbitration Engine
+export {
+  evaluateDisputeRules,
+  runAutoMediation,
+  sweepAutoMediation,
+  type AutoMediationInput,
+  type CarrierTrackingInfo,
+  type DisputeMediationDecision,
+  type PartialRefundOffer,
+} from "./mediator.js";
+
 export type {
   Dispute,
   DisputeEvidenceEntry,
