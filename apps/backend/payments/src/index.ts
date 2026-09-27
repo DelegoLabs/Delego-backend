@@ -8,6 +8,8 @@ import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
 import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
 import { startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
+import { startAutoReleaseWorker, stopAutoReleaseWorker } from "./workers/autoRelease.js";
+import { enablePostgresDisputeStore } from "./disputes/disputeStore.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -113,6 +115,9 @@ const logLevel = process.env.LOG_LEVEL ?? "info";
 const log = createLogger(SERVICE_NAME, logLevel);
 const port = Number(process.env.PAYMENTS_PORT ?? DEFAULT_PORT);
 
+if (process.env.DATABASE_URL) enablePostgresDisputeStore();
+startAutoReleaseWorker();
+
 log.info("Starting service", { port, nodeEnv });
 
 const server = startHttpServer({
@@ -134,6 +139,7 @@ if (process.env.ENABLE_SETTLEMENT_RECONCILIATION !== "false") {
 
 async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
   log.info("Received shutdown signal", { signal });
+  await stopAutoReleaseWorker();
 
   if (stopScheduler) {
     try {
