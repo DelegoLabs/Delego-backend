@@ -57,6 +57,8 @@ The incremental migrations are:
 | `036_notification_preference_center.sql` | Notification preference center: org defaults, JSONB preference documents, and migration history (#115) |
 | `037_multi_currency.sql` | Multi-currency payments, FX rates, and currency settlements (#112) |
 | `038_column_encryption.sql` | Column-level encryption for PII at rest: data-encryption-key version registry and append-only key-access audit log (#68) |
+| `039_user_agent_memories.sql` | Long-term agent memory store with vector embeddings |
+| `040_escrow_archives.sql` | Cold storage for long-settled escrows (`escrow_archives`) written by the CDC snapshot archiver, plus pruner indexes (#290) |
 
 ## Naming rules
 

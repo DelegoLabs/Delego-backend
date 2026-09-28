@@ -30,6 +30,7 @@ import {
 import { PostgresSchemaEvolutionStore } from "./schemaEvolution.js";
 import { InMemoryPublishedEventStore, InMemoryReplicationStateStore } from "./store.js";
 import { InMemorySchemaEvolutionStore } from "./schemaEvolution.js";
+import { createEscrowArchiver, startEscrowArchiveScheduler } from "./archiver/index.js";
 
 const SERVICE_NAME = "cdc";
 const log = createLogger(SERVICE_NAME, process.env.LOG_LEVEL ?? "info");
@@ -116,8 +117,28 @@ async function main(): Promise<void> {
 
   await pipeline.start();
 
+  // ─── Escrow snapshot archiver (Issue #290) ───────────────────────────────
+  // Nightly job that moves escrows settled longer than the retention window
+  // (default 90 days) into `escrow_archives` and prunes them from the live
+  // table. Disable with ESCROW_ARCHIVE_ENABLED=false.
+  let stopEscrowArchiver: (() => void) | null = null;
+  if (process.env.ESCROW_ARCHIVE_ENABLED !== "false") {
+    stopEscrowArchiver = startEscrowArchiveScheduler(
+      createEscrowArchiver(pool, process.env, log)
+    );
+  }
+
   const shutdown = async (): Promise<void> => {
     log.info("Shutting down CDC pipeline");
+    if (stopEscrowArchiver) {
+      try {
+        stopEscrowArchiver();
+      } catch (err) {
+        log.error("Error stopping escrow archiver", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     await pipeline?.stop();
     await connector.close();
     await pool.end();
