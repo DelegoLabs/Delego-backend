@@ -435,3 +435,54 @@ export async function getRevenueMetricsHandler(req: IncomingMessage, res: Server
     sendApiError(res, 500, "INTERNAL_ERROR", message, req);
   }
 }
+
+/**
+ * GET /api/v1/analytics/merchants/:merchantId/sales (Issue #377)
+ *
+ * Query continuous aggregate sales metrics for a merchant.
+ *
+ * Query params:
+ *   interval  - Time bucket ('1m', '1h', '1d', default '1h')
+ *   startTime - ISO 8601 start timestamp
+ *   endTime   - ISO 8601 end timestamp
+ *   limit     - Max number of data points (default 100)
+ */
+export async function getMerchantSalesHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>
+): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) {
+    unauthorized(res, "Authentication required", req);
+    return;
+  }
+
+  const merchantId = params.merchantId;
+  if (!merchantId) {
+    sendApiError(res, 400, "VALIDATION_ERROR", "merchantId is required", req);
+    return;
+  }
+
+  try {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const intervalParam = url.searchParams.get("interval") as any;
+    const interval = ["1m", "1h", "1d"].includes(intervalParam) ? intervalParam : "1h";
+    const startTime = url.searchParams.get("startTime") || undefined;
+    const endTime = url.searchParams.get("endTime") || undefined;
+    const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined;
+
+    const { merchantAnalyticsService } = await import("../services/merchantAnalyticsService.js");
+    const result = await merchantAnalyticsService.getMerchantSales({
+      merchantId,
+      bucketInterval: interval,
+      startTime,
+      endTime,
+      limit,
+    });
+
+    json(res, 200, { data: result, error: null });
+  } catch (err: any) {
+    sendApiError(res, 500, "INTERNAL_ERROR", err.message, req);
+  }
+}
