@@ -72,6 +72,30 @@ The API gateway serves as the single entry point for all client requests.
 - `GET /api/v1/admin/circuit-breakers` - Circuit breaker status
 - `GET /api/docs` - Swagger UI
 
+#### Dynamic Rate Limiting for Unauthenticated Search
+
+Public catalog search endpoints (e.g. `GET /api/v1/search`) are unauthenticated
+and therefore rate limited per client IP using a Redis-backed token bucket to
+prevent competitor data scraping.
+
+Bucket state is stored in Redis under the key `ratelimit:search:{ip}` and follows
+the `SearchRateLimitBucket` shape:
+
+```typescript
+export interface SearchRateLimitBucket {
+  ip: string;
+  remainingTokens: number;
+  refillRatePerSec: number;
+}
+```
+
+- Each IP starts with a full bucket of tokens and refills at `refillRatePerSec`.
+- Every unauthenticated search request consumes one token.
+- When `remainingTokens` reaches zero, the gateway responds with
+  `429 Too Many Requests` and a standard `Retry-After` header indicating how
+  many seconds until the next token is available.
+- Buckets expire automatically once idle so Redis does not grow unbounded.
+
 ### Orchestrator Service (`apps/backend/orchestrator`)
 
 **Package**: `@delegolabs/orchestrator`
