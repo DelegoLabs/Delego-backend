@@ -24,6 +24,7 @@ import {
 } from "../workflows/purchase/index.js";
 import {
   checkoutWorkflow,
+  createCheckoutWorkflowInput,
   createCheckoutSagaCoordinator,
   type CheckoutWorkflowInput,
 } from "../workflows/checkout/index.js";
@@ -470,6 +471,15 @@ async function main(): Promise<void> {
       ...createTaskRoutes(taskService, taskStore),
 
       route("POST", "/checkout", async (req, res) => {
+        const authenticatedUserId = (req as typeof req & { userId?: string }).userId;
+        if (!authenticatedUserId) {
+          json(res, 401, {
+            data: null,
+            error: { code: "UNAUTHORIZED", message: "Authentication required" },
+          });
+          return;
+        }
+
         let body: Record<string, unknown>;
         try {
           body = await readJsonBody(req);
@@ -484,7 +494,10 @@ async function main(): Promise<void> {
           return;
         }
 
-        const input = body as Partial<CheckoutWorkflowInput>;
+        const input = body as Partial<Pick<
+          CheckoutWorkflowInput,
+          "orderId" | "sourceAddress" | "buyerAddress" | "sellerAddress"
+        >>;
         if (
           typeof input.orderId !== "string" ||
           typeof input.sourceAddress !== "string" ||
@@ -503,7 +516,8 @@ async function main(): Promise<void> {
 
         try {
           const sagaId = `checkout:${input.orderId}`;
-          const result = await checkoutWorkflow(input as CheckoutWorkflowInput, checkoutSagaCoordinator, sagaId);
+          const workflowInput = createCheckoutWorkflowInput(input, authenticatedUserId);
+          const result = await checkoutWorkflow(workflowInput, checkoutSagaCoordinator, sagaId);
           json(res, result.status === "completed" || result.status === "compensated" ? 200 : 502, {
             data: serializeSagaExecution(result),
             error:

@@ -39,7 +39,11 @@ import { balanceTracker } from "./assets/balances.js";
 const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth()],
+  middleware: [
+    corsMiddleware(),
+    securityHeadersMiddleware(),
+    requireAuth({ publicPaths: ["/health", "/vapid-public-key", "/transactions/submit"] }),
+  ],
   routes: registerRoutes(),
 });
 
