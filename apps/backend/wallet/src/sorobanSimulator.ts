@@ -9,6 +9,7 @@ import {
   setCachedSimulation,
   setInFlightSimulation,
 } from "./simulationCache.js";
+import { ServiceMetricsRegistry } from "@delegolabs/utils";
 
 type SimulateTransactionResponse = SorobanRpc.Api.SimulateTransactionResponse;
 
@@ -16,6 +17,7 @@ export interface SorobanRpcConfig {
   rpcUrl: string;
   timeoutMs: number;
   maxRetries: number;
+  metricsRegistry?: ServiceMetricsRegistry;
 }
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000;
@@ -138,10 +140,31 @@ export class SorobanTransactionSimulator {
   ): Promise<SimulateTransactionResponse> {
     let lastError: unknown;
     const maxAttempts = 1 + this.config.maxRetries;
+    const startTime = Date.now();
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const simulation = await this.rpcServer.simulateTransaction(transaction);
+        const durationMs = Date.now() - startTime;
+        
+        const ops = transaction.operations ?? [];
+        let contractId = "unknown";
+        let method = "unknown";
+        if (ops.length > 0 && "function" in ops[0]) {
+          const op = ops[0] as any;
+          contractId = op.contract ?? "unknown";
+          method = op.function ?? op.name ?? "unknown";
+        }
+        
+        if (this.config.metricsRegistry) {
+          this.config.metricsRegistry.recordContractLatency({
+            contract: contractId,
+            functionName: method,
+            durationMs,
+            success: SorobanRpc.Api.isSimulationSuccess(simulation)
+          });
+        }
+        
         return simulation;
       } catch (error) {
         lastError = error;
