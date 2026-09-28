@@ -1,6 +1,7 @@
 /**
  * @delegolabs/payments — Entry point
  * #68 Dispute Resolution Arbiter Multi-Sig
+ * #374 Enterprise Disbursement Multi-Sig Quorum
  */
 import { createLogger } from "@delegolabs/utils";
 import { startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
@@ -409,3 +410,24 @@ function computePayloadHash(escrowId: string, arbiter: string, signature: string
   }
   return (h >>> 0).toString(16).padStart(8, "0");
 }
+
+// ─── #374 Enterprise Disbursement Multi-Sig Quorum ────────────────────────────
+
+export {
+  createDisbursementApproval,
+  collectOfficerSignature,
+  getDisbursementState,
+  submitDisbursementApproval,
+  listDisbursements,
+  expireStaleDisbursements,
+  DisbursementNotFoundError,
+  OfficerNotAuthorizedError,
+  DuplicateSignatureError,
+  InvalidSignatureError,
+  DisbursementClosedError,
+  type DisbursementState,
+  type DisbursementStatus,
+  type OfficerSignature,
+  type CreateDisbursementApprovalInput,
+  type SubmitOfficerSignatureInput,
+} from "./disbursementApproval.js";

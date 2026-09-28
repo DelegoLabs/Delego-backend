@@ -85,6 +85,21 @@ import {
   type InsufficientStockError,
 } from "./inventory/index.js";
 import { initiatePayout, validateInitiatePayoutRequest, type InitiatePayoutResponse } from "./payouts/index.js";
+import {
+  createDisbursementApproval,
+  collectOfficerSignature,
+  getDisbursementState,
+  submitDisbursementApproval,
+  listDisbursements,
+  expireStaleDisbursements,
+  DisbursementNotFoundError,
+  OfficerNotAuthorizedError,
+  DuplicateSignatureError,
+  InvalidSignatureError,
+  DisbursementClosedError,
+  type CreateDisbursementApprovalInput,
+  type SubmitOfficerSignatureInput,
+} from "./disbursementApproval.js";
 
 const paymentsHealthRegistry = createPaymentsHealthRegistry();
 
@@ -1271,6 +1286,144 @@ export function registerRoutes(): Route[] {
           return;
         }
         sendOperationError(res, "PAYOUT_INITIATION_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #374 — Enterprise Disbursement Multi-Sig Quorum ────────────────
+    // POST   /disbursements/approvals                    – create approval request
+    // GET    /disbursements/approvals                    – list all approvals
+    // GET    /disbursements/approvals/:id                – get approval state
+    // POST   /disbursements/approvals/:id/sign           – submit officer signature
+    // POST   /disbursements/approvals/:id/submit         – manually submit when quorum met
+    // POST   /disbursements/approvals/expire             – expire stale approvals
+
+    route("POST", "/disbursements/approvals", async (req, res) => {
+      try {
+        const body = await readJsonBody(req) as unknown as CreateDisbursementApprovalInput;
+        if (!body.disbursementId || !body.transactionXdr || !body.officers) {
+          json(res, 400, {
+            data: null,
+            error: { code: "VALIDATION_ERROR", message: "disbursementId, transactionXdr, and officers are required" },
+          });
+          return;
+        }
+        if (!Array.isArray(body.officers) || body.officers.length < 2) {
+          json(res, 400, {
+            data: null,
+            error: { code: "VALIDATION_ERROR", message: "At least 2 officers are required" },
+          });
+          return;
+        }
+        const approval = await createDisbursementApproval(body);
+        json(res, 201, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "Invalid JSON body" } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        const status = message.includes("Invalid Stellar public key") ? 400 : 500;
+        json(res, status, { data: null, error: { code: "DISBURSEMENT_CREATE_FAILED", message } });
+      }
+    }),
+
+    route("GET", "/disbursements/approvals", async (_req, res) => {
+      try {
+        const approvals = listDisbursements();
+        json(res, 200, { data: approvals, error: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_LIST_FAILED", message } });
+      }
+    }),
+
+    route("GET", "/disbursements/approvals/:disbursementId", async (_req, res, params) => {
+      try {
+        const approval = getDisbursementState(params.disbursementId);
+        if (!approval) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: `Disbursement ${params.disbursementId} not found` } });
+          return;
+        }
+        json(res, 200, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof DisbursementNotFoundError) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: err.message } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_FETCH_FAILED", message } });
+      }
+    }),
+
+    route("POST", "/disbursements/approvals/:disbursementId/sign", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req) as unknown as SubmitOfficerSignatureInput;
+        if (!body.officer || !body.signature) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "officer and signature are required" } });
+          return;
+        }
+        const input: SubmitOfficerSignatureInput = {
+          disbursementId: params.disbursementId,
+          officer: body.officer,
+          signature: body.signature,
+        };
+        const approval = await collectOfficerSignature(input);
+        json(res, 200, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "Invalid JSON body" } });
+          return;
+        }
+        if (err instanceof DisbursementNotFoundError) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof OfficerNotAuthorizedError) {
+          json(res, 403, { data: null, error: { code: "OFFICER_NOT_AUTHORIZED", message: err.message } });
+          return;
+        }
+        if (err instanceof DuplicateSignatureError) {
+          json(res, 409, { data: null, error: { code: "DUPLICATE_SIGNATURE", message: err.message } });
+          return;
+        }
+        if (err instanceof InvalidSignatureError) {
+          json(res, 400, { data: null, error: { code: "INVALID_SIGNATURE", message: err.message } });
+          return;
+        }
+        if (err instanceof DisbursementClosedError) {
+          json(res, 409, { data: null, error: { code: "DISBURSEMENT_CLOSED", message: err.message } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "SIGNATURE_COLLECTION_FAILED", message } });
+      }
+    }),
+
+    route("POST", "/disbursements/approvals/:disbursementId/submit", async (_req, res, params) => {
+      try {
+        const approval = await submitDisbursementApproval(params.disbursementId);
+        json(res, 200, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof DisbursementNotFoundError) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message.includes("Quorum not met")) {
+          json(res, 400, { data: null, error: { code: "QUORUM_NOT_MET", message: err.message } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_SUBMIT_FAILED", message } });
+      }
+    }),
+
+    route("POST", "/disbursements/approvals/expire", async (_req, res) => {
+      try {
+        const expired = await expireStaleDisbursements();
+        json(res, 200, { data: { expired }, error: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_EXPIRE_FAILED", message } });
       }
     }),
   ];
