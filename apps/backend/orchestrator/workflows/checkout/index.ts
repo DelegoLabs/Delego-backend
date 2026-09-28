@@ -115,6 +115,10 @@ import { SagaCoordinator, type SagaStep } from "../../src/saga/index.js";
 import type { SagaRecord, SagaStore } from "../../src/saga/index.js";
 import type { DistributedLockManager } from "../../src/locks/manager.js";
 import {
+  getInventoryReservationService,
+  type InventoryReservationItem,
+} from "../../src/inventory/reservation.js";
+import {
   createWorkflowCorrelationId,
   createWorkflowEventEnvelope,
   publishWorkflowEvent,
@@ -238,6 +242,7 @@ export interface CheckoutWorkflowInput {
   sourceAddress: string;
   buyerAddress: string;
   sellerAddress: string;
+  inventoryItems?: InventoryReservationItem[];
 }
 
 export interface CheckoutContext extends Record<string, unknown> {
@@ -409,18 +414,32 @@ export async function checkoutWorkflow(
   coordinator: SagaCoordinator<CheckoutContext>,
   sagaId: string
 ): Promise<SagaRecord<CheckoutContext>> {
-  return coordinator.run(
-    sagaId,
-    input.orderId,
-    {
-      orderId: input.orderId,
-      sourceAddress: input.sourceAddress,
-      buyerAddress: input.buyerAddress,
-      sellerAddress: input.sellerAddress,
-      escrowId: null,
-      confirmed: false,
-    },
-    { workflowType: "checkout", correlationId: createWorkflowCorrelationId() }
-  );
+  const inventoryItems = input.inventoryItems ?? [];
+  const inventory = getInventoryReservationService();
+  if (inventoryItems.length > 0) await inventory.reserve(inventoryItems);
+
+  let result: SagaRecord<CheckoutContext>;
+  try {
+    result = await coordinator.run(
+      sagaId,
+      input.orderId,
+      {
+        orderId: input.orderId,
+        sourceAddress: input.sourceAddress,
+        buyerAddress: input.buyerAddress,
+        sellerAddress: input.sellerAddress,
+        escrowId: null,
+        confirmed: false,
+      },
+      { workflowType: "checkout", correlationId: createWorkflowCorrelationId() }
+    );
+  } catch (error) {
+    if (inventoryItems.length > 0) await inventory.release(inventoryItems);
+    throw error;
+  }
+  if (result.status !== "completed" && inventoryItems.length > 0) {
+    await inventory.release(inventoryItems);
+  }
+  return result;
 }
 
