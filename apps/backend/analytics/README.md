@@ -58,6 +58,11 @@ npm test
 
 ### Data Export
 - `POST /api/v1/analytics/export` - Export data to warehouse
+- `GET /api/v1/analytics/export/transactions.csv` - Stream transaction history as CSV (memory-efficient chunked export, Issue #395)
+
+  Query params (all optional): `userId`, `templateId`, `channel`, `eventType`, `periodStart`, `periodEnd`, `pageSize` (default 1000, max 5000), `maxRows`.
+
+  Rows are read from the database with keyset pagination (`ORDER BY id`, one page at a time) and serialized on the fly with `stream.pipeline`, so HTTP backpressure throttles DB reads and memory stays flat even for 100,000+ row exports. Output is RFC 4180-compliant CSV (CRLF terminators, quoting/escaping per spec).
 
 ## Database Schema
 

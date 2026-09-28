@@ -3,10 +3,11 @@ import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { escrowCoordinator } from "./escrowCoordinator/index.js";
-import { resetAutoReleaseConfigStore } from "./autoRelease/configStore.js";
+import { resetAutoReleaseConfigStore, setAutoReleaseConfig } from "./autoRelease/configStore.js";
 import { resetConfirmationTracker } from "./autoRelease/confirmationTracker.js";
 import { resetReleaseQueue } from "./autoRelease/releaseQueue.js";
 import { registerRoutes } from "./routes.js";
+import { enqueueAutoRelease } from "./workers/autoRelease.js";
 import type { Route } from "@delegolabs/utils";
 
 vi.mock("./escrowCoordinator/index.js", () => ({
@@ -17,6 +18,9 @@ vi.mock("./escrowCoordinator/index.js", () => ({
     refundEscrow: vi.fn(),
     disputeEscrow: vi.fn(),
   },
+}));
+vi.mock("./workers/autoRelease.js", () => ({
+  enqueueAutoRelease: vi.fn(),
 }));
 
 const SECRET = "test-webhook-secret";
@@ -79,6 +83,9 @@ describe("POST /escrow/:escrowId/delivery-confirmed", () => {
     resetReleaseQueue();
     vi.mocked(escrowCoordinator.getEscrowStatus).mockReset();
     vi.mocked(escrowCoordinator.releaseEscrow).mockReset();
+    vi.mocked(enqueueAutoRelease).mockReset().mockResolvedValue({
+      jobId: "queued-1", scheduledFor: "2026-09-27T14:00:00.000Z",
+    });
   });
 
   afterEach(() => {
@@ -153,6 +160,31 @@ describe("POST /escrow/:escrowId/delivery-confirmed", () => {
     const parsed = JSON.parse(res.body);
     expect(parsed.data.success).toBe(true);
     expect(parsed.data.transactionHash).toBe("tx-webhook");
+  });
+
+  it("queues a verified delivery until the configured grace window ends", async () => {
+    await setAutoReleaseConfig({
+      escrowId: "42", enabled: true, delayMinutes: 5,
+      partialReleaseEnabled: false, requiredConfirmations: 1,
+    });
+    vi.mocked(escrowCoordinator.getEscrowStatus).mockResolvedValue({
+      escrowId: "42", buyer: "GBUYER", seller: "GSELLER", amount: "1000",
+      status: "funded", createdAt: Date.now(),
+    });
+    const body = payload();
+    const signature = sign(body);
+    const res = createMockRes();
+    await findDeliveryConfirmedRoute().handler(
+      createMockReq(body, { "x-signature": signature }), res, { escrowId: "42" }
+    );
+
+    expect(res.statusCode).toBe(202);
+    expect(enqueueAutoRelease).toHaveBeenCalledWith(expect.objectContaining({
+      escrowId: "42", orderId: "order-1",
+      signedProof: expect.objectContaining({ signature, confirmedBy: "merchant-1" }),
+      graceExpiresAt: expect.any(Number),
+    }));
+    expect(escrowCoordinator.releaseEscrow).not.toHaveBeenCalled();
   });
 
   it("returns 409 when the escrow is disputed", async () => {

@@ -11,6 +11,7 @@
  *   - Consumer group rebalancing support
  */
 
+import { injectPubSubHeaders, withConsumerSpan } from "../telemetry/propagation.js";
 import { createLogger } from "../logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +156,7 @@ export class RedisStreamManager<T = unknown> {
       type,
       payload,
       metadata: {
+        ...injectPubSubHeaders(),
         ...metadata,
         timestamp,
         type,
@@ -291,7 +293,7 @@ export class RedisStreamManager<T = unknown> {
             if (parsed) {
               try {
                 const start = Date.now();
-                await handler(parsed);
+                await this.runHandler(handler, parsed);
                 processingTimes.push(Date.now() - start);
 
                 await this.client.xAck(this.streamName, groupName, msgId);
@@ -325,7 +327,7 @@ export class RedisStreamManager<T = unknown> {
           if (parsed) {
             try {
               const start = Date.now();
-              await handler(parsed);
+              await this.runHandler(handler, parsed);
               processingTimes.push(Date.now() - start);
 
               await this.client.xAck(this.streamName, groupName, msg.id);
@@ -551,6 +553,19 @@ export class RedisStreamManager<T = unknown> {
   }
 
   // ─── Private Helpers ────────────────────────────────────────────────────
+
+  /** Runs a stream handler inside a CONSUMER span continuing the publisher's trace. */
+  private runHandler(
+    handler: (event: ParsedStreamMessage<T>) => Promise<void>,
+    parsed: ParsedStreamMessage<T>
+  ): Promise<void> {
+    return withConsumerSpan(
+      parsed.metadata,
+      parsed.stream,
+      { "messaging.destination": parsed.stream, "messaging.message_type": parsed.type },
+      () => handler(parsed)
+    );
+  }
 
   private parseMessage(msg: StreamMessage): ParsedStreamMessage<T> | null {
     try {

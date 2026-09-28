@@ -2,7 +2,7 @@ import { Op } from "sequelize";
 import { FXRate } from "../models/FXRate.js";
 import { SupportedCurrency } from "../models/SupportedCurrency.js";
 import type { FXRate as FXRateType, FXRateResponse, FXRateRequest } from "@delegolabs/types";
-import { createChildLogger } from "../logger.js";
+import { fetchWithCorrelation } from "../../middleware/correlation.js";
 
 /**
  * FX Rate Service
@@ -24,7 +24,7 @@ async function fetchFromProvider(provider: string, base: string, quote: string):
   const url = `${FX_PROVIDERS[provider as keyof typeof FX_PROVIDERS]}/rates/${base}/${quote}`;
   
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithCorrelation(url, {
       method: "GET",
       headers: {
         "Accept": "application/json",
