@@ -49,3 +49,4 @@ export * from "./pii-registry.js";
 export * from "./schemas.js";
 export * from "./storefront.js";
 export * from "./shipping.js";
+export * from "./merchantAnalytics.js";
