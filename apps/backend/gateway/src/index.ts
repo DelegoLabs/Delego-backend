@@ -12,6 +12,7 @@ import { openApiValidationMiddleware } from "../middleware/openApiValidation.js"
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
+import { metricsMiddleware } from "./metrics.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -27,6 +28,7 @@ startHttpServer({
   port,
   serviceName: SERVICE_NAME,
   middleware: [
+    metricsMiddleware(),
     requestIdMiddleware(),
     corsMiddleware(),
     securityHeadersMiddleware(),

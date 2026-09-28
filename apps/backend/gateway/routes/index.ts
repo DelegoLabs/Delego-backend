@@ -92,12 +92,14 @@ import { searchProductsHandler } from "../src/search/routes.js";
 import { registerMerchantRoutes } from "../src/merchant/routes.js";
 import { registerCatalogRoutes } from "../src/catalog/routes.js";
 import { registerAgentChatRoutes } from "./agentChat.js";
+import { registerMetricsRoutes } from "../src/metrics.js";
 
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
   return [
     ...registerHealthRoutes(),
+    ...registerMetricsRoutes(),
     // API version discovery — GET /api/versions (issue #54)
     versionDiscoveryRoute,
     route("GET", "/api/v1/status", apiV1Handler),
