@@ -20,3 +20,9 @@ export interface JwtBlacklistStore {
    */
   isRevoked(jti: string): Promise<boolean>;
 }
+
+export interface LinkedPasskeyProfile {
+  userId: string;
+  walletAddresses: string[];
+  credentialIds: string[];
+}
