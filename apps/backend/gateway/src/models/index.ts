@@ -6,6 +6,8 @@ import { DelegationPolicy } from "./DelegationPolicy.js";
 import { PermissionLevel } from "./PermissionLevel.js";
 import { RefreshToken } from "./RefreshToken.js";
 import { OAuthAccount } from "./OAuthAccount.js";
+import { Merchant } from "./Merchant.js";
+import { Product } from "./Product.js";
 
 // User <-> Wallet (One-to-Many)
 User.hasMany(Wallet, { foreignKey: "userId", as: "wallets" });
@@ -43,6 +45,14 @@ DelegationPolicy.belongsTo(Delegation, { foreignKey: "delegationId", as: "delega
 Delegation.hasOne(PermissionLevel, { foreignKey: "delegationId", as: "permissionLevel" });
 PermissionLevel.belongsTo(Delegation, { foreignKey: "delegationId", as: "delegation" });
 
+// User <-> Merchant (One-to-Many)
+User.hasMany(Merchant, { foreignKey: "ownerUserId", as: "merchants" });
+Merchant.belongsTo(User, { foreignKey: "ownerUserId", as: "owner" });
+
+// Merchant <-> Product (One-to-Many)
+Merchant.hasMany(Product, { foreignKey: "merchantId", as: "products" });
+Product.belongsTo(Merchant, { foreignKey: "merchantId", as: "merchant" });
+
 export {
   User,
   Wallet,
@@ -52,4 +62,6 @@ export {
   PermissionLevel,
   RefreshToken,
   OAuthAccount,
+  Merchant,
+  Product,
 };
