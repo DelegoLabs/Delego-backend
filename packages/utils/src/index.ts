@@ -234,6 +234,29 @@ export {
   type LogMetrics,
   type RetentionValidationResult,
 } from "./logAggregation.js";
+export {
+  compressLogChunk,
+  decompressLogChunk,
+  verifyLogChunkCompression,
+  buildLogChunkArchival,
+  isZstdCompressionSupported,
+  LogChunkCompressionError,
+  UnsupportedLogChunkCompressionError,
+  DEFAULT_LOG_CHUNK_COMPRESSION_ALGORITHM,
+  type LogChunkCompressionAlgorithm,
+  type LogChunkCompressionOptions,
+  type CompressedLogChunk,
+  type LogChunkArchival,
+  type LogChunkArchivalContext,
+  type LogChunkCompressionVerification,
+} from "./logChunkCompression.js";
+export {
+  runLogChunkBenchmark,
+  printLogChunkBenchmark,
+  type LogChunkBenchmarkOptions,
+  type LogChunkBenchmarkEntry,
+  type LogChunkBenchmarkResult,
+} from "./logChunkCompressionBenchmark.js";
 export * from "./softDelete/index.js";
 export * from "./audit/index.js";
 export * from "./encryption/index.js";
