@@ -12,6 +12,7 @@ import { openApiValidationMiddleware } from "../middleware/openApiValidation.js"
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
+import { validateRequest } from "./middleware/validateRequest.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -35,6 +36,8 @@ startHttpServer({
     // sunset versions get 410 Gone before any further processing.
     versionNegotiationMiddleware(),
     bodyLimitMiddleware(),
+    // OpenAPI request validation - validates path, query, and body parameters
+    validateRequest(),
     openApiValidationMiddleware({
       validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
     }),
