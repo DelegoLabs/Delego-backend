@@ -15,6 +15,7 @@ import { versionNegotiationMiddleware } from "./middleware/versioning.js";
 import { metricsMiddleware } from "./metrics.js";
 import { killSwitchMiddleware } from "../middleware/killSwitch.js";
 import { getEmergencyKillSwitchService } from "./emergency/killSwitch.js";
+import { registerGracefulShutdown } from "./shutdown.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -31,7 +32,7 @@ getEmergencyKillSwitchService().start().catch((err) => {
   log.warn("Failed to initialize emergency kill-switch service", { error: err.message });
 });
 
-startHttpServer({
+const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
   middleware: [
@@ -54,3 +55,5 @@ startHttpServer({
   ],
   routes: registerRoutes(),
 });
+
+registerGracefulShutdown(server);
