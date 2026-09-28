@@ -3,7 +3,8 @@
  */
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { Account, Asset, Keypair, Networks, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
 import { registerRoutes } from "./routes.js";
 import type { Route } from "@delegolabs/utils";
 
@@ -68,5 +69,61 @@ describe("POST /transactions/simulate body size limit", () => {
     const parsed = JSON.parse(res.body);
     expect(parsed.error.code).toBe("PAYLOAD_TOO_LARGE");
     expect(parsed.error.message).toContain("1048576");
+  });
+});
+
+describe("POST /wallets/simulate", () => {
+  function findWalletSimulateRoute(simulator: { simulateTransaction: ReturnType<typeof vi.fn> }): Route {
+    const route = registerRoutes(simulator as never).find(
+      (candidate) => candidate.method === "POST" && candidate.pattern.test("/wallets/simulate"),
+    );
+    if (!route) throw new Error("wallets/simulate route not registered");
+    return route;
+  }
+
+  it("parses valid XDR and returns the simulator result", async () => {
+    const source = Keypair.random().publicKey();
+    const destination = Keypair.random().publicKey();
+    const transactionXdr = new TransactionBuilder(new Account(source, "1"), {
+      fee: "100",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(Operation.payment({ destination, asset: Asset.native(), amount: "1" }))
+      .setTimeout(30)
+      .build()
+      .toXDR();
+    const simulator = {
+      simulateTransaction: vi.fn().mockResolvedValue({
+        results: [],
+        minResourceFee: "100",
+        transactionData: { toXDR: () => Buffer.from("footprint") },
+      }),
+    };
+    const route = findWalletSimulateRoute(simulator);
+    const req = createMockReq(JSON.stringify({ xdr: transactionXdr }));
+    const res = createMockRes();
+
+    await route.handler(req, res, {});
+
+    expect(simulator.simulateTransaction).toHaveBeenCalledOnce();
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data).toEqual({
+      success: true,
+      minResourceFee: "100",
+      footprint: Buffer.from("footprint").toString("base64"),
+    });
+  });
+
+  it("rejects invalid XDR with HTTP 400 without invoking simulation", async () => {
+    const simulator = { simulateTransaction: vi.fn() };
+    const route = findWalletSimulateRoute(simulator);
+    const req = createMockReq(JSON.stringify({ xdr: "not-valid-xdr" }));
+    const res = createMockRes();
+
+    await route.handler(req, res, {});
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.message).toContain("Invalid transaction XDR");
+    expect(simulator.simulateTransaction).not.toHaveBeenCalled();
   });
 });

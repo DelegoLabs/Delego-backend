@@ -14,7 +14,13 @@ export interface FeeEstimate {
   source: "horizon" | "fallback";
   baseFeeStroops: number;
   recommendedFeeStroops: number;
+  p50: number;
+  p95: number;
+  p99: number;
   percentile: "p50" | "p95" | "p99";
+  p50?: number;
+  p95?: number;
+  p99?: number;
   fetchedAt: string;
 }
 
@@ -144,7 +150,13 @@ export async function estimateTransactionFeeWithServer(
       source: "horizon",
       baseFeeStroops: stats.last_ledger_base_fee,
       recommendedFeeStroops: safeFeeStroops,
+      p50: stats.fee_charged?.p50 ?? safeFeeStroops,
+      p95: stats.fee_charged?.p90 ?? safeFeeStroops,
+      p99: stats.fee_charged?.p99 ?? safeFeeStroops,
       percentile,
+      p50: typeof maxFeeData?.p50 === "number" ? maxFeeData.p50 : undefined,
+      p95: typeof maxFeeData?.p95 === "number" ? maxFeeData.p95 : undefined,
+      p99: typeof maxFeeData?.p99 === "number" ? maxFeeData.p99 : undefined,
       fetchedAt: new Date().toISOString(),
     };
 
@@ -210,6 +222,9 @@ function createFallbackEstimate(
     source: "fallback",
     baseFeeStroops: DEFAULT_FALLBACK_FEE,
     recommendedFeeStroops: DEFAULT_FALLBACK_FEE,
+    p50: DEFAULT_FALLBACK_FEE,
+    p95: DEFAULT_FALLBACK_FEE,
+    p99: DEFAULT_FALLBACK_FEE,
     percentile,
     fetchedAt: new Date().toISOString(),
   };

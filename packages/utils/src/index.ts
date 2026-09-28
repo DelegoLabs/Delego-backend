@@ -1,4 +1,10 @@
-export { createLogger, type Logger } from "./logger.js";
+export {
+  createLogger,
+  getLogContext,
+  runWithLogContext,
+  type Logger,
+  type LogContext,
+} from "./logger.js";
 export { stroopsToDisplay, displayToStroops } from "./currency.js";
 export {
   generateId,
@@ -185,6 +191,7 @@ export {
   type ValidationErrorList,
 } from "./securityEventDetection.js";
 export { requireAuth } from "./auth.js";
+export { requireServiceAuth, SERVICE_AUTH_HEADER, type ServiceAuthOptions } from "./serviceAuth.js";
 export {
   generateApiKey,
   verifyApiKey,
@@ -234,6 +241,33 @@ export {
   type LogMetrics,
   type RetentionValidationResult,
 } from "./logAggregation.js";
+export {
+  compressLogChunk,
+  decompressLogChunk,
+  verifyLogChunkCompression,
+  buildLogChunkArchival,
+  isZstdCompressionSupported,
+  LogChunkCompressionError,
+  UnsupportedLogChunkCompressionError,
+  DEFAULT_LOG_CHUNK_COMPRESSION_ALGORITHM,
+  type LogChunkCompressionAlgorithm,
+  type LogChunkCompressionOptions,
+  type CompressedLogChunk,
+  type LogChunkArchival,
+  type LogChunkArchivalContext,
+  type LogChunkCompressionVerification,
+} from "./logChunkCompression.js";
+export {
+  runLogChunkBenchmark,
+  printLogChunkBenchmark,
+  type LogChunkBenchmarkOptions,
+  type LogChunkBenchmarkEntry,
+  type LogChunkBenchmarkResult,
+} from "./logChunkCompressionBenchmark.js";
 export * from "./softDelete/index.js";
 export * from "./audit/index.js";
 export * from "./encryption/index.js";
+export * from "./carrier/index.js";
+export * from "./containerDigest.js";
+export * from "./telemetry/index.js";
+export * from "./magicBytes.js";
