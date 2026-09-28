@@ -1,2 +1,2 @@
-export { PathPaymentQuoteEngine } from './pathPaymentQuoteEngine';
-export type { PathPaymentQuoteRequest, PathPaymentQuoteResponse, PathHop } from './types';
+export { PathPaymentQuoteEngine } from './pathPaymentQuoteEngine.js';
+export type { PathPaymentQuoteRequest, PathPaymentQuoteResponse, PathHop } from './types.js';

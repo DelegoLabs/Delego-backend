@@ -48,6 +48,10 @@ import {
 import { runPreferenceMigration } from "./preferenceMigration.js";
 import { disconnectAll as disconnectRedis, getConnectionState, getBufferMetrics } from "./redis/client.js";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
+import {
+  initSupportChatServer,
+  getChatRedisClient,
+} from "./supportChat.js";
 
 const SERVICE_NAME = "notifications";
 const DEFAULT_PORT = 3015;
@@ -308,6 +312,11 @@ const server: Server = startHttpServer({
       json(res, 200, { data: getWebSocketMetrics(), error: null });
     }),
 
+    // Issue #378 — support chat active-session metrics
+    route("GET", "/support-chat/metrics", (_req: IncomingMessage, res: ServerResponse) => {
+      json(res, 200, { data: supportChatRelay?.getActiveSessions() ?? [], error: null });
+    }),
+
     // Issue #365 / #59 — notification scheduling with cron + timezone support and a
     // CRUD management API.
     route("POST", "/schedule", async (req: IncomingMessage, res: ServerResponse) => {
@@ -558,6 +567,21 @@ function sanitizePreferenceUpdate(body: Record<string, unknown>): PreferenceUpda
 }
 
 initWebSocketServer(server);
+
+// Issue #378 — End-to-End Encrypted Customer Support Channel.
+// Mounts a separate WebSocket server on path /support-chat.
+// Clients connect with: wss://<host>/support-chat?token=<jwt>&orderId=<id>
+// Enabled by default; set SUPPORT_CHAT_ENABLED=false to skip (e.g. in replicas
+// where only one instance should handle chat).
+let supportChatRelay: ReturnType<typeof initSupportChatServer>["relay"] | null = null;
+if (process.env.SUPPORT_CHAT_ENABLED !== "false") {
+  const chatResult = initSupportChatServer(server, {
+    redis: getChatRedisClient(),
+    jwtSecret: process.env.JWT_SECRET,
+  });
+  supportChatRelay = chatResult.relay;
+  log.info("Support chat WebSocket server started (Issue #378)");
+}
 
 // Issue #59 — scheduled/recurring notifications: persistent store + polling loop.
 //

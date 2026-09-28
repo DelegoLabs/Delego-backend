@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { normalizeEvent, CursorStore, SorobanEventIngestionWorker, RawSorobanEvent } from "../ingestionWorker.js";
 
 vi.mock("@delegolabs/utils", () => ({
