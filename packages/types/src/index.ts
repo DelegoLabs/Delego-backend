@@ -50,3 +50,4 @@ export * from "./schemas.js";
 export * from "./storefront.js";
 export * from "./shipping.js";
 export * from "./merchantAnalytics.js";
+export * from "./storageRotation.js";
