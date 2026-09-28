@@ -12,6 +12,7 @@ import { startAutoReleaseWorker, stopAutoReleaseWorker } from "./workers/autoRel
 import { enablePostgresDisputeStore } from "./disputes/disputeStore.js";
 import { startTimeoutRefundScheduler } from "./workers/timeoutRefund.js";
 import { startShippingExceptionScheduler } from "./shipping/exceptionDetector.js";
+import { startCarrierTrackingWorker } from "./webhooks/carrierWorker.js";
 
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
@@ -217,6 +218,36 @@ if (process.env.ENABLE_SUBSCRIPTION_BILLING !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping subscription billing scheduler");
     stopBillingScheduler();
+  });
+}
+
+// ─── #291 Carrier Tracking Webhook Receiver ─────────────────────────────────
+
+export {
+  normalizeEasyPostEvent,
+  validateEasyPostPayload,
+  getCarrierWebhookSecret,
+  extractCarrierSignature,
+} from "./webhooks/carrierWebhook.js";
+export type {
+  CarrierTrackingStatus,
+  EasyPostTrackingDetail,
+  EasyPostTrackingWebhook,
+  NormalizedCarrierEvent,
+} from "./webhooks/carrierWebhook.js";
+export {
+  CARRIER_TRACKING_QUEUE_NAME,
+  enqueueCarrierEvent,
+  registerCarrierEventProcessor,
+} from "./webhooks/carrierQueue.js";
+export { processCarrierEvent, startCarrierTrackingWorker } from "./webhooks/carrierWorker.js";
+
+if (process.env.ENABLE_CARRIER_TRACKING_WORKER !== "false") {
+  const carrierWorker = startCarrierTrackingWorker();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping carrier tracking worker");
+    carrierWorker.stop();
   });
 }
 

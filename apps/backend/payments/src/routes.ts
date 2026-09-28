@@ -5,6 +5,13 @@ import { getPaymentsHealth } from "../escrow/health.js";
 import { createPaymentsHealthRegistry } from "./health.js";
 import { handleDeliveryConfirmationWebhook } from "../escrow/autoSettlement.js";
 import { getWebhookSecret, verifyWebhookSignature, WEBHOOK_SIGNATURE_HEADER } from "./autoRelease/hmac.js";
+import {
+  extractCarrierSignature,
+  getCarrierWebhookSecret,
+  normalizeEasyPostEvent,
+  validateEasyPostPayload,
+} from "./webhooks/carrierWebhook.js";
+import { enqueueCarrierEvent } from "./webhooks/carrierQueue.js";
 import { handleDeliveryConfirmation } from "./autoRelease/service.js";
 import { EscrowDisputedError, EscrowNotReleasableError } from "./autoRelease/types.js";
 import { ContractInvocationError } from "../escrow/errors.js";
@@ -937,6 +944,63 @@ export function registerRoutes(): Route[] {
       const lockManager = getEscrowFundingLockManager();
       const optimization = lockManager.optimizeConfig();
       json(res, 200, { data: optimization, error: null });
+    }),
+
+    // ─── Issue #291 — Carrier Tracking Webhook Receiver (EasyPost) ─────────
+    // POST /api/v1/webhooks/carriers/easypost
+    // Verifies HMAC-SHA256 over the raw body, validates + normalizes the
+    // EasyPost tracker.updated payload, and enqueues it for async BullMQ
+    // processing. Responds 200 immediately (never awaits the worker) so
+    // carriers get an ack well within 500ms. Redeliveries dedupe on
+    // payload id via the queue jobId.
+    route("POST", "/api/v1/webhooks/carriers/easypost", async (req, res) => {
+      try {
+        const rawBody = await readRawBody(req);
+
+        const secret = getCarrierWebhookSecret();
+        if (!secret) {
+          json(res, 503, {
+            data: null,
+            error: { code: "CONFIG_ERROR", message: "EASYPOST_WEBHOOK_SECRET is not configured" },
+          });
+          return;
+        }
+
+        const signature = extractCarrierSignature(
+          req.headers as Record<string, string | string[] | undefined>
+        );
+        if (!verifyWebhookSignature(rawBody, signature, secret)) {
+          json(res, 401, {
+            data: null,
+            error: { code: "UNAUTHORIZED", message: "Invalid or missing webhook signature" },
+          });
+          return;
+        }
+
+        let parsed: unknown;
+        try {
+          parsed = rawBody ? (JSON.parse(rawBody) as unknown) : {};
+        } catch {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+
+        const validated = validateEasyPostPayload(parsed);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const event = normalizeEasyPostEvent(validated.value);
+        await enqueueCarrierEvent(event);
+
+        json(res, 200, {
+          data: { received: true, id: event.eventId, trackingCode: event.trackingCode, status: event.status },
+          error: null,
+        });
+      } catch (err) {
+        sendOperationError(res, "CARRIER_WEBHOOK_FAILED", err);
+      }
     }),
 
     // ─── Issue #297 — Timeout Refund Worker for Stalled Escrows ─────────────
