@@ -19,7 +19,7 @@ import type {
   SessionKeyRecord,
   SessionKeyPolicy,
   SignResult,
-} from './types';
+} from './types.js';
 
 /** Redis key prefix for session key records */
 const SESSION_KEY_PREFIX = 'session_key:';
@@ -239,23 +239,23 @@ export class SessionKeySigner {
 
   // --- Private helpers ---
 
-  private extractContractIdFromXdr(xdr: string): string {
+  private extractContractIdFromXdr(_xdr: string): string {
     // In production, parse the XDR to extract the contract ID
     // from the InvokeContractHostFunction operation
     return 'EXTRACTED_CONTRACT_ID';
   }
 
-  private extractMethodFromXdr(xdr: string): string {
+  private extractMethodFromXdr(_xdr: string): string {
     // In production, parse the XDR to extract the method name
     return 'EXTRACTED_METHOD';
   }
 
-  private async signTransaction(xdr: string, encryptedKey: string): Promise<string> {
+  private async signTransaction(_xdr: string, _encryptedKey: string): Promise<string> {
     // In production:
     // 1. Decrypt the private key using Vault's transit engine
     // 2. Create a Keypair from the decrypted private key
     // 3. Sign the transaction XDR
     // 4. Return the signed transaction XDR
-    return `${xdr}_SIGNED`;
+    return `${_xdr}_SIGNED`;
   }
 }
