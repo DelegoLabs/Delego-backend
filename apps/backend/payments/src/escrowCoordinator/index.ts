@@ -16,6 +16,7 @@ import {
 } from "./paymentRecordStore.js";
 import { publishPaymentStatusEvent } from "./redisEvents.js";
 import { getEscrowFundingLockManager } from "./escrowFundingLock.js";
+import { checkEscrowVelocity } from "./fraudGuard.js";
 import {
   InsufficientEscrowBalanceError,
   type DisputeEscrowParams,
@@ -130,6 +131,14 @@ export const escrowCoordinator: EscrowCoordinator = {
         paymentRecordId: existing.id,
       });
       return toFundResult(existing);
+    }
+    const velocity = await checkEscrowVelocity(params.buyerAddress);
+    if (velocity.paused) {
+      log.warn("Escrow funding blocked: buyer paused pending fraud review", {
+        orderId: params.orderId,
+        buyerAddress: params.buyerAddress,
+      });
+      return { escrowId: "", txHash: "", ledger: 0, status: "failed" };
     }
 
     // Issue #147 — Use adaptive locking for escrow funding

@@ -49,6 +49,14 @@ DelegationPolicy.belongsTo(Delegation, { foreignKey: "delegationId", as: "delega
 Delegation.hasOne(PermissionLevel, { foreignKey: "delegationId", as: "permissionLevel" });
 PermissionLevel.belongsTo(Delegation, { foreignKey: "delegationId", as: "delegation" });
 
+// User <-> Merchant (One-to-Many)
+User.hasMany(Merchant, { foreignKey: "ownerUserId", as: "merchants" });
+Merchant.belongsTo(User, { foreignKey: "ownerUserId", as: "owner" });
+
+// Merchant <-> Product (One-to-Many)
+Merchant.hasMany(Product, { foreignKey: "merchantId", as: "products" });
+Product.belongsTo(Merchant, { foreignKey: "merchantId", as: "merchant" });
+
 export {
   User,
   Wallet,

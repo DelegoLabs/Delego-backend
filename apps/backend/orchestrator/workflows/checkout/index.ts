@@ -2,7 +2,7 @@
  * #55 Checkout Cancellation Grace Period Timers
  * Uses BullMQ to schedule 30-minute checkout expiry and cancel incomplete orders.
  */
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, tracedFetch } from "@delegolabs/utils";
 import { Queue, Worker, type Job } from "bullmq";
 import { transitionWorkflow } from "../purchase/index.js";
 
@@ -266,7 +266,7 @@ async function callPaymentsService<T>(path: string, body: Record<string, unknown
   const url = `${getPaymentsUrl()}${path}`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await tracedFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

@@ -31,6 +31,7 @@ import { registerSequenceAdminRoutes } from "./batching/sequenceAdminRoutes.js";
 import { registerSimulationCacheAdminRoutes } from "./batching/simulationCacheAdminRoutes.js";
 import { registerDLQAdminRoutes } from "./batching/dlqAdminRoutes.js";
 import { registerAssetRoutes } from "./assets/routes.js";
+import { registerFaucetRoutes } from "./faucet/routes.js";
 
 const log = createLogger("wallet:routes", process.env.LOG_LEVEL ?? "info");
 
@@ -774,5 +775,8 @@ export function registerRoutes(): Route[] {
 
     // --- Issue #108: Asset management routes ---
     ...registerAssetRoutes(),
+
+    // --- Issue #373: Automated Testnet Faucet Dispenser routes ---
+    ...registerFaucetRoutes(),
   ];
 }

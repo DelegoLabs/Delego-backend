@@ -9,7 +9,7 @@
  * - Purpose-based path organization
  */
 
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, type S3ClientConfig } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createLogger } from "@delegolabs/utils";
 
@@ -114,7 +114,7 @@ export function validatePresignedUrlRequestOrThrow(
  * Get S3 client with configured credentials.
  */
 export function getS3Client(): S3Client {
-  const config: Parameters<typeof S3Client>[0] = {
+  const config: S3ClientConfig = {
     region: REGION,
     credentials: {
       accessKeyId: ACCESS_KEY_ID || "dummy-access-key",

@@ -12,6 +12,7 @@ import {
   trackCustomEventHandler,
   exportDataHandler,
   getRevenueMetricsHandler,
+  getMerchantSalesHandler,
 } from "./analyticsRoutes.js";
 
 export function registerAnalyticsRoutes(): Route[] {
@@ -36,6 +37,9 @@ export function registerAnalyticsRoutes(): Route[] {
 
     // Revenue attribution
     route("GET", "/api/v1/analytics/revenue", getRevenueMetricsHandler),
+
+    // Real-Time Merchant Continuous Aggregates (#377)
+    route("GET", "/api/v1/analytics/merchants/:merchantId/sales", getMerchantSalesHandler),
 
     // Data export
     route("POST", "/api/v1/analytics/export", exportDataHandler),

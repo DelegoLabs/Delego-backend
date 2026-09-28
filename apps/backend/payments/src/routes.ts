@@ -5,8 +5,16 @@ import { getPaymentsHealth } from "../escrow/health.js";
 import { createPaymentsHealthRegistry } from "./health.js";
 import { handleDeliveryConfirmationWebhook } from "../escrow/autoSettlement.js";
 import { getWebhookSecret, verifyWebhookSignature, WEBHOOK_SIGNATURE_HEADER } from "./autoRelease/hmac.js";
+import {
+  extractCarrierSignature,
+  getCarrierWebhookSecret,
+  normalizeEasyPostEvent,
+  validateEasyPostPayload,
+} from "./webhooks/carrierWebhook.js";
+import { enqueueCarrierEvent } from "./webhooks/carrierQueue.js";
 import { handleDeliveryConfirmation } from "./autoRelease/service.js";
 import { EscrowDisputedError, EscrowNotReleasableError } from "./autoRelease/types.js";
+import { registerOracleRoutes } from "./oracle/routes.js";
 import { ContractInvocationError } from "../escrow/errors.js";
 import { settleOrder, refundOrder } from "../settlement/index.js";
 import { getEscrowFundingLockManager } from "./escrowCoordinator/escrowFundingLock.js";
@@ -67,6 +75,32 @@ import {
   validateCreateSubscriptionRequest,
   validateRenewRequest,
 } from "./subscriptions/validation.js";
+import { registerShipment, getShipment, type RegisterShipmentDTO, RegisterShipmentResponse } from "./shipping/service.js";
+import { validateRegisterShipment } from "./shipping/validation.js";
+import {
+  reserveStock,
+  releaseReservation,
+  getAvailableStock,
+  validateReserveStockRequest,
+  validateReservationId,
+  type InsufficientStockError,
+} from "./inventory/index.js";
+import { initiatePayout, validateInitiatePayoutRequest, type InitiatePayoutResponse } from "./payouts/index.js";
+import {
+  createDisbursementApproval,
+  collectOfficerSignature,
+  getDisbursementState,
+  submitDisbursementApproval,
+  listDisbursements,
+  expireStaleDisbursements,
+  DisbursementNotFoundError,
+  OfficerNotAuthorizedError,
+  DuplicateSignatureError,
+  InvalidSignatureError,
+  DisbursementClosedError,
+  type CreateDisbursementApprovalInput,
+  type SubmitOfficerSignatureInput,
+} from "./disbursementApproval.js";
 
 const paymentsHealthRegistry = createPaymentsHealthRegistry();
 
@@ -212,6 +246,7 @@ async function ensureContractConfig(res: ServerResponse): Promise<boolean> {
 
 export function registerRoutes(): Route[] {
   return [
+    ...registerOracleRoutes(),
     ...createHealthRoutes({
       registry: paymentsHealthRegistry,
       serviceName: "payments",
@@ -740,7 +775,7 @@ export function registerRoutes(): Route[] {
           return;
         }
 
-        const result = await handleDeliveryConfirmation(validated.value);
+        const result = await handleDeliveryConfirmation(validated.value, signatureHeader);
 
         if ("scheduled" in result) {
           json(res, 202, { data: result, error: null });
@@ -928,6 +963,63 @@ export function registerRoutes(): Route[] {
       json(res, 200, { data: optimization, error: null });
     }),
 
+    // ─── Issue #291 — Carrier Tracking Webhook Receiver (EasyPost) ─────────
+    // POST /api/v1/webhooks/carriers/easypost
+    // Verifies HMAC-SHA256 over the raw body, validates + normalizes the
+    // EasyPost tracker.updated payload, and enqueues it for async BullMQ
+    // processing. Responds 200 immediately (never awaits the worker) so
+    // carriers get an ack well within 500ms. Redeliveries dedupe on
+    // payload id via the queue jobId.
+    route("POST", "/api/v1/webhooks/carriers/easypost", async (req, res) => {
+      try {
+        const rawBody = await readRawBody(req);
+
+        const secret = getCarrierWebhookSecret();
+        if (!secret) {
+          json(res, 503, {
+            data: null,
+            error: { code: "CONFIG_ERROR", message: "EASYPOST_WEBHOOK_SECRET is not configured" },
+          });
+          return;
+        }
+
+        const signature = extractCarrierSignature(
+          req.headers as Record<string, string | string[] | undefined>
+        );
+        if (!verifyWebhookSignature(rawBody, signature, secret)) {
+          json(res, 401, {
+            data: null,
+            error: { code: "UNAUTHORIZED", message: "Invalid or missing webhook signature" },
+          });
+          return;
+        }
+
+        let parsed: unknown;
+        try {
+          parsed = rawBody ? (JSON.parse(rawBody) as unknown) : {};
+        } catch {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+
+        const validated = validateEasyPostPayload(parsed);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const event = normalizeEasyPostEvent(validated.value);
+        await enqueueCarrierEvent(event);
+
+        json(res, 200, {
+          data: { received: true, id: event.eventId, trackingCode: event.trackingCode, status: event.status },
+          error: null,
+        });
+      } catch (err) {
+        sendOperationError(res, "CARRIER_WEBHOOK_FAILED", err);
+      }
+    }),
+
     // ─── Issue #297 — Timeout Refund Worker for Stalled Escrows ─────────────
     // POST /workers/timeout-refund/sweep
     // Triggers an on-demand sweep of timed-out funded escrows and submits
@@ -942,6 +1034,398 @@ export function registerRoutes(): Route[] {
           data: null,
           error: { code: "TIMEOUT_REFUND_SWEEP_FAILED", message },
         });
+      }
+    }),
+
+    // ─── Shipment Registration Endpoint (Issue #XX) ─────────────────────────
+    // POST /api/v1/merchant/orders/:orderId/shipment
+    // Accepts merchant-submitted tracking numbers and registers with EasyPost/carrier
+    route("POST", "/api/v1/merchant/orders/:orderId/shipment", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        
+        // Validate request body
+        const validated = validateRegisterShipment(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const dto: RegisterShipmentDTO = {
+          orderId: params.orderId,
+          carrier: validated.value.carrier,
+          trackingNumber: validated.value.trackingNumber,
+        };
+
+        // Register the shipment
+        const result = await registerShipment(dto);
+
+        if (!result.ok) {
+          // Handle carrier-specific validation errors
+          if (result.error.code === "INVALID_TRACKING_NUMBER") {
+            json(res, 400, {
+              data: null,
+              error: {
+                code: "INVALID_TRACKING_NUMBER",
+                message: result.error.message,
+                details: result.error.details,
+              },
+            });
+            return;
+          }
+          // Handle EasyPost/Carrier API errors
+          json(res, 502, {
+            data: null,
+            error: {
+              code: result.error.code,
+              message: result.error.message,
+              details: result.error.details,
+            },
+          });
+          return;
+        }
+
+        json(res, 201, {
+          data: result.response,
+          error: null,
+        });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+          });
+          return;
+        }
+        sendOperationError(res, "SHIPPING_REGISTRATION_FAILED", err);
+      }
+    }),
+
+    // GET /api/v1/merchant/orders/:orderId/shipment
+    // Retrieve shipment registration status
+    route("GET", "/api/v1/merchant/orders/:orderId/shipment", async (_req, res, params) => {
+      try {
+        const shipment = getShipment(params.orderId);
+        if (!shipment) {
+          json(res, 404, {
+            data: null,
+            error: {
+              code: "SHIPMENT_NOT_FOUND",
+              message: `No shipment found for order ${params.orderId}`,
+            },
+          });
+          return;
+        }
+
+        json(res, 200, {
+          data: shipment,
+          error: null,
+        });
+      } catch (err) {
+        sendOperationError(res, "SHIPPING_FETCH_FAILED", err);
+      }
+    }),
+
+    // ─── Inventory Reservation Endpoints (Issue #XX) ────────────────────────
+
+    // POST /api/v1/inventory/reserve
+    // Reserve stock for an order (escrow is proposed/funding is expected)
+    route("POST", "/api/v1/inventory/reserve", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+
+        const validated = validateReserveStockRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const { productId, quantity, orderId, ttlMs } = validated.value;
+
+        // Seed stock if not exists (optional, for demo purposes)
+        // await seedStock(productId, 1000);
+
+        const result = await reserveStock(productId, quantity, orderId, ttlMs);
+
+        json(res, 201, {
+          data: result,
+          error: null,
+        });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+          });
+          return;
+        }
+        // InsufficientStockError maps to 409 Conflict
+        if (err instanceof Error && (err as any).name === "InsufficientStockError") {
+          json(res, 409, {
+            data: null,
+            error: {
+              code: "INSUFFICIENT_STOCK",
+              message: err instanceof Error ? err.message : "Insufficient stock",
+            },
+          });
+          return;
+        }
+        sendOperationError(res, "INVENTORY_RESERVE_FAILED", err);
+      }
+    }),
+
+    // POST /api/v1/inventory/reservations/:reservationId/release
+    // Explicitly release a reservation (called after escrow is funded)
+    route("POST", "/api/v1/inventory/reservations/:reservationId/release", async (_req, res, params) => {
+      try {
+        const { ok: idOk, value: reservationId, error: idError } = validateReservationId(params.reservationId);
+        if (!idOk) {
+          sendValidationError(res, idError as any);
+          return;
+        }
+
+        const result = await releaseReservation(reservationId, { strict: false });
+
+        if (result.quantityRestored === 0) {
+          json(res, 200, {
+            data: result,
+            error: null,
+          });
+        } else {
+          json(res, 200, {
+            data: result,
+            error: null,
+          });
+        }
+      } catch (err) {
+        if (err instanceof Error && (err as any).name === "ReservationNotFoundError") {
+          json(res, 404, {
+            data: null,
+            error: {
+              code: "RESERVATION_NOT_FOUND",
+              message: err instanceof Error ? err.message : "Reservation not found",
+            },
+          });
+          return;
+        }
+        sendOperationError(res, "INVENTORY_RELEASE_FAILED", err);
+      }
+    }),
+
+    // GET /api/v1/inventory/stock/:productId
+    // Check current available stock
+    route("GET", "/api/v1/inventory/stock/:productId", async (_req, res, params) => {
+      try {
+        const available = await getAvailableStock(params.productId);
+        json(res, 200, {
+          data: { productId: params.productId, available },
+          error: null,
+        });
+      } catch (err) {
+        sendOperationError(res, "INVENTORY_FETCH_FAILED", err);
+      }
+    }),
+
+    // ─── Payout Endpoint (Issue #XX) ────────────────────────────────────────
+
+    // POST /api/v1/payouts/initiate
+    // Calculate platform commission and initiate escrow release
+    route("POST", "/api/v1/payouts/initiate", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+
+        const validated = validateInitiatePayoutRequest(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const result = await initiatePayout(validated.value);
+
+        json(res, 201, {
+          data: result,
+          error: null,
+        });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+          });
+          return;
+        }
+        // Check for common error patterns
+        if (err instanceof Error && err.message.includes("not found")) {
+          json(res, 404, {
+            data: null,
+            error: {
+              code: "ESCROW_NOT_FOUND",
+              message: err.message,
+            },
+          });
+          return;
+        }
+        if (err instanceof Error && err.message.includes("not in funded status")) {
+          json(res, 400, {
+            data: null,
+            error: {
+              code: "INVALID_ESCROW_STATUS",
+              message: err.message,
+            },
+          });
+          return;
+        }
+        sendOperationError(res, "PAYOUT_INITIATION_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #374 — Enterprise Disbursement Multi-Sig Quorum ────────────────
+    // POST   /disbursements/approvals                    – create approval request
+    // GET    /disbursements/approvals                    – list all approvals
+    // GET    /disbursements/approvals/:id                – get approval state
+    // POST   /disbursements/approvals/:id/sign           – submit officer signature
+    // POST   /disbursements/approvals/:id/submit         – manually submit when quorum met
+    // POST   /disbursements/approvals/expire             – expire stale approvals
+
+    route("POST", "/disbursements/approvals", async (req, res) => {
+      try {
+        const body = await readJsonBody(req) as unknown as CreateDisbursementApprovalInput;
+        if (!body.disbursementId || !body.transactionXdr || !body.officers) {
+          json(res, 400, {
+            data: null,
+            error: { code: "VALIDATION_ERROR", message: "disbursementId, transactionXdr, and officers are required" },
+          });
+          return;
+        }
+        if (!Array.isArray(body.officers) || body.officers.length < 2) {
+          json(res, 400, {
+            data: null,
+            error: { code: "VALIDATION_ERROR", message: "At least 2 officers are required" },
+          });
+          return;
+        }
+        const approval = await createDisbursementApproval(body);
+        json(res, 201, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "Invalid JSON body" } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        const status = message.includes("Invalid Stellar public key") ? 400 : 500;
+        json(res, status, { data: null, error: { code: "DISBURSEMENT_CREATE_FAILED", message } });
+      }
+    }),
+
+    route("GET", "/disbursements/approvals", async (_req, res) => {
+      try {
+        const approvals = listDisbursements();
+        json(res, 200, { data: approvals, error: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_LIST_FAILED", message } });
+      }
+    }),
+
+    route("GET", "/disbursements/approvals/:disbursementId", async (_req, res, params) => {
+      try {
+        const approval = getDisbursementState(params.disbursementId);
+        if (!approval) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: `Disbursement ${params.disbursementId} not found` } });
+          return;
+        }
+        json(res, 200, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof DisbursementNotFoundError) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: err.message } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_FETCH_FAILED", message } });
+      }
+    }),
+
+    route("POST", "/disbursements/approvals/:disbursementId/sign", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req) as unknown as SubmitOfficerSignatureInput;
+        if (!body.officer || !body.signature) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "officer and signature are required" } });
+          return;
+        }
+        const input: SubmitOfficerSignatureInput = {
+          disbursementId: params.disbursementId,
+          officer: body.officer,
+          signature: body.signature,
+        };
+        const approval = await collectOfficerSignature(input);
+        json(res, 200, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: "Invalid JSON body" } });
+          return;
+        }
+        if (err instanceof DisbursementNotFoundError) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof OfficerNotAuthorizedError) {
+          json(res, 403, { data: null, error: { code: "OFFICER_NOT_AUTHORIZED", message: err.message } });
+          return;
+        }
+        if (err instanceof DuplicateSignatureError) {
+          json(res, 409, { data: null, error: { code: "DUPLICATE_SIGNATURE", message: err.message } });
+          return;
+        }
+        if (err instanceof InvalidSignatureError) {
+          json(res, 400, { data: null, error: { code: "INVALID_SIGNATURE", message: err.message } });
+          return;
+        }
+        if (err instanceof DisbursementClosedError) {
+          json(res, 409, { data: null, error: { code: "DISBURSEMENT_CLOSED", message: err.message } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "SIGNATURE_COLLECTION_FAILED", message } });
+      }
+    }),
+
+    route("POST", "/disbursements/approvals/:disbursementId/submit", async (_req, res, params) => {
+      try {
+        const approval = await submitDisbursementApproval(params.disbursementId);
+        json(res, 200, { data: approval, error: null });
+      } catch (err) {
+        if (err instanceof DisbursementNotFoundError) {
+          json(res, 404, { data: null, error: { code: "DISBURSEMENT_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message.includes("Quorum not met")) {
+          json(res, 400, { data: null, error: { code: "QUORUM_NOT_MET", message: err.message } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_SUBMIT_FAILED", message } });
+      }
+    }),
+
+    route("POST", "/disbursements/approvals/expire", async (_req, res) => {
+      try {
+        const expired = await expireStaleDisbursements();
+        json(res, 200, { data: { expired }, error: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        json(res, 500, { data: null, error: { code: "DISBURSEMENT_EXPIRE_FAILED", message } });
       }
     }),
   ];

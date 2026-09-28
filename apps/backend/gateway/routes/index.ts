@@ -31,7 +31,13 @@ import {
   revokeDelegationHandler,
 } from "./delegations.js";
 import { getWalletHandler } from "./wallets.js";
-import { rateLimitMetricsHandler, circuitBreakerStatusHandler, tieredRateLimitMetricsHandler } from "./admin.js";
+import {
+  rateLimitMetricsHandler,
+  circuitBreakerStatusHandler,
+  tieredRateLimitMetricsHandler,
+  emergencyBroadcastHandler,
+  emergencyStatusHandler,
+} from "./admin.js";
 import { auditLogQueryHandler, auditLogVerifyHandler } from "./audit.js";
 import { swaggerHandler } from "../src/swagger.js";
 import { logSearchHandler, logStatsHandler, logClearHandler } from "../src/logging/routes.js";
@@ -98,12 +104,17 @@ import { registerStorefrontRoutes } from "./storefront.js";
 import { registerStorageRoutes } from "./storage.js";
 import { registerDisputeRoutes } from "./disputes.js";
 import { searchProductsHandler } from "../src/search/routes.js";
+import { registerMerchantRoutes } from "../src/merchant/routes.js";
+import { registerCatalogRoutes } from "../src/catalog/routes.js";
+import { registerAgentChatRoutes } from "./agentChat.js";
+import { registerMetricsRoutes } from "../src/metrics.js";
 
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
   return [
     ...registerHealthRoutes(),
+    ...registerMetricsRoutes(),
     // API version discovery — GET /api/versions (issue #54)
     versionDiscoveryRoute,
     route("GET", "/api/v1/status", apiV1Handler),
@@ -193,6 +204,9 @@ export function registerRoutes(): Route[] {
     // Admin — audit log query API (#66)
     route("GET", "/api/v1/admin/audit-log", auditLogQueryHandler),
     route("GET", "/api/v1/admin/audit-log/verify", auditLogVerifyHandler),
+    // Emergency Kill-Switch Broadcast API (#375)
+    route("POST", "/api/v1/admin/emergency/broadcast", emergencyBroadcastHandler),
+    route("GET", "/api/v1/admin/emergency/status", emergencyStatusHandler),
     // Swagger UI (#352)
     route("GET", "/api/docs", swaggerHandler),
     route("GET", "/api/docs/openapi.json", swaggerHandler),
@@ -219,5 +233,11 @@ export function registerRoutes(): Route[] {
     ...registerStorageRoutes(),
     // Disputes - merchant response endpoint (Issue #112)
     ...registerDisputeRoutes(),
+    // Merchants - registration & store management
+    ...registerMerchantRoutes(),
+    // Catalog - product CRUD with cursor pagination
+    ...registerCatalogRoutes(),
+    // Agent Chat - SSE streaming for agent conversations
+    ...registerAgentChatRoutes(),
   ];
 }

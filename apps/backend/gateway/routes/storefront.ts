@@ -7,7 +7,6 @@
  * - Redis caching (60s TTL) with cache invalidation on product updates
  */
 
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Route, RouteHandler } from "@delegolabs/utils";
 import { json, createLogger, route } from "@delegolabs/utils";
 import { type RedisClientType, createClient } from "redis";
@@ -31,7 +30,7 @@ export function getRedisClient(): RedisClientType {
   if (!redisClient) {
     const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
     redisClient = createClient({ url: redisUrl });
-    redisClient.on("error", (err) => log.error("Redis client error", { error: err.message }));
+    redisClient.on("error", (err: Error) => log.error("Redis client error", { error: err.message }));
     redisClient.on("connect", () => log.info("Redis client connected"));
     redisClient.connect();
   }
@@ -93,8 +92,8 @@ export { decodeCursor };
  * Replace with actual database query.
  */
 export async function fetchProducts(
-  merchantId: string,
-  params: StorefrontQueryParams,
+  _merchantId: string,
+  _params: StorefrontQueryParams,
 ): Promise<{ items: Product[]; nextCursor: string | null; totalCount: number }> {
   // This would typically query the products database
   // For now, returning a placeholder structure
@@ -189,7 +188,7 @@ export const listProductsHandler: RouteHandler = async (req, res, params) => {
  *
  * GET /api/v1/merchants/:merchantId/products/:productId
  */
-export const getProductHandler: RouteHandler = async (req, res, params) => {
+export const getProductHandler: RouteHandler = async (_req, res, params) => {
   const { merchantId, productId } = params;
 
   if (!merchantId || !productId) {

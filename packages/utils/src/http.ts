@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { withServerSpan } from "./telemetry/propagation.js";
 
 // ─── Request body size limiting ────────────────────────────────────────────
 
@@ -130,9 +131,13 @@ export function startHttpServer(options: HttpServerOptions): Server {
   const { port, host = "0.0.0.0", serviceName, version = "0.0.1", routes = [] } =
     options;
 
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const pathname = url.pathname;
+  const server = createServer((req, res) => {
+    const pathname = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).pathname;
+    // Continues the caller's trace (traceparent) when a global tracer is set.
+    return withServerSpan(req, res, pathname, () => handleRequest(req, res, pathname));
+  });
+
+  const handleRequest = async (req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> => {
 
     const middlewares = options.middleware ?? [];
     let index = 0;
@@ -201,7 +206,7 @@ export function startHttpServer(options: HttpServerOptions): Server {
     };
 
     await next();
-  });
+  };
 
   server.listen(port, host, () => {
     // eslint-disable-next-line no-console
