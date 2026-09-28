@@ -9,5 +9,6 @@ export {
   generatePresignedUrl,
   validatePresignedUrlRequest,
   validatePresignedUrlRequestOrThrow,
+  checkStorageConfig,
 } from "./presignedUrl.js";
 export type { PresignedUrlRequest, PresignedUrlResponse } from "./presignedUrl.js";

@@ -14,10 +14,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@delegolabs/types": "workspace:*",
-    "@delegolabs/utils": "workspace:*",
     "@aws-sdk/client-s3": "^3.758.0",
     "@aws-sdk/s3-request-presigner": "^3.758.0",
+    "@delegolabs/payments": "workspace:*",
+    "@delegolabs/types": "workspace:*",
+    "@delegolabs/utils": "workspace:*",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "bcryptjs": "^3.0.3",
@@ -25,9 +26,11 @@
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.21.0",
     "pg-hstore": "^2.3.4",
+    "redis": "^4.7.1",
     "sequelize": "^6.37.8"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
     "@types/bcryptjs": "^3.0.0",
     "@types/express": "^5.0.6",
     "@types/ioredis-mock": "^8.2.7",
@@ -35,7 +38,6 @@
     "@types/node": "^22.0.0",
     "@types/pg": "^8.20.0",
     "@types/validator": "^13.15.10",
-    "@aws-sdk/client-s3": "^3.758.0",
     "ioredis-mock": "^8.13.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

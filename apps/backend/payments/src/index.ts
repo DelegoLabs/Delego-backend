@@ -50,6 +50,7 @@ export {
   submitMediationDecision,
 } from "./disputes/mediation.js";
 export { executePartialRefund } from "./disputes/partialRefund.js";
+export { submitMerchantResponse } from "./disputes/index.js";
 export { startSlaEscalationScheduler, findAndEscalateBreachedDisputes } from "./disputes/slaEscalation.js";
 export type {
   Dispute,

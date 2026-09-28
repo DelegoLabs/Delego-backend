@@ -185,7 +185,7 @@ export class CursorStore {
       cursorToken: cursor.cursorToken ?? "",
       updatedAt: new Date().toISOString(),
     });
-    this.log.debug("Cursor saved", cursor);
+    this.log.debug("Cursor saved", cursor as unknown as Record<string, unknown>);
   }
 
   /** Load the Redis cursor.  May return null after a Redis flush. */
