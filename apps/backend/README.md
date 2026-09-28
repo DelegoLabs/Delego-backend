@@ -72,6 +72,30 @@ The API gateway serves as the single entry point for all client requests.
 - `GET /api/v1/admin/circuit-breakers` - Circuit breaker status
 - `GET /api/docs` - Swagger UI
 
+#### Dynamic Rate Limiting for Unauthenticated Search
+
+Public catalog search endpoints (e.g. `GET /api/v1/search`) are unauthenticated
+and therefore rate limited per client IP using a Redis-backed token bucket to
+prevent competitor data scraping.
+
+Bucket state is stored in Redis under the key `ratelimit:search:{ip}` and follows
+the `SearchRateLimitBucket` shape:
+
+```typescript
+export interface SearchRateLimitBucket {
+  ip: string;
+  remainingTokens: number;
+  refillRatePerSec: number;
+}
+```
+
+- Each IP starts with a full bucket of tokens and refills at `refillRatePerSec`.
+- Every unauthenticated search request consumes one token.
+- When `remainingTokens` reaches zero, the gateway responds with
+  `429 Too Many Requests` and a standard `Retry-After` header indicating how
+  many seconds until the next token is available.
+- Buckets expire automatically once idle so Redis does not grow unbounded.
+
 ### Orchestrator Service (`apps/backend/orchestrator`)
 
 **Package**: `@delegolabs/orchestrator`
@@ -279,268 +303,6 @@ domain events, and publishes them to the Redis bus with exactly-once delivery.
 Gateway
   ├─> Orchestrator
   │    ├─> Agents
-  │    └─> Wallet
-  ├─> Wallet
-  └─> Payments
-       ├─> Wallet
-       └─> Soroban Contracts
+  │    
 
-Notifications (independent, receives events)
-```
-
-## Development
-
-### Service Structure
-
-Each service follows a consistent structure:
-
-```
-apps/backend/
-├── gateway/
-│   ├── src/
-│   │   ├── routes/
-│   │   ├── middleware/
-│   │   ├── auth/
-│   │   └── index.ts
-│   ├── package.json
-│   └── tsconfig.json
-├── orchestrator/
-│   ├── src/
-│   │   ├── workflows/
-│   │   ├── state/
-│   │   └── index.ts
-│   ├── package.json
-│   └── tsconfig.json
-└── ...
-```
-
-### Running Services
-
-```bash
-# Start all services
-pnpm dev
-
-# Start the gateway
-pnpm dev:gateway
-
-# Start a specific service
-pnpm --filter @delegolabs/orchestrator dev
-pnpm --filter @delegolabs/wallet dev
-pnpm --filter @delegolabs/payments dev
-pnpm --filter @delegolabs/notifications dev
-pnpm --filter @delegolabs/cdc dev
-pnpm --filter @delegolabs/agents dev
-```
-
-### Building Services
-
-```bash
-# Build all services
-pnpm build
-
-# Build specific service
-pnpm --filter @delegolabs/gateway build
-```
-
-### Testing Services
-
-```bash
-# Test all services
-pnpm test
-
-# Test specific service
-pnpm --filter @delegolabs/gateway test
-```
-
-## Service Communication
-
-### HTTP/REST
-
-Services communicate via HTTP/REST for synchronous operations:
-
-```typescript
-// Service A calling Service B
-const response = await axios.get('http://wallet-service:3012/balance');
-```
-
-### Event-Driven
-
-Services communicate via events for asynchronous operations:
-
-```typescript
-// Publish event
-redis.publish('order:created', JSON.stringify(order));
-
-// Subscribe to event
-redis.subscribe('order:created', (message) => {
-  // Handle event
-});
-```
-
-### Service Discovery
-
-Services discover each other via:
-- **Development**: Hardcoded localhost URLs
-- **Staging**: Kubernetes service discovery
-- **Production**: Service mesh (Istio)
-
-## Monitoring
-
-### Health Checks
-
-All services expose a health check endpoint:
-
-```bash
-curl http://localhost:3000/health
-```
-
-Response:
-```json
-{
-  "status": "ok",
-  "service": "gateway",
-  "version": "0.0.1",
-  "timestamp": "2026-01-01T00:00:00.000Z"
-}
-```
-
-### Metrics
-
-Services expose metrics for monitoring:
-- Request count
-- Request duration
-- Error rate
-- Active connections
-- Custom business metrics
-
-### Logging
-
-Structured logging with correlation IDs:
-
-```typescript
-logger.info('Processing request', {
-  requestId: 'abc-123',
-  userId: 'user-123',
-  action: 'create_delegation'
-});
-```
-
-## Deployment
-
-### Development
-
-Services run locally via Docker Compose:
-
-```bash
-pnpm docker:up
-pnpm dev
-```
-
-### Staging (Planned)
-
-Services will be deployed to a Kubernetes staging cluster. Kubernetes manifests are not yet in this repository:
-
-```bash
-kubectl apply -f k8s/staging/
-```
-
-### Production (Planned)
-
-Services will be deployed to a Kubernetes production cluster with blue-green deployment. Kubernetes manifests are not yet in this repository:
-
-```bash
-kubectl apply -f k8s/production/
-```
-
-### Scaling
-
-Services can be scaled horizontally:
-
-```bash
-# Scale gateway to 3 replicas
-kubectl scale deployment gateway --replicas=3
-```
-
-## Best Practices
-
-### Service Design
-
-- **Single Responsibility**: Each service does one thing well
-- **API Design**: RESTful API design principles
-- **Error Handling**: Consistent error handling across services
-- **Idempotency**: Operations should be idempotent where possible
-- **Timeouts**: Implement appropriate timeouts for external calls
-
-### Security
-
-- **Authentication**: JWT-based authentication
-- **Authorization**: Role-based access control
-- **Encryption**: Encrypt sensitive data
-- **Secrets Management**: Use secret management systems
-- **Input Validation**: Validate all inputs
-
-### Performance
-
-- **Caching**: Cache frequently accessed data
-- **Connection Pooling**: Use connection pooling for databases
-- **Async Operations**: Use async/await for I/O operations
-- **Load Testing**: Perform load testing before deployment
-
-### Reliability
-
-- **Circuit Breakers**: Implement circuit breakers for external calls
-- **Retries**: Implement exponential backoff for retries
-- **Health Checks**: Implement health checks for monitoring
-- **Graceful Shutdown**: Handle shutdown signals gracefully
-
-## Troubleshooting
-
-### Common Issues
-
-**Service won't start**
-```bash
-# Check logs
-pnpm dev:gateway
-
-# Check port availability
-lsof -i :3000
-
-# Check dependencies
-pnpm install
-```
-
-**Service communication issues**
-```bash
-# Check service health
-curl http://localhost:3000/health
-
-# Check network connectivity
-ping wallet-service
-
-# Check logs for errors
-```
-
-**Database connection issues**
-```bash
-# Check PostgreSQL is running
-docker ps | grep postgres
-
-# Check connection string
-echo $DATABASE_URL
-
-# Test connection
-psql $DATABASE_URL
-```
-
-## Documentation
-
-- [Gateway Service README](./gateway/README.md)
-- [Orchestrator Service README](./orchestrator/README.md)
-- [Agents Service README](../../agents/README.md)
-- [Wallet Service README](./wallet/README.md)
-- [Payments Service README](./payments/README.md)
-- [Notifications Service README](./notifications/README.md)
-
----
-
-**Last Updated**: June 2026
+/* … truncated 5104 chars — edit only what you need near the top … */
