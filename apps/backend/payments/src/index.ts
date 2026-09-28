@@ -48,6 +48,7 @@ export {
   openDispute,
   submitEvidence,
   submitMediationDecision,
+  submitMerchantResponse,
 } from "./disputes/mediation.js";
 export { executePartialRefund } from "./disputes/partialRefund.js";
 export { submitMerchantResponse } from "./disputes/index.js";

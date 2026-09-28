@@ -40,9 +40,18 @@ export function validateDisputeResponseRequest(
     if (!Array.isArray(request.evidenceAttachmentUrls)) {
       return { valid: false, error: "evidenceAttachmentUrls must be an array" };
     }
+    const allowedExtensions = [".jpg", ".jpeg", ".png", ".pdf"];
     for (const url of request.evidenceAttachmentUrls) {
       if (typeof url !== "string") {
         return { valid: false, error: "evidenceAttachmentUrls must contain only strings" };
+      }
+      const cleanUrl = url.split("?")[0].toLowerCase();
+      const hasValidExt = allowedExtensions.some((ext) => cleanUrl.endsWith(ext));
+      if (!hasValidExt) {
+        return {
+          valid: false,
+          error: `Evidence attachment URL "${url}" does not have an allowed extension (${allowedExtensions.join(", ")})`,
+        };
       }
     }
   }

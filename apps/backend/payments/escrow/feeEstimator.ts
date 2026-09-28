@@ -18,6 +18,9 @@ export interface FeeEstimate {
   p95: number;
   p99: number;
   percentile: "p50" | "p95" | "p99";
+  p50?: number;
+  p95?: number;
+  p99?: number;
   fetchedAt: string;
 }
 
@@ -151,6 +154,9 @@ export async function estimateTransactionFeeWithServer(
       p95: stats.fee_charged?.p90 ?? safeFeeStroops,
       p99: stats.fee_charged?.p99 ?? safeFeeStroops,
       percentile,
+      p50: typeof maxFeeData?.p50 === "number" ? maxFeeData.p50 : undefined,
+      p95: typeof maxFeeData?.p95 === "number" ? maxFeeData.p95 : undefined,
+      p99: typeof maxFeeData?.p99 === "number" ? maxFeeData.p99 : undefined,
       fetchedAt: new Date().toISOString(),
     };
 
