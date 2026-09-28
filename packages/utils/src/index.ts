@@ -1,4 +1,5 @@
 export { createLogger, type Logger } from "./logger.js";
+export * from "./audit/index.js";
 export { stroopsToDisplay, displayToStroops } from "./currency.js";
 export {
   generateId,
