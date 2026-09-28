@@ -15,7 +15,7 @@ import {
 } from "@stellar/stellar-sdk";
 import type { TransactionRequest, TransactionResult } from "@delegolabs/types";
 import { vaultService } from "../vault.js";
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, withSpan } from "@delegolabs/utils";
 import {
   classifySubmissionFailure,
   type SubmissionFailure,
@@ -565,7 +565,7 @@ async function executeTxJob(
 
     // 7. Submit transaction to RPC server
     log.info("Submitting transaction to Stellar network...", { hash: tx.hash().toString("hex") });
-    let sendRes = await rpcServer.sendTransaction(tx);
+    let sendRes = await withSpan("stellar.sendTransaction", () => rpcServer.sendTransaction(tx), { "peer.service": "stellar-rpc" });
 
     if (sendRes.status === "ERROR") {
       const errorMsg = JSON.stringify(sendRes);
