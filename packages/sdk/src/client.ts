@@ -7,6 +7,7 @@ import {
   OrderSchema,
   validateResponse,
 } from "./schemas.js";
+import { scrubExifMetadataIfNeeded } from "./exifScrubber.js";
 
 export interface DelegoClientOptions {
   baseUrl: string;
@@ -24,6 +25,44 @@ export interface DelegoClientOptions {
 }
 
 const TOKEN_STORAGE_KEY = "delego_auth_token";
+
+/** Result of a dispute-evidence upload after metadata scrubbing. */
+export interface DisputeEvidenceUpload {
+  /** Public URL of the scrubbed object stored in R2/S3. */
+  publicUrl: string;
+  /** MIME type of the uploaded (scrubbed) object. */
+  contentType: string;
+  /** Size of the uploaded (scrubbed) object in bytes. */
+  sizeBytes: number;
+}
+
+export interface UploadDisputeEvidenceOptions {
+  /** Filename to store the evidence under. Defaults to the File's name. */
+  filename?: string;
+  /** Abort signal forwarded to the pre-sign request and the upload PUT. */
+  signal?: AbortSignal;
+}
+
+const EVIDENCE_CONTENT_TYPES: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  pdf: "application/pdf",
+};
+
+/** Collapse a user-supplied name to a safe basename (no separators or ".."). */
+function sanitizeEvidenceFilename(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? "";
+  const cleaned = base.replace(/\.\./g, "").replace(/[^\w.\- ]+/g, "_").trim();
+  return cleaned || "evidence";
+}
+
+/** Resolve the content type from the extension, falling back to the Blob's. */
+function resolveEvidenceContentType(filename: string, fallback: string): string {
+  const extension = filename.split(".").pop()?.toLowerCase() ?? "";
+  return EVIDENCE_CONTENT_TYPES[extension] ?? fallback;
+}
 
 function getDefaultStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined {
   if (typeof window === "undefined" || !window.localStorage) return undefined;
@@ -273,5 +312,75 @@ export class DelegoClient {
 
   async getEscrows(): Promise<ApiResponse<Escrow[]>> {
     return this.request<Escrow[]>("/api/v1/escrows");
+  }
+
+  /**
+   * Strip EXIF metadata (GPS coordinates, camera serial numbers, …) from a
+   * photo in the browser, then upload it as dispute evidence (#789):
+   *
+   * 1. Re-render to a canvas at the original resolution to drop EXIF.
+   * 2. Request a pre-signed upload URL (`purpose: "dispute_evidence"`).
+   * 3. PUT the scrubbed bytes directly to storage.
+   *
+   * Non-image evidence (e.g. PDFs) is passed through untouched.
+   */
+  async uploadDisputeEvidence(
+    file: File,
+    options: UploadDisputeEvidenceOptions = {},
+  ): Promise<ApiResponse<DisputeEvidenceUpload>> {
+    const filename = sanitizeEvidenceFilename(options.filename ?? file.name ?? "evidence");
+    const scrubbed = await scrubExifMetadataIfNeeded(file);
+    const contentType = resolveEvidenceContentType(filename, scrubbed.type || file.type);
+
+    const presign = await this.request<{
+      uploadUrl: string;
+      publicUrl: string;
+      expiresInSeconds: number;
+    }>("/api/v1/storage/presigned-url", {
+      method: "POST",
+      body: JSON.stringify({
+        filename,
+        contentType,
+        fileSizeBytes: scrubbed.size,
+        purpose: "dispute_evidence",
+      }),
+      signal: options.signal,
+    });
+
+    if (presign.error || !presign.data) {
+      return {
+        data: null,
+        error: presign.error ?? {
+          code: "PRESIGNED_URL_FAILED",
+          message: "No upload URL was returned",
+        },
+      };
+    }
+
+    const upload = await fetch(presign.data.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: scrubbed,
+      signal: options.signal,
+    });
+
+    if (!upload.ok) {
+      return {
+        data: null,
+        error: {
+          code: "EVIDENCE_UPLOAD_FAILED",
+          message: `Evidence upload failed with status ${upload.status}`,
+        },
+      };
+    }
+
+    return {
+      data: {
+        publicUrl: presign.data.publicUrl,
+        contentType,
+        sizeBytes: scrubbed.size,
+      },
+      error: null,
+    };
   }
 }
