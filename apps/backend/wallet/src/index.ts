@@ -17,7 +17,12 @@ const logLevel = process.env.LOG_LEVEL ?? "info";
 const log = createLogger(SERVICE_NAME, logLevel);
 const port = Number(process.env.WALLET_PORT ?? DEFAULT_PORT);
 
+import { ServiceMetricsRegistry } from "@delegolabs/utils";
+
+export const metricsRegistry = new ServiceMetricsRegistry();
 const sorobanConfig = readSorobanRpcConfig();
+sorobanConfig.metricsRegistry = metricsRegistry;
+
 log.info("Starting service", {
   port,
   nodeEnv,
