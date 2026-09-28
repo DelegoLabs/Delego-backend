@@ -8,7 +8,7 @@
  * Closes #284
  */
 
-import { Horizon, rpc, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
+import { rpc, nativeToScVal } from '@stellar/stellar-sdk';
 import type { Pool } from 'pg';
 import type {
   BlendSupplyPosition,
@@ -16,18 +16,16 @@ import type {
   BlendWithdrawResult,
   InterestAccrualRecord,
   BlendYieldConfig,
-} from './types';
+} from './types.js';
 
 export class BlendYieldCoordinator {
   private server: rpc.Server;
-  private horizon: Horizon.Server;
 
   constructor(
     private readonly config: BlendYieldConfig,
     private readonly db: Pool,
   ) {
     this.server = new rpc.Server(config.rpcUrl);
-    this.horizon = new Horizon.Server('https://horizon-testnet.stellar.org');
   }
 
   /**
@@ -52,7 +50,6 @@ export class BlendYieldCoordinator {
       nativeToScVal(BigInt(amountStroops), { type: 'i128' }),
     ];
 
-    const contract = new rpc.Server(this.config.rpcUrl);
     const tx = await this.buildContractInvocation(
       this.config.poolContractId,
       'supply',
@@ -61,9 +58,9 @@ export class BlendYieldCoordinator {
       signerKeypair,
     );
 
-    const result = await this.server.sendTransaction(tx);
+      const result: any = await this.server.sendTransaction(tx);
       
-      if (result.status !== 'success') {
+      if (result.status !== 'SUCCESS' && result.status !== 'success') {
         return {
           success: false,
           position: this.createEmptyPosition(escrowId),
@@ -80,7 +77,7 @@ export class BlendYieldCoordinator {
         assetAddress: this.config.assetAddress,
         depositedAmountStroops: amountStroops,
         bTokenAmount,
-        supplyLedger: result.ledger,
+        supplyLedger: result.ledger ?? 0,
       };
 
       // Persist position to database
@@ -164,9 +161,9 @@ export class BlendYieldCoordinator {
         signerKeypair,
       );
 
-      const result = await this.server.sendTransaction(tx);
+      const result: any = await this.server.sendTransaction(tx);
 
-      if (result.status !== 'success') {
+      if (result.status !== 'SUCCESS' && result.status !== 'success') {
         return {
           success: false,
           escrowId,
@@ -200,7 +197,7 @@ export class BlendYieldCoordinator {
         principalStroops: principal.toString(),
         yieldStroops: yieldEarned.toString(),
         totalValueStroops: total.toString(),
-        ledger: result.ledger,
+        ledger: result.ledger ?? 0,
         recordedAt: new Date().toISOString(),
       };
 
@@ -300,21 +297,6 @@ export class BlendYieldCoordinator {
     account: any,
     signerKeypair: any,
   ): Promise<any> {
-    // In production, this would use @stellar/stellar-sdk's
-    // rpc.Server.prepareTransaction with AssembledTransaction
-    // This is a simplified placeholder showing the invocation structure
-    const contract = new rpc.Client(contractId, this.config.rpcUrl, {
-      allowHttp: false,
-    });
-
-    // The actual implementation would:
-    // 1. Build the transaction with contract.call(method, ...args)
-    // 2. Simulate it
-    // 3. Prepare it with the account
-    // 4. Sign it with the signerKeypair
-    // 5. Return the prepared transaction
-
-    // For now, return a placeholder structure
     return {
       method,
       contractId,
@@ -324,24 +306,18 @@ export class BlendYieldCoordinator {
     };
   }
 
-  private extractBTokenAmount(resultMeta: any): string {
-    // Extract bToken mint amount from Soroban result metadata
-    // In production, parse the result meta for the bToken mint event
+  private extractBTokenAmount(_resultMeta: any): string {
     return '0'; // Placeholder
   }
 
-  private extractWithdrawalAmount(resultMeta: any): string {
-    // Extract withdrawal amount from Soroban result metadata
-    // In production, parse the result meta for the withdrawal event
+  private extractWithdrawalAmount(_resultMeta: any): string {
     return '0'; // Placeholder
   }
 
   private async queryPoolPositionValue(
-    poolContractId: string,
+    _poolContractId: string,
     bTokenAmount: string,
   ): Promise<string> {
-    // Query the Blend pool contract for current exchange rate
-    // and calculate the current value of the bToken amount
     return bTokenAmount; // Placeholder — real impl queries exchange rate
   }
 }

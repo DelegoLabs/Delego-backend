@@ -29,8 +29,8 @@ let redisClient: Redis | null = null;
 export function getRedisClient(): Redis {
   if (!redisClient) {
     const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
-    redisClient = new Redis(redisUrl);
-    redisClient.on("error", (err: Error) => log.error("Redis client error", { error: err.message }));
+    redisClient = new Redis(redisUrl, { lazyConnect: true });
+    redisClient.on("error", (err) => log.error("Redis client error", { error: err.message }));
     redisClient.on("connect", () => log.info("Redis client connected"));
   }
   return redisClient;

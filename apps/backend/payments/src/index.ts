@@ -42,6 +42,7 @@ export {
   openDispute,
   submitEvidence,
   submitMediationDecision,
+  submitMerchantResponse,
 } from "./disputes/mediation.js";
 export { executePartialRefund } from "./disputes/partialRefund.js";
 export { startSlaEscalationScheduler, findAndEscalateBreachedDisputes } from "./disputes/slaEscalation.js";
