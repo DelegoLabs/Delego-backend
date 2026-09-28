@@ -212,6 +212,10 @@ async function ensureContractConfig(res: ServerResponse): Promise<boolean> {
 
 export function registerRoutes(): Route[] {
   return [
+    route("GET", "/health", (_req, res) => {
+      json(res, 200, { status: "ok", timestamp: new Date().toISOString() });
+    }),
+
     ...createHealthRoutes({
       registry: paymentsHealthRegistry,
       serviceName: "payments",
