@@ -7,6 +7,14 @@ export {
 
 export { computeEntryHash, verifyChain, type HashableAuditFields } from "./hashChain.js";
 
+export {
+  verifyStoredChain,
+  formatChainVerificationReport,
+  DEFAULT_VERIFY_PAGE_SIZE,
+  type VerifyStoredChainOptions,
+  type StoredChainVerificationResult,
+} from "./verifyStoredChain.js";
+
 export type {
   AuditOperation,
   AuditLogEntry,
