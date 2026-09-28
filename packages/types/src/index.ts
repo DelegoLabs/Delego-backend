@@ -49,6 +49,7 @@ export * from "./certExpiry.js";
 export * from "./encryption.js";
 export * from "./pii-registry.js";
 export * from "./schemas.js";
+export * from "./merchant-profile.js";
 export * from "./storefront.js";
 export * from "./shipping.js";
 export * from "./merchantAnalytics.js";
