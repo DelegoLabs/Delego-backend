@@ -89,12 +89,14 @@ import { registerStorefrontRoutes } from "./storefront.js";
 import { registerStorageRoutes } from "./storage.js";
 import { registerDisputeRoutes } from "./disputes.js";
 import { searchProductsHandler } from "../src/search/routes.js";
+import { registerMetricsRoutes } from "../src/metrics.js";
 
 
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
   return [
     ...registerHealthRoutes(),
+    ...registerMetricsRoutes(),
     // API version discovery — GET /api/versions (issue #54)
     versionDiscoveryRoute,
     route("GET", "/api/v1/status", apiV1Handler),
