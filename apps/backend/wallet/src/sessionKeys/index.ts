@@ -1,7 +1,7 @@
-export { SessionKeySigner } from './sessionKeySigner';
+export { SessionKeySigner } from "./sessionKeySigner.js";
 export type {
   SignWithSessionKeyDTO,
   SessionKeyRecord,
   SessionKeyPolicy,
   SignResult,
-} from './types';
+} from "./types.js";

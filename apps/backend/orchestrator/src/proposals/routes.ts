@@ -4,7 +4,8 @@
  * GET  /proposals/:id    — fetch a proposal
  * POST /proposals/check  — pre-flight limit check (no state change)
  */
-import { createLogger, json, route, requireAuth } from "@delegolabs/utils";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { createLogger, json, route, readBodyWithLimit, PayloadTooLargeError } from "@delegolabs/utils";
 import type { Pool } from "pg";
 import { z } from "zod";
 import { ProposalService } from "./service.js";
@@ -12,6 +13,16 @@ import {
   DelegationLimitExceededError,
   ConcurrentProposalConflictError,
 } from "./types.js";
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const raw = await readBodyWithLimit(req);
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("JSON body must be an object");
+  }
+  return parsed as Record<string, unknown>;
+}
 
 const log = createLogger(
   "orchestrator:proposals:routes",
@@ -45,47 +56,61 @@ export function createProposalRoutes(db: Pool) {
   const service = new ProposalService(db);
 
   return [
-    route("POST", "/proposals", requireAuth, async (req: Request) => {
-      let body: unknown;
+    route("POST", "/proposals", async (req: IncomingMessage, res: ServerResponse) => {
+      let body: Record<string, unknown>;
       try {
-        body = await (req as any).json();
-      } catch {
-        return json({ error: "Invalid JSON body" }, 400);
+        body = await readJsonBody(req);
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          json(res, 413, { error: err.message });
+          return;
+        }
+        json(res, 400, { error: "Invalid JSON body" });
+        return;
       }
 
       const parsed = CreateProposalSchema.safeParse(body);
       if (!parsed.success) {
-        return json({ error: "Validation failed", details: parsed.error.flatten() }, 400);
+        json(res, 400, { error: "Validation failed", details: parsed.error.flatten() });
+        return;
       }
 
       try {
         const proposal = await service.createProposal(parsed.data);
-        return json(proposal, 201);
+        json(res, 201, proposal);
       } catch (err) {
         if (err instanceof DelegationLimitExceededError) {
-          return json({ error: err.message, code: "DELEGATION_LIMIT_EXCEEDED" }, 422);
+          json(res, 422, { error: err.message, code: "DELEGATION_LIMIT_EXCEEDED" });
+          return;
         }
         if (err instanceof ConcurrentProposalConflictError) {
-          return json({ error: err.message, code: "CONCURRENT_CONFLICT" }, 409);
+          json(res, 409, { error: err.message, code: "CONCURRENT_CONFLICT" });
+          return;
         }
         log.error("Unexpected error creating proposal", {
           error: err instanceof Error ? err.message : String(err),
         });
-        return json({ error: "Internal server error" }, 500);
+        json(res, 500, { error: "Internal server error" });
       }
     }),
 
-    route("POST", "/proposals/check", requireAuth, async (req: Request) => {
-      let body: unknown;
+    route("POST", "/proposals/check", async (req: IncomingMessage, res: ServerResponse) => {
+      let body: Record<string, unknown>;
       try {
-        body = await (req as any).json();
-      } catch {
-        return json({ error: "Invalid JSON body" }, 400);
+        body = await readJsonBody(req);
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          json(res, 413, { error: err.message });
+          return;
+        }
+        json(res, 400, { error: "Invalid JSON body" });
+        return;
       }
 
       const parsed = CheckLimitSchema.safeParse(body);
       if (!parsed.success) {
-        return json({ error: "Validation failed", details: parsed.error.flatten() }, 400);
+        json(res, 400, { error: "Validation failed", details: parsed.error.flatten() });
+        return;
       }
 
       const result = await service.checkLimit(
@@ -93,7 +118,7 @@ export function createProposalRoutes(db: Pool) {
         parsed.data.delegationId,
         parsed.data.amountStroops
       );
-      return json(result, 200);
+      json(res, 200, result);
     }),
   ];
 }
