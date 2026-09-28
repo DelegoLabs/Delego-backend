@@ -9,6 +9,11 @@
 import { describe, it, expect, vi } from "vitest";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { rateLimitMiddleware } from "./rateLimit.js";
+import {
+  InMemorySlidingWindowClient,
+  TenantRateLimiter,
+} from "../src/rateLimit/tenantRateLimiter.js";
+import type { RateLimitTier, TenantTierName } from "../src/rateLimit/tenantTiers.js";
 
 type MockResponse = ServerResponse & {
   statusCode: number;
@@ -168,5 +173,74 @@ describe("rateLimitMiddleware", () => {
     expect(allowedNext).toHaveBeenCalledTimes(1);
 
     vi.restoreAllMocks();
+  });
+});
+
+describe("rateLimitMiddleware — tiered sliding window (issue #309)", () => {
+  const TIERS: Record<TenantTierName, RateLimitTier> = {
+    free: { name: "free", requestsPerMinute: 2, burstAllowance: 1 },
+    merchant: { name: "merchant", requestsPerMinute: 3, burstAllowance: 1 },
+    enterprise: { name: "enterprise", requestsPerMinute: 4, burstAllowance: 0 },
+  };
+
+  function buildMiddleware() {
+    const limiter = new TenantRateLimiter(new InMemorySlidingWindowClient(), TIERS);
+    return rateLimitMiddleware(undefined, { tenantLimiter: limiter });
+  }
+
+  it("sets X-RateLimit-* headers, admits the burst, then returns 429 with Retry-After", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    const middleware = buildMiddleware();
+    const req = createMockReq({ ip: "8.8.8.8" });
+
+    const first = createMockRes();
+    const firstNext = vi.fn();
+    await middleware(req, first, firstNext);
+    expect(firstNext).toHaveBeenCalledTimes(1);
+    expect(first.headers["X-RateLimit-Limit"]).toBe("2");
+    expect(first.headers["X-RateLimit-Remaining"]).toBe("1");
+
+    // 2nd request exhausts the steady-state quota.
+    const second = createMockRes();
+    await middleware(req, second, vi.fn());
+    expect(second.statusCode).toBe(0);
+    expect(second.headers["X-RateLimit-Remaining"]).toBe("0");
+
+    // 3rd request is still admitted by the tier's burst allowance.
+    const third = createMockRes();
+    const thirdNext = vi.fn();
+    await middleware(req, third, thirdNext);
+    expect(thirdNext).toHaveBeenCalledTimes(1);
+    expect(third.statusCode).toBe(0);
+
+    // 4th request exhausts steady-state + burst => 429 with exact Retry-After.
+    const fourth = createMockRes();
+    const fourthNext = vi.fn();
+    await middleware(req, fourth, fourthNext);
+    expect(fourthNext).not.toHaveBeenCalled();
+    expect(fourth.statusCode).toBe(429);
+    expect(JSON.parse(fourth.body).error.code).toBe("RATE_LIMIT_EXCEEDED");
+    expect(fourth.headers["Retry-After"]).toBe("60");
+
+    vi.useRealTimers();
+  });
+
+  it("keeps the sliding window per caller", async () => {
+    const middleware = buildMiddleware();
+
+    for (let i = 0; i < 4; i++) {
+      await middleware(createMockReq({ ip: "10.0.0.1" }), createMockRes(), vi.fn());
+    }
+    const blocked = createMockRes();
+    await middleware(createMockReq({ ip: "10.0.0.1" }), blocked, vi.fn());
+    expect(blocked.statusCode).toBe(429);
+
+    const other = createMockRes();
+    const otherNext = vi.fn();
+    await middleware(createMockReq({ ip: "10.0.0.2" }), other, otherNext);
+    expect(otherNext).toHaveBeenCalledTimes(1);
+    expect(other.statusCode).toBe(0);
   });
 });
