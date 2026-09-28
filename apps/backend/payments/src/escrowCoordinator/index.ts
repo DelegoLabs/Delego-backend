@@ -5,8 +5,8 @@ import {
   mapChainEscrowStatus,
   orderIdToContractBytes,
   readEscrowFromChain,
-  submitContractInvocation,
 } from "./contractClient.js";
+import { submitContractInvocationWithRetry } from "./contractInvocationRetry.js";
 import {
   createPaymentRecord,
   findPaymentRecordByEscrowId,
@@ -153,7 +153,7 @@ export const escrowCoordinator: EscrowCoordinator = {
     });
 
     try {
-      const tx = await submitContractInvocation({
+      const tx = await submitContractInvocationWithRetry({
         sourceAddress: params.buyerAddress,
         contractId: params.escrowContractId,
         method: "deposit",
@@ -239,7 +239,7 @@ export const escrowCoordinator: EscrowCoordinator = {
     await updatePaymentRecord(record.id, { failureReason: null });
 
     try {
-      const tx = await submitContractInvocation({
+      const tx = await submitContractInvocationWithRetry({
         sourceAddress: params.callerAddress,
         contractId: params.escrowContractId,
         method: "release",
@@ -313,7 +313,7 @@ export const escrowCoordinator: EscrowCoordinator = {
     await updatePaymentRecord(record.id, { failureReason: null });
 
     try {
-      const tx = await submitContractInvocation({
+      const tx = await submitContractInvocationWithRetry({
         sourceAddress: params.callerAddress,
         contractId: params.escrowContractId,
         method: "refund",
@@ -395,7 +395,7 @@ export const escrowCoordinator: EscrowCoordinator = {
     await updatePaymentRecord(record.id, { failureReason: null });
 
     try {
-      const tx = await submitContractInvocation({
+      const tx = await submitContractInvocationWithRetry({
         sourceAddress: params.callerAddress,
         contractId: params.escrowContractId,
         method: "dispute",
@@ -466,7 +466,7 @@ export const escrowCoordinator: EscrowCoordinator = {
     await updatePaymentRecord(record.id, { failureReason: null });
 
     try {
-      const tx = await submitContractInvocation({
+      const tx = await submitContractInvocationWithRetry({
         sourceAddress: params.callerAddress,
         contractId: params.escrowContractId,
         method: "partial_refund",
@@ -548,7 +548,7 @@ export const escrowCoordinator: EscrowCoordinator = {
     await updatePaymentRecord(record.id, { failureReason: null });
 
     try {
-      const tx = await submitContractInvocation({
+      const tx = await submitContractInvocationWithRetry({
         sourceAddress: params.callerAddress,
         contractId: params.escrowContractId,
         method: "partial_release",
