@@ -54,4 +54,5 @@ export * from "./shipping.js";
 export * from "./merchantAnalytics.js";
 export * from "./storageRotation.js";
 export * from "./container-digest.js";
+export * from "./dlq.js";
 export * from "./storage.js";

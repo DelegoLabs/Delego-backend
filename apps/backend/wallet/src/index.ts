@@ -75,13 +75,19 @@ try {
   log.error("Failed to initialize simulation cache", { error: (err as Error).message });
 }
 
-// Issue #143: Initialize transaction DLQ
+// Issue #143 & #363: Initialize transaction DLQ and automated triage worker
+let dlqTriageWorker: import("./queue/dlqTriageWorker.js").DlqTriageWorker | null = null;
 try {
   const redis = getRedisConnection();
   initDLQ(redis);
   log.info("Transaction DLQ initialized");
+
+  const { DlqTriageWorker } = await import("./queue/dlqTriageWorker.js");
+  dlqTriageWorker = new DlqTriageWorker(redis);
+  dlqTriageWorker.start();
+  log.info("Automated DLQ triage worker started");
 } catch (err) {
-  log.error("Failed to initialize transaction DLQ", { error: (err as Error).message });
+  log.error("Failed to initialize transaction DLQ or triage worker", { error: (err as Error).message });
 }
 
 // ─── Graceful Shutdown ─────────────────────────────────────────────────────
@@ -93,6 +99,14 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
   server.close(() => {
     log.info("HTTP server closed");
   });
+
+  // Stop DLQ triage worker
+  try {
+    dlqTriageWorker?.stop();
+    log.info("DLQ triage worker stopped");
+  } catch (err) {
+    log.error("Error stopping DLQ triage worker", { error: (err as Error).message });
+  }
 
   // Drain batch flush timers
   try {
@@ -135,4 +149,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-// TODO: Wire routes, database, and domain logic
+// Export DLQ triage worker components for external use
+export { DlqTriageWorker } from "./queue/dlqTriageWorker.js";
+export { DlqSlackAlerter } from "./queue/dlqSlackAlerter.js";
+export { classifyErrorAndDecide, calculateExponentialBackoff } from "./queue/dlqClassificationEngine.js";
