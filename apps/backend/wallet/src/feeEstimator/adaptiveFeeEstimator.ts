@@ -13,8 +13,6 @@ import { Redis } from "ioredis";
 import { createLogger, type Logger } from "@delegolabs/utils";
 import { estimateTransactionFee, type FeeEstimate } from "@delegolabs/payments/fee-estimator";
 
-const log = createLogger("wallet:adaptiveFeeEstimator", process.env.LOG_LEVEL ?? "info");
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -54,7 +52,6 @@ export const DEFAULT_ADAPTIVE_CONFIG: AdaptiveFeeConfig = {
 };
 
 const CACHE_KEY = "fee:adaptive:estimate";
-const CONGESTION_KEY = "fee:adaptive:congestion";
 const METRICS_KEY = "fee:adaptive:metrics";
 
 // ---------------------------------------------------------------------------

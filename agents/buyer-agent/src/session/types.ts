@@ -1,7 +1,7 @@
 /**
  * Session state types — Issue #268
  */
-import type { ChatMessage } from "../../src/llm/types.js";
+import type { ChatMessage } from "../../../src/llm/types.js";
 
 export type LLMMessage = ChatMessage;
 

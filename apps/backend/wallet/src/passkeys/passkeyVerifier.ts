@@ -19,7 +19,7 @@ import type {
   PasskeyAccountMapping,
   ChallengeResult,
   VerificationResult,
-} from './types';
+} from './types.js';
 
 /** Redis key prefix for WebAuthn challenges */
 const CHALLENGE_PREFIX = 'webauthn_challenge:';
@@ -28,10 +28,10 @@ const CHALLENGE_PREFIX = 'webauthn_challenge:';
 const CHALLENGE_TTL_SECONDS = 300;
 
 /** Expected origin for WebAuthn verification (RP origin) */
-const RP_ORIGIN = process.env.WEBAUTHN_RP_ORIGIN ?? 'https://delego.app';
+export const RP_ORIGIN = process.env.WEBAUTHN_RP_ORIGIN ?? 'https://delego.app';
 
 /** RP ID for WebAuthn (domain name) */
-const RP_ID = process.env.WEBAUTHN_RP_ID ?? 'delego.app';
+export const RP_ID = process.env.WEBAUTHN_RP_ID ?? 'delego.app';
 
 export class PasskeyVerifier {
   constructor(
@@ -257,7 +257,7 @@ export class PasskeyVerifier {
    * In production, use @simplewebauthn/server's verifyAuthenticationResponse.
    */
   private async verifyWebAuthnAssertion(
-    payload: WebAuthnVerificationPayload,
+    _payload: WebAuthnVerificationPayload,
   ): Promise<boolean> {
     // Production implementation:
     //
