@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createTransactionHistoryRowStream, TRANSACTION_HISTORY_CSV_HEADERS } from "../services/transactionHistoryStream.js";
+import { streamCsvExport } from "../services/csvExportService.js";
 import { json, readBodyWithLimit } from "@delegolabs/utils";
 import { extractAuth } from "../../../gateway/middleware/auth.js";
 import { sendApiError, unauthorized } from "../../../gateway/src/errors.js";
@@ -363,6 +365,59 @@ export async function trackCustomEventHandler(req: IncomingMessage, res: ServerR
     const message = err instanceof Error ? err.message : "Failed to track event";
     sendApiError(res, 500, "INTERNAL_ERROR", message, req);
   }
+}
+
+/**
+ * GET /api/v1/analytics/export/transactions.csv
+ *
+ * Stream the transaction history as CSV directly to the HTTP response in
+ * chunks — Issue #395. The database is read one page at a time (keyset
+ * pagination) and rows are serialized on the fly, so memory stays flat even
+ * for 100k+ row exports.
+ *
+ * Query params (all optional):
+ *   userId      - Filter by user ID
+ *   templateId  - Filter by template ID
+ *   channel     - Filter by channel (email, push, sms, in-app)
+ *   eventType   - Filter by event type (sent, delivered, opened, ...)
+ *   periodStart - ISO-8601 lower bound on timestamp (inclusive)
+ *   periodEnd   - ISO-8601 upper bound on timestamp (inclusive)
+ *   pageSize    - DB page size (default 1000, max 5000)
+ *   maxRows     - Hard cap on exported rows
+ */
+export async function exportTransactionsCsvHandler(req: IncomingMessage, res: ServerResponse, _params: Record<string, string>): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) {
+    unauthorized(res, "Authentication required", req);
+    return;
+  }
+
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+  const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize")) || 1000, 1), 5000);
+  const maxRowsParam = url.searchParams.get("maxRows");
+  const maxRows = maxRowsParam ? Math.max(Number(maxRowsParam) || 0, 0) || undefined : undefined;
+
+  const queryStream = createTransactionHistoryRowStream({
+    pageSize,
+    ...(maxRows !== undefined ? { maxRows } : {}),
+    filters: {
+      userId: url.searchParams.get("userId") || undefined,
+      templateId: url.searchParams.get("templateId") || undefined,
+      channel: url.searchParams.get("channel") || undefined,
+      eventType: url.searchParams.get("eventType") || undefined,
+      periodStart: url.searchParams.get("periodStart") || undefined,
+      periodEnd: url.searchParams.get("periodEnd") || undefined,
+    },
+  });
+
+  // Fire-and-forget per the issue spec (`streamCsvExport(...): void`): the
+  // pipeline runs in the background; errors are logged and the response is
+  // torn down inside streamCsvExportAsync.
+  streamCsvExport(queryStream, res, {
+    headers: TRANSACTION_HISTORY_CSV_HEADERS,
+    filename: "transaction-history.csv",
+  });
 }
 
 /**

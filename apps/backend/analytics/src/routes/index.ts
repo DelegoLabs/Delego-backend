@@ -10,6 +10,7 @@ import {
   endABTestHandler,
   getCohortAnalysisHandler,
   trackCustomEventHandler,
+  exportTransactionsCsvHandler,
   exportDataHandler,
   getRevenueMetricsHandler,
 } from "./analyticsRoutes.js";
@@ -38,6 +39,8 @@ export function registerAnalyticsRoutes(): Route[] {
     route("GET", "/api/v1/analytics/revenue", getRevenueMetricsHandler),
 
     // Data export
+    // Issue #395: memory-efficient chunked CSV streaming of transaction history.
+    route("GET", "/api/v1/analytics/export/transactions.csv", exportTransactionsCsvHandler),
     route("POST", "/api/v1/analytics/export", exportDataHandler),
   ];
 }
