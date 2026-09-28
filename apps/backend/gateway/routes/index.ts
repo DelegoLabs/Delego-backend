@@ -22,7 +22,13 @@ import {
   revokeDelegationHandler,
 } from "./delegations.js";
 import { getWalletHandler } from "./wallets.js";
-import { rateLimitMetricsHandler, circuitBreakerStatusHandler, tieredRateLimitMetricsHandler } from "./admin.js";
+import {
+  rateLimitMetricsHandler,
+  circuitBreakerStatusHandler,
+  tieredRateLimitMetricsHandler,
+  emergencyBroadcastHandler,
+  emergencyStatusHandler,
+} from "./admin.js";
 import { auditLogQueryHandler, auditLogVerifyHandler } from "./audit.js";
 import { swaggerHandler } from "../src/swagger.js";
 import { logSearchHandler, logStatsHandler, logClearHandler } from "../src/logging/routes.js";
@@ -176,6 +182,9 @@ export function registerRoutes(): Route[] {
     // Admin — audit log query API (#66)
     route("GET", "/api/v1/admin/audit-log", auditLogQueryHandler),
     route("GET", "/api/v1/admin/audit-log/verify", auditLogVerifyHandler),
+    // Emergency Kill-Switch Broadcast API (#375)
+    route("POST", "/api/v1/admin/emergency/broadcast", emergencyBroadcastHandler),
+    route("GET", "/api/v1/admin/emergency/status", emergencyStatusHandler),
     // Swagger UI (#352)
     route("GET", "/api/docs", swaggerHandler),
     route("GET", "/api/docs/openapi.json", swaggerHandler),

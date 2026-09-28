@@ -12,6 +12,8 @@ import { openApiValidationMiddleware } from "../middleware/openApiValidation.js"
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
+import { killSwitchMiddleware } from "../middleware/killSwitch.js";
+import { getEmergencyKillSwitchService } from "./emergency/killSwitch.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -23,6 +25,11 @@ const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
 log.info("Starting gateway", { port, nodeEnv });
 
+// Start emergency kill-switch subscriber
+getEmergencyKillSwitchService().start().catch((err) => {
+  log.warn("Failed to initialize emergency kill-switch service", { error: err.message });
+});
+
 startHttpServer({
   port,
   serviceName: SERVICE_NAME,
@@ -30,6 +37,7 @@ startHttpServer({
     requestIdMiddleware(),
     corsMiddleware(),
     securityHeadersMiddleware(),
+    killSwitchMiddleware(),
     raspMiddleware(),
     // Version negotiation must run before auth and rate-limiting so that
     // sunset versions get 410 Gone before any further processing.
