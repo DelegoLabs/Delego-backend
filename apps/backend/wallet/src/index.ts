@@ -2,7 +2,7 @@
  * @delegolabs/wallet — Entry point
  * TODO: Implement service logic
  */
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, initTelemetry } from "@delegolabs/utils";
 import { startHttpServer, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
 import {
   SorobanTransactionSimulator,
@@ -15,6 +15,11 @@ const DEFAULT_PORT = 3012;
 const nodeEnv = process.env.NODE_ENV ?? "development";
 const logLevel = process.env.LOG_LEVEL ?? "info";
 const log = createLogger(SERVICE_NAME, logLevel);
+
+// Distributed tracing (Issue #307): enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+void initTelemetry(SERVICE_NAME).catch((err: unknown) =>
+  log.warn("Telemetry init failed", { error: err instanceof Error ? err.message : String(err) })
+);
 const port = Number(process.env.WALLET_PORT ?? DEFAULT_PORT);
 
 import { ServiceMetricsRegistry } from "@delegolabs/utils";
