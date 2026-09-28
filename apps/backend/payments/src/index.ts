@@ -9,6 +9,7 @@ import { startReconciliationScheduler } from "./reconciliation/settlementReconci
 import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
 import { startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
 import { startTimeoutRefundScheduler } from "./workers/timeoutRefund.js";
+import { startCarrierTrackingWorker } from "./webhooks/carrierWorker.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -181,6 +182,36 @@ if (process.env.ENABLE_SUBSCRIPTION_BILLING !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping subscription billing scheduler");
     stopBillingScheduler();
+  });
+}
+
+// ─── #291 Carrier Tracking Webhook Receiver ─────────────────────────────────
+
+export {
+  normalizeEasyPostEvent,
+  validateEasyPostPayload,
+  getCarrierWebhookSecret,
+  extractCarrierSignature,
+} from "./webhooks/carrierWebhook.js";
+export type {
+  CarrierTrackingStatus,
+  EasyPostTrackingDetail,
+  EasyPostTrackingWebhook,
+  NormalizedCarrierEvent,
+} from "./webhooks/carrierWebhook.js";
+export {
+  CARRIER_TRACKING_QUEUE_NAME,
+  enqueueCarrierEvent,
+  registerCarrierEventProcessor,
+} from "./webhooks/carrierQueue.js";
+export { processCarrierEvent, startCarrierTrackingWorker } from "./webhooks/carrierWorker.js";
+
+if (process.env.ENABLE_CARRIER_TRACKING_WORKER !== "false") {
+  const carrierWorker = startCarrierTrackingWorker();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping carrier tracking worker");
+    carrierWorker.stop();
   });
 }
 
