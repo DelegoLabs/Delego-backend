@@ -12,6 +12,7 @@ import { openApiValidationMiddleware } from "../middleware/openApiValidation.js"
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
+import { registerGracefulShutdown } from "./shutdown.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -23,7 +24,7 @@ const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
 log.info("Starting gateway", { port, nodeEnv });
 
-startHttpServer({
+const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
   middleware: [
@@ -44,3 +45,5 @@ startHttpServer({
   ],
   routes: registerRoutes(),
 });
+
+registerGracefulShutdown(server);
