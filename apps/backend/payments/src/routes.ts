@@ -1,5 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { route, json, createHealthRoutes, readBodyWithLimit, PayloadTooLargeError, type Route } from "@delegolabs/utils";
+import {
+  route,
+  json,
+  createHealthRoutes,
+  readBodyWithLimit,
+  PayloadTooLargeError,
+  requireServiceAuth,
+  type Route,
+} from "@delegolabs/utils";
 import { escrowService } from "../escrow/index.js";
 import { getPaymentsHealth } from "../escrow/health.js";
 import { createPaymentsHealthRegistry } from "./health.js";
@@ -110,6 +118,9 @@ import {
 import { CircuitBreakerOpenError } from "./exchangeRate/circuitBreaker.js";
 
 const paymentsHealthRegistry = createPaymentsHealthRegistry();
+const requireOrchestratorServiceAuth = requireServiceAuth({
+  envVar: "ORCHESTRATOR_PAYMENTS_SERVICE_TOKEN",
+});
 
 // Body is capped at 1MB (see readBodyWithLimit) — an oversized body rejects
 // with PayloadTooLargeError, which callers handle by responding 413.
@@ -301,6 +312,22 @@ export function registerRoutes(): Route[] {
     }),
 
     route("POST", "/escrow/deposit", async (req, res) => {
+      let serviceAuthenticated = false;
+      requireOrchestratorServiceAuth(req, res, () => {
+        serviceAuthenticated = true;
+      });
+      if (!serviceAuthenticated) return;
+
+      const authenticatedUserId = req.headers["x-delego-user-id"];
+      if (typeof authenticatedUserId !== "string" || authenticatedUserId.trim().length === 0) {
+        sendValidationError(res, {
+          code: "VALIDATION_ERROR",
+          message: "X-Delego-User-Id header is required",
+        });
+        return;
+      }
+      (req as IncomingMessage & { userId?: string }).userId = authenticatedUserId;
+
       let lockedOrderId: string | undefined;
       try {
         const idempotency = validateIdempotencyKey(req.headers as Record<string, string | string[] | undefined>, "/escrow/deposit");
@@ -332,7 +359,10 @@ export function registerRoutes(): Route[] {
           }
         }
 
-        const result = await escrowService.deposit(validated.value);
+        const result = await escrowService.deposit({
+          ...validated.value,
+          userId: (req as IncomingMessage & { userId?: string }).userId,
+        });
         json(res, 200, { data: result, error: null });
       } catch (err) {
         if (err instanceof PayloadTooLargeError) {

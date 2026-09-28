@@ -7,8 +7,10 @@ import {
   createHealthRoutes,
   readBodyWithLimit,
   PayloadTooLargeError,
+  requireServiceAuth,
   type Route,
 } from "@delegolabs/utils";
+import { Wallet } from "./models/Wallet.js";
 import { createWalletHealthRegistry } from "./health.js";
 import { accountService } from "../stellar/account.js";
 import { mergeAccount, previewMerge } from "../stellar/recovery.js";
@@ -42,6 +44,9 @@ import { registerFeeEstimatorRoutes } from "./feeEstimator/routes.js";
 const log = createLogger("wallet:routes", process.env.LOG_LEVEL ?? "info");
 
 const walletHealthRegistry = createWalletHealthRegistry();
+const requirePaymentsServiceAuth = requireServiceAuth({
+  envVar: "PAYMENTS_WALLET_SERVICE_TOKEN",
+});
 
 interface TokenBalance {
   assetCode: string;
@@ -274,6 +279,12 @@ export function registerRoutes(
 
     // Sign and submit a transaction to Soroban
     route("POST", "/transactions/submit", async (req, res) => {
+      let serviceAuthenticated = false;
+      requirePaymentsServiceAuth(req, res, () => {
+        serviceAuthenticated = true;
+      });
+      if (!serviceAuthenticated) return;
+
       try {
         const body = await readJsonBody<{
           sourceAddress: string;
@@ -295,12 +306,62 @@ export function registerRoutes(
           throw new Error("Malformed Stellar public key address");
         }
 
+        let userId: string | undefined;
+        let walletId: string | undefined;
+        if (body.method === "create_escrow") {
+          const escrowContractId = process.env.ESCROW_CONTRACT_ID;
+          if (!escrowContractId?.trim()) {
+            json(res, 503, {
+              data: null,
+              error: { code: "SERVICE_CONFIGURATION_ERROR", message: "Escrow contract is not configured" },
+            });
+            return;
+          }
+          if (body.contractId !== escrowContractId) {
+            json(res, 403, {
+              data: null,
+              error: { code: "FORBIDDEN", message: "Checkout submission uses an unrecognized escrow contract" },
+            });
+            return;
+          }
+
+          const authenticatedUserId = req.headers["x-delego-user-id"];
+          if (typeof authenticatedUserId !== "string" || authenticatedUserId.trim().length === 0) {
+            json(res, 401, {
+              data: null,
+              error: { code: "UNAUTHORIZED", message: "X-Delego-User-Id header is required for checkout deposit" },
+            });
+            return;
+          }
+
+          const wallet = await Wallet.findOne({
+            where: { stellarAddress: body.sourceAddress },
+          });
+          if (!wallet) {
+            json(res, 404, {
+              data: null,
+              error: { code: "WALLET_NOT_FOUND", message: "Source wallet not found" },
+            });
+            return;
+          }
+          if (wallet.userId !== authenticatedUserId) {
+            json(res, 403, {
+              data: null,
+              error: { code: "FORBIDDEN", message: "Source wallet is not owned by the authenticated user" },
+            });
+            return;
+          }
+          userId = authenticatedUserId;
+          walletId = wallet.id;
+        }
+
         const txResult = await transactionService.submit({
           sourceAddress: body.sourceAddress,
           contractId: body.contractId,
           method: body.method,
           args: body.args,
           memo: body.memo ?? "Submitting transaction",
+          ...(userId ? { userId, walletId } : {}),
         });
 
         json(res, 200, { data: txResult, error: null });
