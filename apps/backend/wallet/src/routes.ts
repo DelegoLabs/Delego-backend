@@ -24,6 +24,11 @@ import {
 } from "@stellar/stellar-sdk";
 import { getRedisConnection, getJobStatus } from "./queue/txQueue.js";
 import { createLogger } from "@delegolabs/utils";
+import {
+  SorobanTransactionSimulator,
+  mapSimulationResult,
+  readSorobanRpcConfig,
+} from "./sorobanSimulator.js";
 import { registerMultiSigRoutes } from "./multisig/routes.js";
 import { registerRecoveryRoutes } from "./recovery/routes.js";
 import { registerBatchingRoutes } from "./batching/routes.js";
@@ -114,7 +119,9 @@ function respondIfPayloadTooLarge(res: Parameters<typeof json>[0], err: unknown)
   return false;
 }
 
-export function registerRoutes(): Route[] {
+export function registerRoutes(
+  simulator = new SorobanTransactionSimulator(readSorobanRpcConfig()),
+): Route[] {
   const validateAddress = validatePublicKeyMiddleware("address");
 
   return [
@@ -122,6 +129,45 @@ export function registerRoutes(): Route[] {
       registry: walletHealthRegistry,
       serviceName: "wallet",
       version: "0.0.1",
+    }),
+
+    route("POST", "/wallets/simulate", async (req, res) => {
+      try {
+        const body = await readJsonBody<{ xdr?: string; network?: string }>(req);
+        if (typeof body.xdr !== "string" || body.xdr.trim() === "") {
+          throw new Error("A transaction XDR string is required");
+        }
+        const network = (body.network ?? "testnet").toLowerCase();
+        if (network !== "testnet" && network !== "mainnet") {
+          throw new Error("Network must be either testnet or mainnet");
+        }
+
+        let transaction: Transaction;
+        try {
+          transaction = TransactionBuilder.fromXDR(
+            body.xdr,
+            network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET,
+          ) as Transaction;
+          if (!(transaction instanceof Transaction)) {
+            throw new Error("Fee-bump transactions are not supported by this endpoint");
+          }
+        } catch (err) {
+          throw new Error(`Invalid transaction XDR: ${err instanceof Error ? err.message : "Unable to parse payload"}`);
+        }
+
+        const simulation = await simulator.simulateTransaction(transaction);
+        json(res, 200, { data: mapSimulationResult(simulation), error: null });
+      } catch (err: any) {
+        if (respondIfPayloadTooLarge(res, err)) return;
+        const message = err instanceof Error ? err.message : "Transaction simulation failed";
+        const status = message.startsWith("Invalid transaction XDR:") ||
+          message === "A transaction XDR string is required" ||
+          message.startsWith("Network must be") ? 400 : 502;
+        json(res, status, {
+          data: null,
+          error: { code: status === 400 ? "INVALID_XDR" : "SIMULATION_FAILED", message },
+        });
+      }
     }),
 
     // Create new Stellar wallet (Master or Delegate keypair)
