@@ -22,11 +22,24 @@ import {
   revokeDelegationHandler,
 } from "./delegations.js";
 import { getWalletHandler } from "./wallets.js";
-import { rateLimitMetricsHandler, circuitBreakerStatusHandler, tieredRateLimitMetricsHandler } from "./admin.js";
+import {
+  rateLimitMetricsHandler,
+  circuitBreakerStatusHandler,
+  tieredRateLimitMetricsHandler,
+} from "./admin.js";
 import { auditLogQueryHandler, auditLogVerifyHandler } from "./audit.js";
 import { swaggerHandler } from "../src/swagger.js";
-import { logSearchHandler, logStatsHandler, logClearHandler } from "../src/logging/routes.js";
-import { raspMetricsHandler, raspEventsHandler, raspSimulationHandler, raspFalsePositiveHandler } from "./rasp.js";
+import {
+  logSearchHandler,
+  logStatsHandler,
+  logClearHandler,
+} from "../src/logging/routes.js";
+import {
+  raspMetricsHandler,
+  raspEventsHandler,
+  raspSimulationHandler,
+  raspFalsePositiveHandler,
+} from "./rasp.js";
 import {
   createApiKeyHandler,
   listApiKeysHandler,
@@ -86,11 +99,10 @@ import { registerPaymentRoutes } from "./payment.js";
 import { registerRecoveryRoutes } from "./recovery.js";
 import { registerMultiCurrencyRoutes } from "./multi-currency.js";
 import { registerStorefrontRoutes } from "./storefront.js";
+import { updateMerchantProfileHandler } from "./merchantProfile.js";
 import { registerStorageRoutes } from "./storage.js";
 import { registerDisputeRoutes } from "./disputes.js";
 import { searchProductsHandler } from "../src/search/routes.js";
-
-
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
   return [
@@ -124,7 +136,11 @@ export function registerRoutes(): Route[] {
     // Admin â€" rate-limit dashboard (#340)
     route("GET", "/api/v1/admin/rate-limit/metrics", rateLimitMetricsHandler),
     // Admin — tiered token-bucket rate-limit metrics (#51)
-    route("GET", "/api/v1/admin/rate-limit/tiered-metrics", tieredRateLimitMetricsHandler),
+    route(
+      "GET",
+      "/api/v1/admin/rate-limit/tiered-metrics",
+      tieredRateLimitMetricsHandler,
+    ),
     // Admin — circuit breaker status (#364)
     route("GET", "/api/v1/admin/circuit-breakers", circuitBreakerStatusHandler),
     // Request/response logging (#151)
@@ -135,7 +151,11 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/admin/rasp/metrics", raspMetricsHandler),
     route("GET", "/api/v1/admin/rasp/events", raspEventsHandler),
     route("POST", "/api/v1/admin/rasp/simulate", raspSimulationHandler),
-    route("POST", "/api/v1/admin/rasp/false-positive", raspFalsePositiveHandler),
+    route(
+      "POST",
+      "/api/v1/admin/rasp/false-positive",
+      raspFalsePositiveHandler,
+    ),
     // API key scoping (#152)
     route("POST", "/api/v1/api-keys", createApiKeyHandler),
     route("GET", "/api/v1/api-keys", listApiKeysHandler),
@@ -159,7 +179,11 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/monitoring/schedules/:id", getScheduleHandler),
     route("PATCH", "/api/v1/monitoring/schedules/:id", updateScheduleHandler),
     route("DELETE", "/api/v1/monitoring/schedules/:id", deleteScheduleHandler),
-    route("GET", "/api/v1/monitoring/schedules/:id/oncall", getCurrentOnCallHandler),
+    route(
+      "GET",
+      "/api/v1/monitoring/schedules/:id/oncall",
+      getCurrentOnCallHandler,
+    ),
     route("POST", "/api/v1/monitoring/policies", createPolicyHandler),
     route("GET", "/api/v1/monitoring/policies", listPoliciesHandler),
     route("GET", "/api/v1/monitoring/policies/:id", getPolicyHandler),
@@ -167,11 +191,19 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/monitoring/routes", listRoutesHandler),
     route("POST", "/api/v1/monitoring/alerts", createAlertHandler),
     route("GET", "/api/v1/monitoring/alerts", listAlertsHandler),
-    route("POST", "/api/v1/monitoring/alerts/:id/acknowledge", acknowledgeAlertHandler),
+    route(
+      "POST",
+      "/api/v1/monitoring/alerts/:id/acknowledge",
+      acknowledgeAlertHandler,
+    ),
     route("POST", "/api/v1/monitoring/alerts/:id/resolve", resolveAlertHandler),
     route("POST", "/api/v1/monitoring/channels", createChannelHandler),
     route("GET", "/api/v1/monitoring/channels", listChannelsHandler),
-    route("POST", "/api/v1/monitoring/notifications/send", sendNotificationHandler),
+    route(
+      "POST",
+      "/api/v1/monitoring/notifications/send",
+      sendNotificationHandler,
+    ),
     route("GET", "/api/v1/monitoring/dashboard", monitoringDashboardHandler),
     // Admin — audit log query API (#66)
     route("GET", "/api/v1/admin/audit-log", auditLogQueryHandler),
@@ -191,13 +223,27 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/templates/:id", getTemplateHandler),
     route("GET", "/api/v1/templates/:id/versions", listTemplateVersionsHandler),
     route("DELETE", "/api/v1/templates/:id", deleteTemplateHandler),
-    route("POST", "/api/v1/templates/:id/deprecate", deprecateTemplateVersionHandler),
-    route("POST", "/api/v1/templates/:id/instantiate", instantiateTemplateHandler),
+    route(
+      "POST",
+      "/api/v1/templates/:id/deprecate",
+      deprecateTemplateVersionHandler,
+    ),
+    route(
+      "POST",
+      "/api/v1/templates/:id/instantiate",
+      instantiateTemplateHandler,
+    ),
     route("POST", "/api/v1/templates/:id/rate", rateTemplateHandler),
     route("POST", "/api/v1/templates/:id/test", testTemplateHandler),
     route("GET", "/api/v1/templates/:id/docs", templateDocumentationHandler),
     // Storefront - merchant product catalog (Issue #112)
     ...registerStorefrontRoutes(),
+    // Merchant profile updates (#360)
+    route(
+      "PATCH",
+      "/api/v1/merchants/:merchantId",
+      updateMerchantProfileHandler,
+    ),
     // Storage - pre-signed URLs for uploads (Issue #112)
     ...registerStorageRoutes(),
     // Disputes - merchant response endpoint (Issue #112)
