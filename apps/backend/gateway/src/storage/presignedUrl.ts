@@ -114,7 +114,7 @@ export function validatePresignedUrlRequestOrThrow(
  * Get S3 client with configured credentials.
  */
 export function getS3Client(): S3Client {
-  const config: Parameters<typeof S3Client>[0] = {
+  const config: any = {
     region: REGION,
     credentials: {
       accessKeyId: ACCESS_KEY_ID || "dummy-access-key",

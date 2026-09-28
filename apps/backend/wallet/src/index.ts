@@ -74,6 +74,22 @@ try {
   log.error("Failed to initialize transaction DLQ", { error: (err as Error).message });
 }
 
+// Issue #364: Initialize and start dynamic fee estimator periodic polling
+let dynamicFeeEstimator: import("./feeEstimator/dynamicFeeEstimator.js").DynamicFeeEstimator | null = null;
+try {
+  const redis = getRedisConnection();
+  const horizonUrl =
+    process.env.STELLAR_NETWORK === "mainnet"
+      ? (process.env.STELLAR_HORIZON_URL ?? "https://horizon.stellar.org")
+      : (process.env.STELLAR_HORIZON_URL ?? "https://horizon-testnet.stellar.org");
+  const { DynamicFeeEstimator } = await import("./feeEstimator/dynamicFeeEstimator.js");
+  dynamicFeeEstimator = new DynamicFeeEstimator(redis, horizonUrl);
+  dynamicFeeEstimator.start();
+  log.info("Dynamic fee estimator started");
+} catch (err) {
+  log.error("Failed to start dynamic fee estimator", { error: (err as Error).message });
+}
+
 // ─── Graceful Shutdown ─────────────────────────────────────────────────────
 
 async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
@@ -83,6 +99,16 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
   server.close(() => {
     log.info("HTTP server closed");
   });
+
+  // Stop dynamic fee estimator polling
+  try {
+    if (dynamicFeeEstimator) {
+      dynamicFeeEstimator.stop();
+      log.info("Dynamic fee estimator stopped");
+    }
+  } catch (err) {
+    log.error("Error stopping dynamic fee estimator", { error: (err as Error).message });
+  }
 
   // Drain batch flush timers
   try {

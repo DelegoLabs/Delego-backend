@@ -13,7 +13,7 @@ import { Redis } from "ioredis";
 import { createLogger, type Logger } from "@delegolabs/utils";
 import { Horizon, Asset, TransactionBuilder, Operation, Keypair, Networks } from "@stellar/stellar-sdk";
 
-const log = createLogger("wallet:faucetRelayer", process.env.LOG_LEVEL ?? "info");
+// Faucet relayer
 
 // ---------------------------------------------------------------------------
 // Types (matching issue spec)
@@ -115,7 +115,6 @@ export class FaucetRateLimiter {
 // ---------------------------------------------------------------------------
 
 export class FaucetRelayer {
-  private redis: Redis;
   private rateLimiter: FaucetRateLimiter;
   private log: Logger;
   private horizonUrl: string;
@@ -128,7 +127,6 @@ export class FaucetRelayer {
       logger?: Logger;
     },
   ) {
-    this.redis = redis;
     this.rateLimiter = options?.rateLimiter ?? new FaucetRateLimiter(redis);
     this.horizonUrl = options?.horizonUrl ?? HORIZON_TESTNET_URL;
     this.log = options?.logger ?? createLogger("wallet:faucetRelayer", process.env.LOG_LEVEL ?? "info");
