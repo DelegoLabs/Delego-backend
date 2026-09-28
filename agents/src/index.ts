@@ -10,16 +10,22 @@ export {
   OpenAIClient,
   AnthropicClient,
   GeminiClient,
+  FailoverLLMClient,
   createLLMClient,
   createDefaultLLMClient,
+  createFailoverLLMClient,
+  resolveFallbackChain,
 } from "./llm/index.js";
 export type {
   LLMClient,
   LLMRequestOptions,
   LLMResponse,
   LLMProviderName,
+  LLMProviderMetrics,
   LLMToolDefinition,
   LLMToolCallResponse,
+  LlmProvider,
+  LlmRequestOptions,
 } from "./llm/index.js";
 
 // Issue #262: Tool execution registry
