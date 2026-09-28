@@ -16,6 +16,16 @@ export { InvalidPartialRefundAmountError, executePartialRefund, type PartialRefu
 
 export { findAndEscalateBreachedDisputes, startSlaEscalationScheduler, type SlaEscalationResult } from "./slaEscalation.js";
 
+// Issue #403 — Automated dispute escalation worker for stalled arbitrations
+export {
+  DEFAULT_STALLED_HOURS,
+  findAndEscalateStalledDisputes,
+  startDisputeEscalationWorker,
+  type DisputeEscalationResult,
+  type DisputeEscalationRule,
+  type DisputeEscalationWorkerOptions,
+} from "./escalationWorker.js";
+
 export {
   enablePostgresDisputeStore,
   getDisputeStore,
@@ -69,6 +79,7 @@ export type {
   DisputeEvidenceInput,
   DisputeResolution,
   DisputeStatus,
+  DisputeTier,
   MediationDecision,
   PartialRefundRequest,
   ResolutionType,
