@@ -15,6 +15,15 @@ import {
   jwksHandler,
 } from "./auth.js";
 import {
+  beginRegistrationHandler,
+  completeRegistrationHandler,
+  beginAuthenticationHandler,
+  completeAuthenticationHandler,
+  listPasskeysHandler,
+  renamePasskeyHandler,
+  deletePasskeyHandler,
+} from "./passkeys.js";
+import {
   createDelegationHandler,
   listDelegationsHandler,
   getDelegationHandler,
@@ -128,6 +137,14 @@ export function registerRoutes(): Route[] {
     route("GET", "/.well-known/jwks.json", jwksHandler),
     route("GET", "/api/v1/auth/oauth/authorize", oauthAuthorizeHandler),
     route("POST", "/api/v1/auth/oauth/callback", oauthCallbackHandler),
+    // Passkey / WebAuthn (#367)
+    route("POST", "/api/v1/auth/passkeys/register/begin", beginRegistrationHandler),
+    route("POST", "/api/v1/auth/passkeys/register/complete", completeRegistrationHandler),
+    route("POST", "/api/v1/auth/passkeys/authenticate/begin", beginAuthenticationHandler),
+    route("POST", "/api/v1/auth/passkeys/authenticate/complete", completeAuthenticationHandler),
+    route("GET", "/api/v1/auth/passkeys", listPasskeysHandler),
+    route("PATCH", "/api/v1/auth/passkeys/:credentialId", renamePasskeyHandler),
+    route("DELETE", "/api/v1/auth/passkeys/:credentialId", deletePasskeyHandler),
     route("POST", "/api/v1/delegations", createDelegationHandler),
     route("GET", "/api/v1/delegations", listDelegationsHandler),
     route("GET", "/api/v1/delegations/:id", getDelegationHandler),

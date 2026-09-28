@@ -6,8 +6,8 @@ import { DelegationPolicy } from "./DelegationPolicy.js";
 import { PermissionLevel } from "./PermissionLevel.js";
 import { RefreshToken } from "./RefreshToken.js";
 import { OAuthAccount } from "./OAuthAccount.js";
-import { Merchant } from "./Merchant.js";
-import { Product } from "./Product.js";
+import { PasskeyCredential } from "./PasskeyCredential.js";
+import { PasskeyChallenge } from "./PasskeyChallenge.js";
 
 // User <-> Wallet (One-to-Many)
 User.hasMany(Wallet, { foreignKey: "userId", as: "wallets" });
@@ -28,6 +28,10 @@ RefreshToken.belongsTo(User, { foreignKey: "userId", as: "user" });
 // User <-> OAuthAccount (One-to-Many)
 User.hasMany(OAuthAccount, { foreignKey: "userId", as: "oauthAccounts" });
 OAuthAccount.belongsTo(User, { foreignKey: "userId", as: "user" });
+
+// User <-> PasskeyCredential (One-to-Many) — Issue #367
+User.hasMany(PasskeyCredential, { foreignKey: "userId", as: "passkeys" });
+PasskeyCredential.belongsTo(User, { foreignKey: "userId", as: "user" });
 
 // Wallet <-> SpendLimit (One-to-Many)
 Wallet.hasMany(SpendLimit, { foreignKey: "walletId", as: "spendLimits" });
@@ -62,6 +66,6 @@ export {
   PermissionLevel,
   RefreshToken,
   OAuthAccount,
-  Merchant,
-  Product,
+  PasskeyCredential,
+  PasskeyChallenge,
 };
