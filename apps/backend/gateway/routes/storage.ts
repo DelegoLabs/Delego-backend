@@ -5,12 +5,11 @@
  * and dispute evidence directly to Cloudflare R2 / AWS S3.
  */
 
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Route, RouteHandler } from "@delegolabs/utils";
 import { json, createLogger, route } from "@delegolabs/utils";
 import { generatePresignedUrl, checkStorageConfig } from "../src/storage/index.js";
 import { readJsonBody } from "../src/request.js";
-import type { PresignedUrlRequest, PresignedUrlResponse } from "../src/storage/index.js";
+import type { PresignedUrlRequest } from "../src/storage/index.js";
 
 const log = createLogger("gateway:storage", process.env.LOG_LEVEL ?? "info");
 

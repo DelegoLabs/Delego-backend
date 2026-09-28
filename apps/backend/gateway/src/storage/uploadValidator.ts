@@ -10,7 +10,6 @@ import {
   S3Client,
   GetObjectCommand,
   DeleteObjectCommand,
-  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import {
   createLogger,
