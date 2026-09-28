@@ -9,6 +9,7 @@ import { startReconciliationScheduler } from "./reconciliation/settlementReconci
 import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
 import { startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
 import { startTimeoutRefundScheduler } from "./workers/timeoutRefund.js";
+import { startRateRefreshScheduler } from "./exchangeRate/index.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -192,6 +193,17 @@ if (process.env.ENABLE_TIMEOUT_REFUND_WORKER !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping timeout refund scheduler");
     timeoutRefundScheduler.stop();
+  });
+}
+
+// ─── #379 Automated Currency Conversion Rate Cache ──────────────────────────
+
+if (process.env.ENABLE_EXCHANGE_RATE_CACHE !== "false") {
+  const rateRefreshScheduler = startRateRefreshScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping exchange rate refresh scheduler");
+    rateRefreshScheduler.stop();
   });
 }
 

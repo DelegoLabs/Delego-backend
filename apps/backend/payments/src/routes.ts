@@ -67,6 +67,13 @@ import {
   validateCreateSubscriptionRequest,
   validateRenewRequest,
 } from "./subscriptions/validation.js";
+import {
+  getExchangeRate,
+  getExchangeRateHealth,
+  refreshRate,
+  ExchangeRateUnavailableError,
+} from "./exchangeRate/index.js";
+import { CircuitBreakerOpenError } from "./exchangeRate/circuitBreaker.js";
 
 const paymentsHealthRegistry = createPaymentsHealthRegistry();
 
@@ -943,6 +950,49 @@ export function registerRoutes(): Route[] {
           error: { code: "TIMEOUT_REFUND_SWEEP_FAILED", message },
         });
       }
+    }),
+
+    // ─── Issue #379 — Automated Currency Conversion Rate Cache ─────────────
+    // Fresh rates come from the Redis cache; when the oracle is unreachable
+    // the cache serves the last known good rate (stale: true) instead of
+    // erroring, per the Issue #379 fallback requirement.
+    route("GET", "/exchange-rates/:base/:quote", async (_req, res, params) => {
+      try {
+        const rate = await getExchangeRate(params.base, params.quote);
+        json(res, 200, { data: rate, error: null });
+      } catch (err) {
+        if (err instanceof ExchangeRateUnavailableError) {
+          json(res, 503, {
+            data: null,
+            error: { code: "EXCHANGE_RATE_UNAVAILABLE", message: err.message },
+          });
+          return;
+        }
+        sendOperationError(res, "EXCHANGE_RATE_FETCH_FAILED", err);
+      }
+    }),
+
+    // On-demand refresh — bypasses the cache read path and calls the oracle
+    // directly (circuit-breaker protected). 502 when the oracle/circuit is down.
+    route("POST", "/exchange-rates/:base/:quote/refresh", async (_req, res, params) => {
+      try {
+        const record = await refreshRate(params.base, params.quote);
+        json(res, 200, { data: record, error: null });
+      } catch (err) {
+        if (err instanceof CircuitBreakerOpenError) {
+          json(res, 503, {
+            data: null,
+            error: { code: "RATE_ORACLE_CIRCUIT_OPEN", message: err.message },
+          });
+          return;
+        }
+        sendOperationError(res, "EXCHANGE_RATE_REFRESH_FAILED", err);
+      }
+    }),
+
+    // Circuit breaker stats + cache hit/miss/fallback metrics in one snapshot.
+    route("GET", "/exchange-rates/health", async (_req, res) => {
+      json(res, 200, { data: getExchangeRateHealth(), error: null });
     }),
   ];
 }
