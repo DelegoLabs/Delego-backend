@@ -7,7 +7,6 @@ import {
   json,
   route,
   startHttpServer,
-  createHealthRoutes,
   corsMiddleware,
   securityHeadersMiddleware,
   requireAuth,
@@ -15,7 +14,7 @@ import {
 import { Pool } from "pg";
 import { Redis } from "ioredis";
 import { getCacheClient } from "@delegolabs/cache";
-import { createOrchestratorHealthRegistry } from "./health.js";
+import { createOrchestratorHealthRoutes } from "./health.js";
 import {
   createWorkflow,
   transitionWorkflow,
@@ -53,7 +52,6 @@ const port = Number(process.env.ORCHESTRATOR_PORT ?? DEFAULT_PORT);
 const sagaStore = new PostgresSagaStore();
 let lockManager: DistributedLockManager | null = null;
 let checkoutSagaCoordinator: SagaCoordinator<CheckoutContext> = createCheckoutSagaCoordinator(sagaStore);
-const orchestratorHealthRegistry = createOrchestratorHealthRegistry();
 
 // ─── #33 Transactional Outbox Relay ──────────────────────────────────────────
 // Backs service_event_outbox writes (see workflows/purchase/index.ts transitionWorkflow)
@@ -459,12 +457,10 @@ async function main(): Promise<void> {
     serviceName: SERVICE_NAME,
     middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth()],
     routes: [
-      ...createHealthRoutes({
-        registry: orchestratorHealthRegistry,
-        serviceName: SERVICE_NAME,
-        version: "0.0.1",
-        extraMetrics: () => lockManager?.metrics.toPrometheusText() ?? "",
-      }),
+      ...createOrchestratorHealthRoutes(
+        undefined,
+        () => lockManager?.metrics.toPrometheusText() ?? "",
+      ),
       ...(lockManager ? createLockRoutes(lockManager) : []),
 
       ...createTaskRoutes(taskService, taskStore),
@@ -728,4 +724,3 @@ export { publishWorkflowEvent, createWorkflowCorrelationId } from "./workflow-ev
 export type { WorkflowEventEnvelope } from "./workflow-events.js";
 export { PurchaseWorkflowMachine } from "../state/index.js";
 export type { PurchaseState, PurchaseEvent } from "../state/index.js";
-
