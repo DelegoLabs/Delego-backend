@@ -91,6 +91,13 @@ export {
 // ─── #45 Escrow Auto-Release on Delivery Confirmation ──────────────────────
 
 export { adminOverrideRelease, executeAutoRelease, handleDeliveryConfirmation } from "./autoRelease/service.js";
+
+// ─── #369 Automated Oracle Delivery Receipt Signing ────────────────────────
+
+export { signDeliveryReceipt, verifyDeliveryReceipt } from "./oracle/service.js";
+export { getOracleSigner, getOracleSignerConfig, resetOracleSigner } from "./oracle/config.js";
+export { registerOracleRoutes } from "./oracle/routes.js";
+export type { OracleDeliveryReceiptInput, OracleSignedDeliveryReceipt, OracleSubmitReceiptResult } from "./oracle/types.js";
 export { getAutoReleaseConfig, setAutoReleaseConfig } from "./autoRelease/configStore.js";
 export { verifyWebhookSignature } from "./autoRelease/hmac.js";
 export type {

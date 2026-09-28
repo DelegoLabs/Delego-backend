@@ -7,6 +7,7 @@ import { handleDeliveryConfirmationWebhook } from "../escrow/autoSettlement.js";
 import { getWebhookSecret, verifyWebhookSignature, WEBHOOK_SIGNATURE_HEADER } from "./autoRelease/hmac.js";
 import { handleDeliveryConfirmation } from "./autoRelease/service.js";
 import { EscrowDisputedError, EscrowNotReleasableError } from "./autoRelease/types.js";
+import { registerOracleRoutes } from "./oracle/routes.js";
 import { ContractInvocationError } from "../escrow/errors.js";
 import { settleOrder, refundOrder } from "../settlement/index.js";
 import { getEscrowFundingLockManager } from "./escrowCoordinator/escrowFundingLock.js";
@@ -212,6 +213,7 @@ async function ensureContractConfig(res: ServerResponse): Promise<boolean> {
 
 export function registerRoutes(): Route[] {
   return [
+    ...registerOracleRoutes(),
     ...createHealthRoutes({
       registry: paymentsHealthRegistry,
       serviceName: "payments",
