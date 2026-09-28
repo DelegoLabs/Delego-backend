@@ -16,6 +16,7 @@ import { metricsMiddleware } from "./metrics.js";
 import { killSwitchMiddleware } from "../middleware/killSwitch.js";
 import { getEmergencyKillSwitchService } from "./emergency/killSwitch.js";
 import { registerGracefulShutdown } from "./shutdown.js";
+import { startMetricsSampling, adaptiveRateLimitingMiddleware } from "./rateLimit/adaptive.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -37,6 +38,8 @@ getEmergencyKillSwitchService().start().catch((err) => {
   log.warn("Failed to initialize emergency kill-switch service", { error: err.message });
 });
 
+startMetricsSampling();
+
 const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
@@ -54,6 +57,7 @@ const server = startHttpServer({
     openApiValidationMiddleware({
       validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
     }),
+    adaptiveRateLimitingMiddleware(),
     rateLimitMiddleware(),
     compressionMiddleware(),
     requestResponseLoggingMiddleware(),

@@ -25,3 +25,4 @@ startHttpServer({
 export { checkRateLimit } from './rateLimiter.js';
 export { getRedisClient, disconnectRedis } from './redisClient.js';
 export { getRateLimitConfig } from './config.js';
+export * from './adaptive.js';
