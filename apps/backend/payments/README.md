@@ -109,6 +109,16 @@ SHIPPING_STALLED_MOVEMENT_DAYS=7
 SHIPPING_ETA_GRACE_BUSINESS_DAYS=10
 # Scan interval in seconds (default: 86400 = daily)
 SHIPPING_EXCEPTION_SCAN_INTERVAL_SECONDS=86400
+
+# Currency conversion rate cache (Issue #379)
+EXCHANGE_RATE_CACHE_TTL_SECONDS=300
+EXCHANGE_RATE_STALE_TTL_SECONDS=86400
+EXCHANGE_RATE_REFRESH_INTERVAL_SECONDS=300
+EXCHANGE_RATE_PAIRS=USD/XLM,EUR/XLM,USD/BTC,USD/ETH,USD/USDC
+EXCHANGE_RATE_CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+EXCHANGE_RATE_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_MS=30000
+EXCHANGE_RATE_CIRCUIT_BREAKER_HALF_OPEN_SUCCESS=2
+ENABLE_EXCHANGE_RATE_CACHE=true
 ```
 
 ## Architecture
@@ -122,4 +132,25 @@ SHIPPING_EXCEPTION_SCAN_INTERVAL_SECONDS=86400
 - **src/**: Core payment service logic and HTTP route handlers
   - `validation.ts`: Escrow funding lock definitions (`acquireLock`, `releaseLock`, `EscrowFundingLock`) and payload validators
   - `routes.ts`: Payment routes with 409 `DUPLICATE_FUNDING_REQUEST` concurrency protections
+
+### Currency Conversion Rate Cache with Circuit Breaker (Issue #379)
+
+Caches fiat-to-crypto exchange rates in Redis with automatic fallback to
+last known good rates when the rate oracle API is unreachable.
+
+- **Redis-backed cache**: each pair is stored twice —
+  `exchange:rate:<BASE>:<QUOTE>` (fresh copy, short TTL) and
+  `exchange:rate:last-good:<BASE>:<QUOTE>` (stale fallback copy, long TTL).
+- **Circuit breaker**: oracle refreshes run through
+  `src/exchangeRate/circuitBreaker.ts` (closed → open → half-open, same
+  pattern as the Soroban RPC breaker); an open circuit short-circuits
+  oracle calls instead of stalling reads.
+- **Stale fallback**: when the oracle fails (or the circuit is open) reads
+  degrade to the last known good rate, flagged `stale: true`, rather than
+  erroring — payments keep working through oracle outages.
+- **Background refresh**: `startRateRefreshScheduler()` keeps the configured
+  `EXCHANGE_RATE_PAIRS` warm on `EXCHANGE_RATE_REFRESH_INTERVAL_SECONDS`.
+- **HTTP API**: `GET /exchange-rates/:base/:quote`,
+  `POST /exchange-rates/:base/:quote/refresh`,
+  `GET /exchange-rates/health`.
 
