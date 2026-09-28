@@ -37,6 +37,7 @@ import { registerSimulationCacheAdminRoutes } from "./batching/simulationCacheAd
 import { registerDLQAdminRoutes } from "./batching/dlqAdminRoutes.js";
 import { registerAssetRoutes } from "./assets/routes.js";
 import { registerFaucetRoutes } from "./faucet/routes.js";
+import { registerFeeEstimatorRoutes } from "./feeEstimator/routes.js";
 
 const log = createLogger("wallet:routes", process.env.LOG_LEVEL ?? "info");
 
@@ -824,5 +825,8 @@ export function registerRoutes(
 
     // --- Issue #373: Automated Testnet Faucet Dispenser routes ---
     ...registerFaucetRoutes(),
+
+    // --- Issue #364: Dynamic fee estimator routes ---
+    ...registerFeeEstimatorRoutes(),
   ];
 }
