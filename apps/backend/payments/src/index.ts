@@ -11,6 +11,8 @@ import { startSubscriptionBillingScheduler } from "./subscriptions/billingSchedu
 import { startAutoReleaseWorker, stopAutoReleaseWorker } from "./workers/autoRelease.js";
 import { enablePostgresDisputeStore } from "./disputes/disputeStore.js";
 import { startTimeoutRefundScheduler } from "./workers/timeoutRefund.js";
+import { startShippingExceptionScheduler } from "./shipping/exceptionDetector.js";
+
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -108,6 +110,34 @@ export type {
 } from "./autoRelease/types.js";
 export { EscrowDisputedError, EscrowNotReleasableError } from "./autoRelease/types.js";
 
+// ─── #295 Shipping Exception & Lost Package Detector ───────────────────────
+
+export {
+  addBusinessDays,
+  businessDaysBetween,
+  classifyAnomaly,
+  detectShippingExceptions,
+  startShippingExceptionScheduler,
+} from "./shipping/exceptionDetector.js";
+export { notifyShippingAnomaly, SHIPPING_ANOMALY_EVENT } from "./shipping/notifications.js";
+export type { ShippingAnomalyNotification } from "./shipping/notifications.js";
+export {
+  getShipmentStore,
+  InMemoryShipmentStore,
+  resetShipmentStore,
+  setShipmentStore,
+} from "./shipping/shipmentStore.js";
+export type { ShipmentAnomalyFlag, ShipmentStore } from "./shipping/shipmentStore.js";
+export type {
+  InTransitShipment,
+  ShipmentTrackingStatus,
+  ShipmentTrackingUpdate,
+  ShippingAnomalyReason,
+  ShippingAnomalyRecord,
+  ShippingDetectionConfig,
+  ShippingScanResult,
+} from "./shipping/types.js";
+
 const SERVICE_NAME = "payments";
 const DEFAULT_PORT = 3014;
 
@@ -198,6 +228,17 @@ if (process.env.ENABLE_TIMEOUT_REFUND_WORKER !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping timeout refund scheduler");
     timeoutRefundScheduler.stop();
+  });
+}
+
+// ─── #295 Shipping Exception & Lost Package Detector ───────────────────────
+
+if (process.env.ENABLE_SHIPPING_EXCEPTION_SCAN !== "false") {
+  const stopShippingExceptionScheduler = startShippingExceptionScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping shipping exception scheduler");
+    stopShippingExceptionScheduler();
   });
 }
 
