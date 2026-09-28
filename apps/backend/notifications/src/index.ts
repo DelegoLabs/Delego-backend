@@ -1,6 +1,3 @@
-/**
- * @delegolabs/notifications — Entry point
- */
 import { createLogger, startHttpServer, route, json, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
 import { readBody } from "./readBody.js";
 import { broadcastNotificationToUser, getWebSocketMetrics, initWebSocketServer } from "./websocket.js";
@@ -49,6 +46,7 @@ import {
   upsertStoredPreference,
 } from "./preferenceCenterStore.js";
 import { runPreferenceMigration } from "./preferenceMigration.js";
+import { disconnectAll as disconnectRedis, getConnectionState, getBufferMetrics } from "./redis/client.js";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
 
 const SERVICE_NAME = "notifications";
@@ -128,8 +126,57 @@ if (rpcUrl && escrowContractId) {
 const server: Server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth({ publicPaths: ["/health", "/vapid-public-key"] })],
+  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth({ publicPaths: ["/health", "/vapid-public-key", "/health/redis"] })],
   routes: [
+    route("GET", "/health", (_req: IncomingMessage, res: ServerResponse) => {
+      const redisState = getConnectionState();
+      const bufferMetrics = getBufferMetrics();
+      
+      json(res, 200, {
+        data: {
+          status: "healthy",
+          service: SERVICE_NAME,
+          redis: {
+            connected: redisState.isReady,
+            reconnectAttempts: redisState.reconnectAttempts,
+            lastError: redisState.lastError
+          },
+          buffer: {
+            size: bufferMetrics.bufferSize,
+            maxSize: bufferMetrics.maxSize
+          }
+        },
+        error: null
+      });
+    }),
+
+    route("GET", "/health/redis", (_req: IncomingMessage, res: ServerResponse) => {
+      const state = getConnectionState();
+      const metrics = getBufferMetrics();
+      
+      json(res, state.isReady ? 200 : 503, {
+        data: {
+          connectionState: {
+            isReady: state.isReady,
+            isConnecting: state.isConnecting,
+            reconnectAttempts: state.reconnectAttempts,
+            lastError: state.lastError
+          },
+          bufferMetrics: {
+            bufferSize: metrics.bufferSize,
+            maxSize: metrics.maxSize,
+            utilizationPercent: (metrics.bufferSize / metrics.maxSize) * 100,
+            oldestTimestamp: metrics.oldestTimestamp,
+            oldestAgeMs: metrics.oldestTimestamp ? Date.now() - metrics.oldestTimestamp : null
+          }
+        },
+        error: state.isReady ? null : {
+          code: "REDIS_UNAVAILABLE",
+          message: state.lastError ?? "Redis connection not ready"
+        }
+      });
+    }),
+
     route("GET", "/vapid-public-key", (_req: IncomingMessage, res: ServerResponse) => {
       const key = getVapidPublicKey();
       if (!key) {
@@ -611,6 +658,17 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
       });
     }
   }
+  
+  // Gracefully disconnect Redis clients
+  try {
+    await disconnectRedis();
+    log.info("Redis clients disconnected");
+  } catch (err) {
+    log.error("Failed to disconnect Redis clients cleanly", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  
   server.close(() => {
     log.info("HTTP server closed");
     process.exit(0);

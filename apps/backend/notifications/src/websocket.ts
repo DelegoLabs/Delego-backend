@@ -1,10 +1,10 @@
 
 import type { Server, IncomingMessage } from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
-import { Redis } from "ioredis";
 import { randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { createLogger } from "@delegolabs/utils";
+import { getSubscriberClient, publishNotification } from "./redis/client.js";
 
 const SERVICE_NAME = "notifications";
 const log = createLogger(SERVICE_NAME, process.env.LOG_LEVEL ?? "info");
@@ -76,7 +76,7 @@ let messagesSent = 0;
 let messagesReceived = 0;
 
 const connections = new Map<string, PushConnection>();
-const redisSubscriber = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", { lazyConnect: true });
+const redisSubscriber = getSubscriberClient();
 
 if (process.env.NODE_ENV !== "test" && process.env.CI !== "true" && process.env.MOCK_REDIS !== "true") {
   redisSubscriber.subscribe("notifications:*", (err: Error | null | undefined) => {
