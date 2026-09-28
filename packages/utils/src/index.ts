@@ -238,3 +238,4 @@ export * from "./softDelete/index.js";
 export * from "./audit/index.js";
 export * from "./encryption/index.js";
 export * from "./carrier/index.js";
+export * from "./containerDigest.js";
