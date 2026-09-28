@@ -1,4 +1,10 @@
-export { createLogger, type Logger } from "./logger.js";
+export {
+  createLogger,
+  getLogContext,
+  runWithLogContext,
+  type Logger,
+  type LogContext,
+} from "./logger.js";
 export { stroopsToDisplay, displayToStroops } from "./currency.js";
 export {
   generateId,
