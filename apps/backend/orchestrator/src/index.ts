@@ -41,6 +41,8 @@ import type { SagaCoordinator } from "./saga/index.js";
 import type { CheckoutContext } from "../workflows/checkout/index.js";
 import { PostgresTaskStore, tasksSequelize, TaskService, TaskEventBroker } from "./tasks/index.js";
 import { createTaskRoutes } from "./tasks/routes.js";
+import { DLQStore, DLQService, createDLQRoutes } from "./dlq/index.js";
+import type { ConnectionOptions } from "bullmq";
 
 const SERVICE_NAME = "orchestrator";
 const DEFAULT_PORT = 3010;
@@ -71,6 +73,14 @@ let outboxRelay: OutboxRelayHandle | null = null;
 const taskStore = new PostgresTaskStore();
 let taskBroker: TaskEventBroker | null = null;
 const taskService = new TaskService({ store: taskStore });
+
+// ─── Dead Letter Queue (DLQ) Management ────────────────────────────────────
+// #310 Auto-replay & remediation worker for failed BullMQ jobs
+// Monitors failed jobs (e.g. temporary network partitions) and safely replays them
+// after circuit breaker resets to prevent retry storms.
+const dlqPool = new Pool({ connectionString: process.env.DATABASE_URL });
+const dlqStore = new DLQStore(dlqPool);
+let dlqService: DLQService | null = null;
 
 // ─── #64 Reconciliation Engine ───────────────────────────────────────────────
 
@@ -453,6 +463,15 @@ async function main(): Promise<void> {
     }
   }
 
+  // Initialize DLQ service with Redis connection for BullMQ
+  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+  const redisConnection: ConnectionOptions = {
+    host: new URL(redisUrl).hostname,
+    port: Number(new URL(redisUrl).port) || 6379,
+  };
+  dlqService = new DLQService(dlqStore, redisConnection, log);
+  log.info("DLQ service initialized");
+
   log.info("Starting orchestrator", { port });
   startHttpServer({
     port,
@@ -468,6 +487,8 @@ async function main(): Promise<void> {
       ...(lockManager ? createLockRoutes(lockManager) : []),
 
       ...createTaskRoutes(taskService, taskStore),
+
+      ...(dlqService ? createDLQRoutes(dlqService) : []),
 
       route("POST", "/checkout", async (req, res) => {
         let body: Record<string, unknown>;
@@ -676,6 +697,26 @@ async function main(): Promise<void> {
       process.once(signal, () => clearInterval(slaTimer));
     }
   }
+
+  // ─── DLQ Auto-Replay Cron ──────────────────────────────────────────────
+  // Issue #310: Periodically auto-replays failed jobs with recoverable network errors
+  // Interval defaults to 5 minutes; set DLQ_AUTO_REPLAY_INTERVAL_MS=0 to disable
+  const dlqReplayIntervalMs = Number(process.env.DLQ_AUTO_REPLAY_INTERVAL_MS ?? 300_000);
+  if (dlqReplayIntervalMs > 0 && dlqService) {
+    await dlqService.autoReplayRecoverableJobs().catch((err) =>
+      log.warn("Initial DLQ auto-replay failed", { error: err instanceof Error ? err.message : String(err) })
+    );
+    const dlqTimer = setInterval(() => {
+      void dlqService?.autoReplayRecoverableJobs().catch((err) =>
+        log.warn("DLQ auto-replay failed", { error: err instanceof Error ? err.message : String(err) })
+      );
+    }, dlqReplayIntervalMs);
+    dlqTimer.unref();
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      process.once(signal, () => clearInterval(dlqTimer));
+    }
+    log.info("DLQ auto-replay cron started", { intervalMs: dlqReplayIntervalMs });
+  }
 }
 
 main().catch((err) => {
@@ -706,6 +747,14 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
       await outboxRelay.stop();
     } catch (err) {
       log.error("Error stopping outbox relay", { error: (err as Error).message });
+    }
+  }
+
+  if (dlqService) {
+    try {
+      await dlqService.close();
+    } catch (err) {
+      log.error("Error closing DLQ service", { error: (err as Error).message });
     }
   }
 
