@@ -89,6 +89,9 @@ import { registerStorefrontRoutes } from "./storefront.js";
 import { registerStorageRoutes } from "./storage.js";
 import { registerDisputeRoutes } from "./disputes.js";
 import { searchProductsHandler } from "../src/search/routes.js";
+import { registerMerchantRoutes } from "../src/merchant/routes.js";
+import { registerCatalogRoutes } from "../src/catalog/routes.js";
+import { registerAgentChatRoutes } from "./agentChat.js";
 
 
 /** Register all gateway routes */
@@ -202,5 +205,11 @@ export function registerRoutes(): Route[] {
     ...registerStorageRoutes(),
     // Disputes - merchant response endpoint (Issue #112)
     ...registerDisputeRoutes(),
+    // Merchants - registration & store management
+    ...registerMerchantRoutes(),
+    // Catalog - product CRUD with cursor pagination
+    ...registerCatalogRoutes(),
+    // Agent Chat - SSE streaming for agent conversations
+    ...registerAgentChatRoutes(),
   ];
 }
