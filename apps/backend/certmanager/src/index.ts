@@ -9,6 +9,7 @@
  *   - Wildcard certificate support (dns-01)
  *   - Certificate revocation
  *   - Deployment automation (nginx/haproxy/envoy/webhook)
+ *   - Merchant storefront SSL/TLS expiry monitoring (Issue #390)
  */
 import { createLogger, createHealthRoutes, startHttpServer, HealthRegistry } from "@delegolabs/utils";
 import { createAcmeClient } from "./acme/client.js";
@@ -25,6 +26,10 @@ import {
 } from "./storage/index.js";
 import { registerStorageRotationRoutes } from "./storage/routes.js";
 import type { StorageObjectStore } from "./storage/index.js";
+import { registerCertExpiryRoutes } from "./routes/certExpiryRoutes.js";
+import { CertExpiryChecker } from "./expiry/checker.js";
+import { ExpiryScheduler } from "./expiry/scheduler.js";
+import { createCertExpiryAlerter } from "./expiry/alerter.js";
 
 const SERVICE_NAME = "certmanager";
 const DEFAULT_PORT = 3020;
@@ -71,6 +76,40 @@ const health = createHealthRoutes({
   registry: healthRegistry,
   serviceName: SERVICE_NAME,
   version: "0.0.1",
+});
+
+// Issue #390 — automated SSL/TLS certificate expiry checking for merchant
+// storefronts: probe each registered custom domain and alert 14 days before
+// expiration.
+const expiryChecker = new CertExpiryChecker({
+  alerter: createCertExpiryAlerter({
+    webhookUrl: process.env.CERT_EXPIRY_WEBHOOK_URL,
+  }),
+  warningDays: Number(process.env.CERT_EXPIRY_WARNING_DAYS ?? 14),
+  probe: {
+    timeoutMs: Number(process.env.CERT_EXPIRY_PROBE_TIMEOUT_MS ?? 10_000),
+    port: Number(process.env.CERT_EXPIRY_PROBE_PORT ?? 443),
+  },
+});
+
+// Seed monitored domains from a JSON env var:
+//   [{ "merchantId": "m1", "domain": "shop.example.com" }, ...]
+try {
+  if (process.env.CERT_EXPIRY_DOMAINS) {
+    expiryChecker.registerDomains(JSON.parse(process.env.CERT_EXPIRY_DOMAINS));
+    log.info("registered merchant domains for expiry monitoring", {
+      count: expiryChecker.listDomains().length,
+    });
+  }
+} catch (err) {
+  log.error("invalid CERT_EXPIRY_DOMAINS payload — expiry monitoring starts empty", {
+    error: (err as Error).message,
+  });
+}
+
+const expiryScheduler = new ExpiryScheduler(expiryChecker, {
+  intervalMs: Number(process.env.CERT_EXPIRY_INTERVAL_MS ?? 1000 * 60 * 60 * 12),
+  onError: (err) => log.error("expiry check tick failed", { error: (err as Error).message }),
 });
 
 log.info("Starting certmanager", { port, nodeEnv });
@@ -155,6 +194,7 @@ startHttpServer({
     ...health,
     ...registerRoutes(service),
     ...registerStorageRotationRoutes(storageRotationService),
+    ...registerCertExpiryRoutes(expiryChecker),
   ],
 });
 
@@ -162,4 +202,15 @@ if (process.env.CERT_RENEWAL_ENABLED !== "false") {
   scheduler.start();
 }
 
-export { service, scheduler, storageRotationService, storageRotationScheduler };
+if (process.env.CERT_EXPIRY_ENABLED !== "false") {
+  expiryScheduler.start();
+}
+
+export {
+  service,
+  scheduler,
+  storageRotationService,
+  storageRotationScheduler,
+  expiryChecker,
+  expiryScheduler,
+};

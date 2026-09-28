@@ -24,6 +24,11 @@ Automated TLS certificate management for the Delego backend.
 - **Storage key rotation (#400)** — dual-credential rotation of Cloudflare R2 /
   AWS S3 access keys every 90 days with zero downtime and key-expiry alerts
   (see below).
+- **Storefront expiry monitoring** (Issue #390) — probes every registered
+  merchant custom domain over a live TLS socket, computes `daysRemaining` and
+  `isExpiringSoon`, and emits an alert **14 days before expiration** (plus on
+  expiry and when a storefront becomes unreachable). Alerts go to the service
+  log and optionally a webhook, with 24h per-domain dedupe.
 
 ## Configuration
 
@@ -37,6 +42,13 @@ Automated TLS certificate management for the Delego backend.
 | `CERT_RENEWAL_INTERVAL_MS` | `43200000` | Scheduler interval (12h) |
 | `CERT_RENEWAL_ENABLED` | `true` | Run the background renewal scheduler |
 | `CERT_STORE` | `memory` | `memory` or `postgres` |
+| `CERT_EXPIRY_ENABLED` | `true` | Run the background expiry checker (Issue #390) |
+| `CERT_EXPIRY_INTERVAL_MS` | `43200000` | Expiry sweep interval (12h) |
+| `CERT_EXPIRY_WARNING_DAYS` | `14` | Days before expiry at which alerts fire |
+| `CERT_EXPIRY_DOMAINS` | – | JSON array of `{ merchantId, domain }` to monitor |
+| `CERT_EXPIRY_WEBHOOK_URL` | – | POST target for expiry alerts (log sink is always on) |
+| `CERT_EXPIRY_PROBE_PORT` | `443` | TLS port probed on merchant domains |
+| `CERT_EXPIRY_PROBE_TIMEOUT_MS` | `10000` | Per-probe connect timeout |
 
 ### Storage key rotation (#400)
 
@@ -108,6 +120,11 @@ Shared types live in `@delegolabs/types` (`storageRotation.ts`):
 | `POST` | `/api/v1/certificates/:id/revoke` | Revoke a certificate |
 | `POST` | `/api/v1/certificates/renewals` | Trigger due renewals |
 | `GET` | `/api/v1/certificates/metrics` | Monitoring metrics |
+| `GET` | `/api/v1/certificates/expiry` | Run an expiry sweep over all monitored domains |
+| `GET` | `/api/v1/certificates/expiry/domains` | List monitored merchant domains |
+| `POST` | `/api/v1/certificates/expiry/domains` | Register a `{ merchantId, domain }` for monitoring |
+| `DELETE` | `/api/v1/certificates/expiry/domains/:domain` | Stop monitoring a domain |
+| `GET` | `/api/v1/certificates/expiry/:domain` | Probe a single monitored domain now |
 | `GET` | `/api/v1/storage/rotation` | Storage key rotation state + metrics |
 | `POST` | `/api/v1/storage/rotation` | Trigger a storage key rotation |
 | `POST` | `/api/v1/storage/rotation/complete` | Revoke the retiring storage key early |
