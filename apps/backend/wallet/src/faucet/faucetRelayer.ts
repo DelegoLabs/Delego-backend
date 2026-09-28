@@ -13,8 +13,6 @@ import { Redis } from "ioredis";
 import { createLogger, type Logger } from "@delegolabs/utils";
 import { Horizon, Asset, TransactionBuilder, Operation, Keypair, Networks } from "@stellar/stellar-sdk";
 
-const log = createLogger("wallet:faucetRelayer", process.env.LOG_LEVEL ?? "info");
-
 // ---------------------------------------------------------------------------
 // Types (matching issue spec)
 // ---------------------------------------------------------------------------
