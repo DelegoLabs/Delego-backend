@@ -12,6 +12,7 @@
 import { HealthRegistry, httpHealthCheck, type HealthCheckFn } from "@delegolabs/utils";
 import { checkDatabaseHealth } from "./db.js";
 import { getRedisHealth, type RedisHealth } from "./rateLimit/redisClient.js";
+import { fetchWithCorrelation } from "../middleware/correlation.js";
 
 const SERVICE_URLS = {
   orchestrator: process.env.ORCHESTRATOR_SERVICE_URL ?? "http://localhost:3013",
@@ -34,7 +35,11 @@ function createDownstreamCheck(
   timeoutMs: number,
   fetchImpl: typeof fetch,
 ): HealthCheckFn {
-  const probe = httpHealthCheck({ url, timeoutMs, fetchImpl });
+  const probe = httpHealthCheck({
+    url,
+    timeoutMs,
+    fetchImpl: (input, init) => fetchWithCorrelation(input, init, fetchImpl),
+  });
   return async () => {
     try {
       return await probe();
