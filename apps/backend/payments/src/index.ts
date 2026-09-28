@@ -9,6 +9,7 @@ import { startReconciliationScheduler } from "./reconciliation/settlementReconci
 import { startSlaEscalationScheduler } from "./disputes/slaEscalation.js";
 import { startSubscriptionBillingScheduler } from "./subscriptions/billingScheduler.js";
 import { startTimeoutRefundScheduler } from "./workers/timeoutRefund.js";
+import { startCarrierPollingScheduler } from "./workers/carrierPolling.js";
 
 export { escrowCoordinator } from "./escrowCoordinator/index.js";
 export { reconcileSettlements, startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -192,6 +193,17 @@ if (process.env.ENABLE_TIMEOUT_REFUND_WORKER !== "false") {
   process.on("SIGTERM", () => {
     log.info("SIGTERM received; stopping timeout refund scheduler");
     timeoutRefundScheduler.stop();
+  });
+}
+
+// ─── #384 Carrier Tracking Polling Fallback ──────────────────────────────────
+
+if (process.env.ENABLE_CARRIER_POLLING !== "false") {
+  const carrierPollingScheduler = startCarrierPollingScheduler();
+
+  process.on("SIGTERM", () => {
+    log.info("SIGTERM received; stopping carrier polling scheduler");
+    carrierPollingScheduler.stop();
   });
 }
 
