@@ -2,7 +2,7 @@
  * @delegolabs/gateway — API entry point
  * Routes external requests to internal services.
  */
-import { createLogger, startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
+import { createLogger, initTelemetry, startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
 import { registerRoutes } from "../routes/index.js";
 import { bodyLimitMiddleware } from "../routes/api-v1.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
@@ -19,6 +19,11 @@ const DEFAULT_PORT = 3000;
 const nodeEnv = process.env.NODE_ENV ?? "development";
 const logLevel = process.env.LOG_LEVEL ?? "info";
 const log = createLogger(SERVICE_NAME, logLevel);
+
+// Distributed tracing (Issue #307): enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+void initTelemetry(SERVICE_NAME).catch((err: unknown) =>
+  log.warn("Telemetry init failed", { error: err instanceof Error ? err.message : String(err) })
+);
 const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
 log.info("Starting gateway", { port, nodeEnv });

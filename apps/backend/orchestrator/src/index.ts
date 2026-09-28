@@ -7,6 +7,8 @@ import {
   json,
   route,
   startHttpServer,
+  tracedFetch,
+  initTelemetry,
   createHealthRoutes,
   corsMiddleware,
   securityHeadersMiddleware,
@@ -48,6 +50,11 @@ const MAX_REQUEST_BODY_BYTES = Number(process.env.MAX_REQUEST_BODY_BYTES ?? 1_04
 
 const logLevel = process.env.LOG_LEVEL ?? "info";
 const log = createLogger(SERVICE_NAME, logLevel);
+
+// Distributed tracing (Issue #307): enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+void initTelemetry(SERVICE_NAME).catch((err: unknown) =>
+  log.warn("Telemetry init failed", { error: err instanceof Error ? err.message : String(err) })
+);
 const port = Number(process.env.ORCHESTRATOR_PORT ?? DEFAULT_PORT);
 
 const sagaStore = new PostgresSagaStore();
@@ -262,7 +269,7 @@ export async function recoverUnfinishedWorkflows(): Promise<WorkflowSnapshot[]> 
 async function fetchOnChainEscrowStatus(escrowId: string): Promise<"funded" | "released" | "refunded" | "not_found"> {
   const walletUrl = process.env.WALLET_SERVICE_URL ?? "http://localhost:3012";
   try {
-    const res = await fetch(`${walletUrl}/escrow/${encodeURIComponent(escrowId)}/status`);
+    const res = await tracedFetch(`${walletUrl}/escrow/${encodeURIComponent(escrowId)}/status`);
     if (!res.ok) return "not_found";
     const body = await res.json() as { data?: { status?: string } };
     const status = body.data?.status;
