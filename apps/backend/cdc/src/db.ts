@@ -35,6 +35,20 @@ export async function ensureCdcSchema(pool: Pool): Promise<void> {
   const logger = getLog();
   logger.info("Ensuring CDC schema exists");
   await pool.query(`
+    -- Issue #366 — Soroban event sync checkpoints (see migration 040)
+    CREATE TABLE IF NOT EXISTS soroban_event_sync_checkpoints (
+      contract_id VARCHAR(255) PRIMARY KEY,
+      last_ledger_sequence INTEGER NOT NULL DEFAULT 0,
+      last_event_id VARCHAR(255) NOT NULL DEFAULT '',
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS soroban_processed_events (
+      event_id VARCHAR(255) PRIMARY KEY,
+      contract_id VARCHAR(255) NOT NULL,
+      ledger_sequence INTEGER NOT NULL,
+      published_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS cdc_replication_state (
       slot_name VARCHAR(255) PRIMARY KEY,
       confirmed_flush_lsn TEXT NOT NULL DEFAULT '0/0',
