@@ -27,6 +27,7 @@ import {
   createCheckoutSagaCoordinator,
   type CheckoutWorkflowInput,
 } from "../workflows/checkout/index.js";
+import { InsufficientStockError } from "./inventory/reservation.js";
 import { connectSagaDb, PostgresSagaStore, serializeSagaExecution } from "./saga/index.js";
 import { startOutboxRelay, type OutboxRelayHandle } from "./events/outboxRelay.js";
 import { PostgresServiceEventOutboxStore } from "./events/postgres-service-event-outbox.js";
@@ -512,6 +513,13 @@ async function main(): Promise<void> {
                 : { code: "CHECKOUT_SAGA_FAILED", message: result.error ?? "Checkout saga failed" },
           });
         } catch (err) {
+          if (err instanceof InsufficientStockError) {
+            json(res, 409, {
+              data: null,
+              error: { code: "INSUFFICIENT_STOCK", message: err.message },
+            });
+            return;
+          }
           json(res, 502, {
             data: null,
             error: {
