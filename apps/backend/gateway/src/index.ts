@@ -12,6 +12,7 @@ import { openApiValidationMiddleware } from "../middleware/openApiValidation.js"
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
+import { startMetricsSampling, adaptiveRateLimitingMiddleware } from "./rateLimit/adaptive.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -22,6 +23,8 @@ const log = createLogger(SERVICE_NAME, logLevel);
 const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
 log.info("Starting gateway", { port, nodeEnv });
+
+startMetricsSampling();
 
 startHttpServer({
   port,
@@ -38,6 +41,7 @@ startHttpServer({
     openApiValidationMiddleware({
       validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
     }),
+    adaptiveRateLimitingMiddleware(),
     rateLimitMiddleware(),
     compressionMiddleware(),
     requestResponseLoggingMiddleware(),
