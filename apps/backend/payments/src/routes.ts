@@ -751,7 +751,7 @@ export function registerRoutes(): Route[] {
           return;
         }
 
-        const result = await handleDeliveryConfirmation(validated.value);
+        const result = await handleDeliveryConfirmation(validated.value, signatureHeader);
 
         if ("scheduled" in result) {
           json(res, 202, { data: result, error: null });
