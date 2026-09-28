@@ -5,10 +5,15 @@
  * replication (or Debezium), transforms them into domain events, and publishes
  * them to the Redis bus with exactly-once delivery. Exposes a monitoring
  * dashboard (`/cdc/dashboard`) and metrics (`/metrics`, `/api/v1/cdc/metrics`).
+ *
+ * Issue #366 — Soroban RPC event listener with missed-ledger backfill is
+ * started alongside the WAL pipeline when SOROBAN_RPC_URL and
+ * SOROBAN_CONTRACT_IDS are configured.
  */
 
 import { createLogger, startHttpServer } from "@delegolabs/utils";
 import type { Pool } from "pg";
+import { Redis } from "ioredis";
 
 import { loadCdcRuntimeEnv } from "./config.js";
 import { createCdcPool } from "./db.js";
@@ -30,6 +35,11 @@ import {
 import { PostgresSchemaEvolutionStore } from "./schemaEvolution.js";
 import { InMemoryPublishedEventStore, InMemoryReplicationStateStore } from "./store.js";
 import { InMemorySchemaEvolutionStore } from "./schemaEvolution.js";
+import { createEscrowArchiver, startEscrowArchiveScheduler } from "./archiver/index.js";
+import {
+  createSorobanEventIngestionWorker,
+  type SorobanEventIngestionWorker,
+} from "./sorobanEvents/index.js";
 
 const SERVICE_NAME = "cdc";
 const log = createLogger(SERVICE_NAME, process.env.LOG_LEVEL ?? "info");
@@ -116,8 +126,78 @@ async function main(): Promise<void> {
 
   await pipeline.start();
 
+  // ─── Escrow snapshot archiver (Issue #290) ───────────────────────────────
+  // Nightly job that moves escrows settled longer than the retention window
+  // (default 90 days) into `escrow_archives` and prunes them from the live
+  // table. Disable with ESCROW_ARCHIVE_ENABLED=false.
+  let stopEscrowArchiver: (() => void) | null = null;
+  if (process.env.ESCROW_ARCHIVE_ENABLED !== "false") {
+    stopEscrowArchiver = startEscrowArchiveScheduler(
+      createEscrowArchiver(pool, process.env, log)
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Issue #366 — Soroban RPC event listener with missed-ledger backfill
+  //
+  // Started only when SOROBAN_RPC_URL and SOROBAN_CONTRACT_IDS are provided so
+  // the CDC service stays backward-compatible for deployments that don't use
+  // the Soroban event listener.
+  // ---------------------------------------------------------------------------
+  let sorobanWorker: SorobanEventIngestionWorker | undefined;
+
+  const sorobanRpcUrl = process.env.SOROBAN_RPC_URL;
+  const sorobanContractIds = process.env.SOROBAN_CONTRACT_IDS
+    ? process.env.SOROBAN_CONTRACT_IDS.split(",").map((id) => id.trim()).filter(Boolean)
+    : [];
+
+  if (sorobanRpcUrl && sorobanContractIds.length > 0) {
+    log.info("Starting Soroban event listener (Issue #366)", {
+      rpcUrl: sorobanRpcUrl,
+      contracts: sorobanContractIds,
+    });
+
+    const sorobanRedis = new Redis(env.redisUrl ?? "redis://localhost:6379");
+
+    sorobanWorker = createSorobanEventIngestionWorker(
+      sorobanRedis,
+      {
+        rpcUrl: sorobanRpcUrl,
+        contractIds: sorobanContractIds,
+        pollIntervalMs: Number(process.env.SOROBAN_POLL_INTERVAL_MS ?? 5000),
+        pageSize: Number(process.env.SOROBAN_PAGE_SIZE ?? 50),
+      },
+      {
+        // Wire PostgreSQL stores in production; in-memory in test/local.
+        pgPool: useMemory ? undefined : pool,
+        logger: log,
+      }
+    );
+
+    // start() runs the startup backfill then begins the live polling loop.
+    sorobanWorker.start().catch((err: unknown) => {
+      log.error("Soroban event listener failed to start", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  } else {
+    log.info(
+      "Soroban event listener disabled — set SOROBAN_RPC_URL and SOROBAN_CONTRACT_IDS to enable"
+    );
+  }
+
   const shutdown = async (): Promise<void> => {
     log.info("Shutting down CDC pipeline");
+    if (stopEscrowArchiver) {
+      try {
+        stopEscrowArchiver();
+      } catch (err) {
+        log.error("Error stopping escrow archiver", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    sorobanWorker?.stop();
     await pipeline?.stop();
     await connector.close();
     await pool.end();

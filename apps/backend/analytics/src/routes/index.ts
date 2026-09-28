@@ -10,11 +10,12 @@ import {
   endABTestHandler,
   getCohortAnalysisHandler,
   trackCustomEventHandler,
+  exportTransactionsCsvHandler,
   exportDataHandler,
   getRevenueMetricsHandler,
   getMerchantQualityScoreHandler,
+  getMerchantSalesHandler,
 } from "./analyticsRoutes.js";
-
 export function registerAnalyticsRoutes(): Route[] {
   return [
     // Funnel metrics
@@ -35,13 +36,18 @@ export function registerAnalyticsRoutes(): Route[] {
     // Custom events
     route("POST", "/api/v1/analytics/events", trackCustomEventHandler),
 
-    // Revenue attribution
+        // Revenue attribution
     route("GET", "/api/v1/analytics/revenue", getRevenueMetricsHandler),
 
     // Merchant reputation (#392)
     route("GET", "/api/v1/analytics/merchants/:merchantId/quality-score", getMerchantQualityScoreHandler),
 
+    // Real-Time Merchant Continuous Aggregates (#377)
+    route("GET", "/api/v1/analytics/merchants/:merchantId/sales", getMerchantSalesHandler),
+
     // Data export
+    // Issue #395: memory-efficient chunked CSV streaming of transaction history.
+    route("GET", "/api/v1/analytics/export/transactions.csv", exportTransactionsCsvHandler),
     route("POST", "/api/v1/analytics/export", exportDataHandler),
   ];
 }

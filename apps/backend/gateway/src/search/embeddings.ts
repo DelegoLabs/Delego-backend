@@ -1,3 +1,5 @@
+import { fetchWithCorrelation } from "../../middleware/correlation.js";
+
 /**
  * Text embedding helper for semantic product search.
  * Issue #263: embed a user query into a float vector using the configured
@@ -27,7 +29,7 @@ export async function embedText(text: string): Promise<number[]> {
 
   const model = process.env["EMBED_MODEL"] ?? DEFAULT_EMBED_MODEL;
 
-  const res = await fetch(EMBED_API_URL, {
+  const res = await fetchWithCorrelation(EMBED_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
