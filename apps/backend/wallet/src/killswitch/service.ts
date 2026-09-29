@@ -18,7 +18,7 @@ interface KillSwitchDatabase {
 }
 
 interface KillSwitchRedis {
-  scan(cursor: string, ...args: (string | number)[]): Promise<[string, string[]]>;
+  scan(...args: any[]): Promise<any>;
   get(key: string): Promise<string | null>;
   del(...keys: string[]): Promise<number>;
 }
