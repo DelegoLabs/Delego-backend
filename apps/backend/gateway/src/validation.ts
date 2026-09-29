@@ -46,6 +46,51 @@ export interface UpdateDelegationPayload {
   };
 }
 
+export interface CreateMerchantPayload {
+  storeName: string;
+  description?: string;
+  stellarAddress: string;
+  contactEmail: string;
+  category: string;
+}
+
+export interface UpdateMerchantPayload {
+  storeName?: string;
+  description?: string;
+  contactEmail?: string;
+  category?: string;
+}
+
+export interface CreateProductPayload {
+  sku: string;
+  title: string;
+  description?: string;
+  priceStroops: string;
+  assetCode?: string;
+  stockQuantity?: number;
+  isListed?: boolean;
+  imageUrl?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateProductPayload {
+  sku?: string;
+  title?: string;
+  description?: string;
+  priceStroops?: string;
+  assetCode?: string;
+  stockQuantity?: number;
+  isListed?: boolean;
+  imageUrl?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentChatPayload {
+  messages: Array<{ role: string; content: string }>;
+  delegationId?: string;
+  tools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
+}
+
 export const RegisterSchema: any = {
   type: "object",
   properties: {
@@ -118,6 +163,100 @@ export const UpdateDelegationSchema: any = {
       additionalProperties: false
     }
   },
+  additionalProperties: false
+};
+
+export const CreateMerchantSchema: any = {
+  type: "object",
+  properties: {
+    storeName: { type: "string", minLength: 1, maxLength: 128 },
+    description: { type: "string" },
+    stellarAddress: { type: "string", minLength: 56, maxLength: 56, pattern: "^G[A-Za-z0-9]{55}$" },
+    contactEmail: { type: "string", format: "email" },
+    category: { type: "string", minLength: 1, maxLength: 64 }
+  },
+  required: ["storeName", "stellarAddress", "contactEmail", "category"],
+  additionalProperties: false
+};
+
+export const UpdateMerchantSchema: any = {
+  type: "object",
+  properties: {
+    storeName: { type: "string", minLength: 1, maxLength: 128 },
+    description: { type: "string" },
+    contactEmail: { type: "string", format: "email" },
+    category: { type: "string", minLength: 1, maxLength: 64 }
+  },
+  additionalProperties: false,
+  minProperties: 1
+};
+
+export const CreateProductSchema: any = {
+  type: "object",
+  properties: {
+    sku: { type: "string", minLength: 1, maxLength: 64 },
+    title: { type: "string", minLength: 1, maxLength: 255 },
+    description: { type: "string" },
+    priceStroops: { type: "string", pattern: "^[1-9][0-9]*$" },
+    assetCode: { type: "string", minLength: 1, maxLength: 12 },
+    stockQuantity: { type: "integer", minimum: 0 },
+    isListed: { type: "boolean" },
+    imageUrl: { type: "string" },
+    metadata: { type: "object" }
+  },
+  required: ["sku", "title", "priceStroops"],
+  additionalProperties: false
+};
+
+export const UpdateProductSchema: any = {
+  type: "object",
+  properties: {
+    sku: { type: "string", minLength: 1, maxLength: 64 },
+    title: { type: "string", minLength: 1, maxLength: 255 },
+    description: { type: "string" },
+    priceStroops: { type: "string", pattern: "^[1-9][0-9]*$" },
+    assetCode: { type: "string", minLength: 1, maxLength: 12 },
+    stockQuantity: { type: "integer", minimum: 0 },
+    isListed: { type: "boolean" },
+    imageUrl: { type: "string" },
+    metadata: { type: "object" }
+  },
+  additionalProperties: false,
+  minProperties: 1
+};
+
+export const AgentChatSchema: any = {
+  type: "object",
+  properties: {
+    messages: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          role: { type: "string", enum: ["system", "user", "assistant", "tool"] },
+          content: { type: "string" }
+        },
+        required: ["role", "content"],
+        additionalProperties: false
+      },
+      minItems: 1
+    },
+    delegationId: { type: "string", format: "uuid" },
+    tools: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          parameters: { type: "object" }
+        },
+        required: ["name", "description", "parameters"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["messages"],
   additionalProperties: false
 };
 

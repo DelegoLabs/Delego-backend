@@ -4,15 +4,24 @@
  * Two responsibilities:
  *  1. sanitizeText()  — strips prompt-injection attempts from untrusted
  *                       merchant/product descriptions before they reach the LLM.
- *  2. validateToolParams() — validates all tool call parameters against Zod
- *                            schemas before execution; rejects any call that
- *                            doesn't conform.
+ *  2. validateToolParams() — sanitizes, type-coerces and validates all tool
+ *                            call parameters against Zod schemas before
+ *                            execution; rejects any call that doesn't conform.
+ *
+ * Issue #362: argument sanitization and explicit type coercion now run ahead of
+ * validation, so an LLM that sends `"10.5"` (dollars) for an integer stroop
+ * field is corrected rather than crashing the invoker, and rejections carry a
+ * self-correction prompt the agent loop can hand back to the model.
  *
  * Security incidents are written to the `security_alerts` table so the ops
  * team can audit them after the fact.
  */
 import { createLogger } from "@delegolabs/utils";
 import type { Pool } from "pg";
+import {
+  buildSelfCorrectionPrompt,
+  sanitizeToolCall,
+} from "../../../src/tools/sanitization.js";
 import {
   TOOL_SCHEMAS,
   type FlaggedCategory,
@@ -126,11 +135,13 @@ export class GuardrailMiddleware {
   }
 
   /**
-   * Validate tool call parameters against the registered Zod schema for
-   * `toolName`.  Returns the parsed (safe, coerced) params on success.
+   * Sanitize, type-coerce and validate tool call parameters against the
+   * registered Zod schema for `toolName`. Returns the parsed (safe, coerced)
+   * params on success.
    *
    * Throws a `GuardrailValidationError` on failure so callers can handle
-   * tool-call rejections without a full process crash.
+   * tool-call rejections without a full process crash. The error carries a
+   * self-correction prompt so the model can retry with valid arguments (#362).
    */
   validateToolParams<T = unknown>(
     toolName: string,
@@ -144,21 +155,22 @@ export class GuardrailMiddleware {
       );
     }
 
-    const result = schema.safeParse(rawParams);
-    if (!result.success) {
-      const message = result.error.issues
-        .map((i) => `${i.path.join(".")}: ${i.message}`)
-        .join("; ");
+    const result = sanitizeToolCall(toolName, rawParams, schema);
+
+    if (!result.executionAllowed) {
+      const issues = result.sanitizationErrors ?? ["unknown validation failure"];
 
       log.warn("Guardrail: tool parameter validation failed", {
         toolName,
-        issues: result.error.issues,
+        issues,
       });
 
-      throw new GuardrailValidationError(toolName, message);
+      throw new GuardrailValidationError(toolName, issues.join("; "), {
+        selfCorrectionPrompt: buildSelfCorrectionPrompt(toolName, issues),
+      });
     }
 
-    return result.data as T;
+    return result.validatedArguments as T;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
@@ -199,11 +211,17 @@ export class GuardrailMiddleware {
 }
 
 export class GuardrailValidationError extends Error {
+  /** Structured feedback to send back to the model so it can self-correct (#362). */
+  readonly selfCorrectionPrompt: string;
+
   constructor(
     public readonly toolName: string,
-    message: string
+    message: string,
+    options: { selfCorrectionPrompt?: string } = {}
   ) {
     super(`Tool parameter validation failed for "${toolName}": ${message}`);
     this.name = "GuardrailValidationError";
+    this.selfCorrectionPrompt =
+      options.selfCorrectionPrompt ?? buildSelfCorrectionPrompt(toolName, [message]);
   }
 }
