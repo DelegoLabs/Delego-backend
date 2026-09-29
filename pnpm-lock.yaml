@@ -243,6 +243,15 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.758.0
         version: 3.1141.0
+      '@delegolabs/payments':
+        specifier: workspace:*
+        version: link:../payments
+      '@delegolabs/types':
+        specifier: workspace:*
+        version: link:../../../packages/types
+      '@delegolabs/utils':
+        specifier: workspace:*
+        version: link:../../../packages/utils
       '@simplewebauthn/server':
         specifier: ^13.1.0
         version: 13.3.3
