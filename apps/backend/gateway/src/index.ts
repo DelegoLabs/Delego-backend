@@ -6,6 +6,7 @@ import { createLogger, startHttpServer, corsMiddleware, securityHeadersMiddlewar
 import { registerRoutes } from "../routes/index.js";
 import { bodyLimitMiddleware } from "../routes/api-v1.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
+import { idempotencyMiddleware } from "../middleware/idempotency.js";
 import { requestIdMiddleware } from "../middleware/requestId.js";
 import { compressionMiddleware } from "../middleware/compression.js";
 import { openApiValidationMiddleware } from "../middleware/openApiValidation.js";
@@ -39,6 +40,9 @@ startHttpServer({
       validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
     }),
     rateLimitMiddleware(),
+    // Deduplicates retried mutations (Issue #380): must wrap route handlers,
+    // so it runs after auth/rate-limiting and before response capture points.
+    idempotencyMiddleware(),
     compressionMiddleware(),
     requestResponseLoggingMiddleware(),
   ],
