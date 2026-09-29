@@ -3,7 +3,7 @@ import type {
   TransactionRequest,
   TransactionResult,
 } from "@delegolabs/types";
-import { createLogger, SERVICE_AUTH_HEADER } from "@delegolabs/utils";
+import { createLogger, SERVICE_AUTH_HEADER, tracedFetch } from "@delegolabs/utils";
 import { getWalletUrl } from "./config.js";
 import { estimateTransactionFee, type FeeEstimate } from "./feeEstimator.js";
 import { normalizeContractError } from "./errors.js";
@@ -68,7 +68,7 @@ export async function submitContractCall(
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await tracedFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
