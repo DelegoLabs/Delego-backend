@@ -6,6 +6,7 @@ import { escrowCoordinator } from "./escrowCoordinator/index.js";
 import { resetAutoReleaseConfigStore, setAutoReleaseConfig } from "./autoRelease/configStore.js";
 import { resetConfirmationTracker } from "./autoRelease/confirmationTracker.js";
 import { resetReleaseQueue } from "./autoRelease/releaseQueue.js";
+import { resetWebhookIdempotencyCache } from "./autoRelease/idempotency.js";
 import { registerRoutes } from "./routes.js";
 import { enqueueAutoRelease } from "./workers/autoRelease.js";
 import type { Route } from "@delegolabs/utils";
@@ -29,7 +30,7 @@ type MockResponse = ServerResponse & { statusCode: number; body: string };
 
 function createMockReq(body: string, headers: Record<string, string> = {}): IncomingMessage {
   const req = new EventEmitter() as unknown as IncomingMessage;
-  req.headers = { "content-type": "application/json", ...headers };
+  req.headers = { "content-type": "application/json", "x-idempotency-key": "test-idempotency-key", ...headers };
   process.nextTick(() => {
     req.emit("data", Buffer.from(body));
     req.emit("end");
@@ -81,6 +82,7 @@ describe("POST /escrow/:escrowId/delivery-confirmed", () => {
     resetAutoReleaseConfigStore();
     resetConfirmationTracker();
     resetReleaseQueue();
+    resetWebhookIdempotencyCache();
     vi.mocked(escrowCoordinator.getEscrowStatus).mockReset();
     vi.mocked(escrowCoordinator.releaseEscrow).mockReset();
     vi.mocked(enqueueAutoRelease).mockReset().mockResolvedValue({
@@ -105,6 +107,19 @@ describe("POST /escrow/:escrowId/delivery-confirmed", () => {
 
     expect(res.statusCode).toBe(401);
     expect(JSON.parse(res.body).error.code).toBe("UNAUTHORIZED");
+    expect(escrowCoordinator.releaseEscrow).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when the idempotency key is missing", async () => {
+    const body = payload();
+    const req = createMockReq(body, { "x-signature": sign(body) });
+    delete req.headers["x-idempotency-key"];
+    const res = createMockRes();
+
+    await findDeliveryConfirmedRoute().handler(req, res, { escrowId: "42" });
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
     expect(escrowCoordinator.releaseEscrow).not.toHaveBeenCalled();
   });
 
@@ -160,6 +175,30 @@ describe("POST /escrow/:escrowId/delivery-confirmed", () => {
     const parsed = JSON.parse(res.body);
     expect(parsed.data.success).toBe(true);
     expect(parsed.data.transactionHash).toBe("tx-webhook");
+  });
+
+  it("returns the cached response for a duplicate idempotency key", async () => {
+    vi.mocked(escrowCoordinator.getEscrowStatus).mockResolvedValue({
+      escrowId: "42", buyer: "GBUYER", seller: "GSELLER", amount: "1000",
+      status: "funded", createdAt: Date.now(),
+    });
+    vi.mocked(escrowCoordinator.releaseEscrow).mockResolvedValue({
+      txHash: "tx-webhook", ledger: 4, status: "released", sellerAddress: "GSELLER", amount: "1000",
+    });
+
+    const route = findDeliveryConfirmedRoute();
+    const body = payload();
+    const headers = { "x-signature": sign(body), "x-idempotency-key": "duplicate-request" };
+    const firstResponse = createMockRes();
+    const secondResponse = createMockRes();
+
+    await route.handler(createMockReq(body, headers), firstResponse, { escrowId: "42" });
+    await route.handler(createMockReq(body, headers), secondResponse, { escrowId: "42" });
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(secondResponse.body).toBe(firstResponse.body);
+    expect(escrowCoordinator.releaseEscrow).toHaveBeenCalledTimes(1);
   });
 
   it("queues a verified delivery until the configured grace window ends", async () => {
