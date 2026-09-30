@@ -56,6 +56,8 @@ const server = startHttpServer({
     // sunset versions get 410 Gone before any further processing.
     versionNegotiationMiddleware(),
     bodyLimitMiddleware(),
+    // OpenAPI request validation - validates path, query, and body parameters
+    validateRequest(),
     openApiValidationMiddleware({
       validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
     }),
