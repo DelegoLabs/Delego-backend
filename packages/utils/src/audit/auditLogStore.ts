@@ -20,6 +20,7 @@ import type {
   Queryable,
 } from "./types.js";
 import { computeEntryHash } from "./hashChain.js";
+import { dispatchAuditLogEntry } from "./cefExporter.js";
 
 export class AuditLogError extends Error {
   constructor(message: string) {
@@ -175,7 +176,9 @@ export async function recordAuditEntry(
     ]
   );
 
-  return mapRow(result.rows[0]);
+  const entry = mapRow(result.rows[0]);
+  dispatchAuditLogEntry(entry);
+  return entry;
 }
 
 const DEFAULT_LIMIT = 20;

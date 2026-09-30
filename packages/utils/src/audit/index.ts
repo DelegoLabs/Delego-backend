@@ -6,6 +6,13 @@ export {
 } from "./auditLogStore.js";
 
 export { computeEntryHash, verifyChain, type HashableAuditFields } from "./hashChain.js";
+export {
+  configureAuditLogTransport,
+  createCefSyslogTransport,
+  formatCef,
+  type AuditLogTransport,
+  type CefSyslogOptions,
+} from "./cefExporter.js";
 
 export {
   computeCurrentHash,
