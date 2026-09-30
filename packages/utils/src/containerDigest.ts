@@ -4,7 +4,7 @@ import { exec } from "child_process";
 export class ContainerRolloutVerifier {
   public async inspectImageDigest(imageName: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      exec(`docker inspect --format="{{index .RepoDigests 0}}" ${imageName}`, (error, stdout, stderr) => {
+      exec(`docker inspect --format="{{index .RepoDigests 0}}" ${imageName}`, (error, stdout, _stderr) => {
         if (error) {
           reject(new Error(`Failed to inspect image digest for ${imageName}: ${error.message}`));
           return;

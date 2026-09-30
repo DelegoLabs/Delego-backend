@@ -125,6 +125,50 @@ function respondIfPayloadTooLarge(res: Parameters<typeof json>[0], err: unknown)
   return false;
 }
 
+export interface RetryOptions {
+  maxRetries?: number;
+  initialDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  shouldRetry?: (err: unknown) => boolean;
+}
+
+export function isNetworkError(err: unknown): boolean {
+  if (!err) return false;
+  const status = (err as any)?.response?.status ?? (err as any)?.status;
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return false;
+  }
+  return true;
+}
+
+export async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelayMs: number = 500,
+  options: RetryOptions = {},
+): Promise<T> {
+  const max = options.maxRetries ?? maxRetries;
+  const initialDelay = options.initialDelayMs ?? initialDelayMs;
+  const delayFn =
+    options.sleep ??
+    ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const predicate = options.shouldRetry ?? isNetworkError;
+
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      if (attempt >= max || !predicate(err)) {
+        throw err;
+      }
+      const delay = initialDelay * Math.pow(2, attempt);
+      await delayFn(delay);
+      attempt++;
+    }
+  }
+}
+
 export function registerRoutes(
   simulator = new SorobanTransactionSimulator(readSorobanRpcConfig()),
 ): Route[] {
@@ -529,7 +573,7 @@ export function registerRoutes(
           const server = new Horizon.Server(horizonUrl);
           let account;
           try {
-            account = await server.loadAccount(address);
+            account = await retryWithBackoff(() => server.loadAccount(address));
           } catch (err: any) {
             if (err.response?.status === 404) {
               json(res, 404, {
@@ -704,7 +748,7 @@ export function registerRoutes(
           let txResponse;
           try {
             // Verify account exists before retrieving history
-            await server.loadAccount(address);
+            await retryWithBackoff(() => server.loadAccount(address));
 
             let builder = server
               .transactions()
@@ -714,7 +758,7 @@ export function registerRoutes(
             if (cursorParam) {
               builder = builder.cursor(cursorParam);
             }
-            txResponse = await builder.call();
+            txResponse = await retryWithBackoff(() => builder.call());
           } catch (err: any) {
             if (err.response?.status === 404) {
               json(res, 404, {
