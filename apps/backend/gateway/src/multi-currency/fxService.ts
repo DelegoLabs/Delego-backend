@@ -9,6 +9,8 @@ import { fetchWithCorrelation } from "../../middleware/correlation.js";
  * Manages FX rates from multiple providers and calculates conversion paths
  */
 
+const log = createChildLogger({ module: "fx-service" });
+
 const FX_PROVIDERS = {
   stellar_lumen: "https://stellar-lumen-oracle.example.com",
   polygon_oracle: "https://polygon-oracle.example.com",
@@ -58,7 +60,12 @@ async function fetchFromProvider(provider: string, base: string, quote: string):
       ask,
     };
   } catch (error) {
-    console.error(`Failed to fetch FX rate from ${provider}:`, error);
+    log.error("Failed to fetch FX rate from provider", {
+      provider,
+      base,
+      quote,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw new Error(`FX rate fetch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
 }
@@ -252,7 +259,11 @@ export async function batchGetFXRates(pairs: Array<{ base: string; quote: string
       });
       rates.push(rate);
     } catch (error) {
-      console.error(`Failed to get rate for ${pair.base}/${pair.quote}:`, error);
+      log.error("Failed to get FX rate for currency pair", {
+        base: pair.base,
+        quote: pair.quote,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -274,7 +285,11 @@ export async function refreshAllFXRates(): Promise<void> {
             quoteCurrency: otherCurrency.code,
           });
         } catch (error) {
-          console.error(`Failed to refresh rate for ${currency.code}/${otherCurrency.code}:`, error);
+          log.error("Failed to refresh FX rate", {
+            baseCurrency: currency.code,
+            quoteCurrency: otherCurrency.code,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }

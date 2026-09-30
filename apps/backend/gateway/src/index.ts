@@ -32,7 +32,7 @@ void initTelemetry(SERVICE_NAME).catch((err: unknown) =>
 );
 const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
-log.info("Starting gateway", { port, nodeEnv });
+logger.info("Starting gateway", { port, nodeEnv, logLevel });
 
 // Start emergency kill-switch subscriber
 getEmergencyKillSwitchService().start().catch((err) => {
