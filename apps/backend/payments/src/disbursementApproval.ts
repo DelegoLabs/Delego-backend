@@ -7,7 +7,7 @@
  * public keys and tracks quorum state.
  */
 
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, tracedFetch } from "@delegolabs/utils";
 import * as crypto from "node:crypto";
 import { Keypair } from "@stellar/stellar-sdk";
 
@@ -258,7 +258,7 @@ async function broadcastDisbursement(state: DisbursementState): Promise<void> {
 
   try {
     const walletUrl = process.env.WALLET_SERVICE_URL ?? "http://localhost:3012";
-    const res = await fetch(`${walletUrl}/tx/submit`, {
+    const res = await tracedFetch(`${walletUrl}/tx/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

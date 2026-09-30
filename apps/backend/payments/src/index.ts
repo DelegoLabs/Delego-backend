@@ -3,7 +3,7 @@
  * #68 Dispute Resolution Arbiter Multi-Sig
  * #374 Enterprise Disbursement Multi-Sig Quorum
  */
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, tracedFetch } from "@delegolabs/utils";
 import { startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
 import { registerRoutes } from "./routes.js";
 import { startReconciliationScheduler } from "./reconciliation/settlementReconciler.js";
@@ -405,7 +405,7 @@ async function submitDisputeResolution(state: DisputeResolutionState): Promise<v
 
   try {
     const walletUrl = process.env.WALLET_SERVICE_URL ?? "http://localhost:3012";
-    const res = await fetch(`${walletUrl}/escrow/${encodeURIComponent(state.escrowId)}/dispute-resolve`, {
+    const res = await tracedFetch(`${walletUrl}/escrow/${encodeURIComponent(state.escrowId)}/dispute-resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

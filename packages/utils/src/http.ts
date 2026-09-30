@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { correlationMiddleware } from "./correlation.js";
 import { withServerSpan } from "./telemetry/propagation.js";
 
 // ─── Request body size limiting ────────────────────────────────────────────
@@ -139,7 +140,7 @@ export function startHttpServer(options: HttpServerOptions): Server {
 
   const handleRequest = async (req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> => {
 
-    const middlewares = options.middleware ?? [];
+    const middlewares = [correlationMiddleware, ...(options.middleware ?? [])];
     let index = 0;
 
     const next = async (err?: any) => {

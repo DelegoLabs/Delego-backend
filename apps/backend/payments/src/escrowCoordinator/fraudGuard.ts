@@ -1,4 +1,4 @@
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, tracedFetch } from "@delegolabs/utils";
 
 const log = createLogger("escrow-fraud-guard");
 
@@ -17,7 +17,7 @@ export interface EscrowVelocityCheck {
  */
 export async function checkEscrowVelocity(accountAddress: string): Promise<EscrowVelocityCheck> {
   try {
-    const res = await fetch(`${FRAUD_URL}/api/v1/fraud/escrow-velocity`, {
+    const res = await tracedFetch(`${FRAUD_URL}/api/v1/fraud/escrow-velocity`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ accountAddress }),
