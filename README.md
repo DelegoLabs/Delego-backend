@@ -115,7 +115,7 @@ pnpm build
 ```bash
 pnpm test                    # all workspaces
 pnpm test:unit               # unit tests
-pnpm test:integration        # integration tests
+pnpm test:integration        # integration test
 pnpm test:e2e                # end-to-end tests
 ```
 
