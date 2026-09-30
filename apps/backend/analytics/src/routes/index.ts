@@ -1,4 +1,5 @@
 import { route, type Route } from "@delegolabs/utils";
+import { getSpendSummaryHandler } from "./spendSummary.js";
 import {
   getFunnelMetricsHandler,
   getEngagementMetricsHandler,
@@ -18,6 +19,7 @@ import {
 } from "./analyticsRoutes.js";
 export function registerAnalyticsRoutes(): Route[] {
   return [
+    route("GET", "/api/v1/analytics/spend-summary", getSpendSummaryHandler),
     // Funnel metrics
     route("GET", "/api/v1/analytics/funnel", getFunnelMetricsHandler),
     route("GET", "/api/v1/analytics/engagement", getEngagementMetricsHandler),
