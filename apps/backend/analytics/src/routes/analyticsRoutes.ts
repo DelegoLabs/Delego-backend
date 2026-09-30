@@ -5,6 +5,7 @@ import { json, readBodyWithLimit } from "@delegolabs/utils";
 import { extractAuth } from "../../../gateway/middleware/auth.js";
 import { sendApiError, unauthorized } from "../../../gateway/src/errors.js";
 import { analyticsService } from "../services/analyticsService.js";
+import { merchantReputationService } from "../services/merchantReputationService.js";
 import { abTestService } from "../services/abTestService.js";
 import { cohortService } from "../services/cohortService.js";
 import { revenueService } from "../services/revenueService.js";
@@ -487,6 +488,44 @@ export async function getRevenueMetricsHandler(req: IncomingMessage, res: Server
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch revenue metrics";
+    sendApiError(res, 500, "INTERNAL_ERROR", message, req);
+  }
+}
+
+/**
+ * GET /api/v1/analytics/merchants/:merchantId/quality-score
+ *
+ * #392 — Merchant reputation weight: a normalized 0-100 composite score
+ * factoring in dispute frequency, fulfillment/on-time rate, and
+ * cancellation rate. Cached in Redis; see merchantReputationService.
+ *
+ * Query params:
+ *   periodStart - Only consider orders created on/after this ISO-8601 timestamp
+ *   periodEnd   - Only consider orders created on/before this ISO-8601 timestamp
+ */
+export async function getMerchantQualityScoreHandler(req: IncomingMessage, res: ServerResponse, params: Record<string, string>): Promise<void> {
+  const auth = extractAuth(req);
+  if (!auth.userId) {
+    unauthorized(res, "Authentication required", req);
+    return;
+  }
+
+  const merchantId = params["merchantId"];
+  if (!merchantId) {
+    sendApiError(res, 400, "VALIDATION_ERROR", "merchantId is required", req);
+    return;
+  }
+
+  try {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const periodStart = url.searchParams.get("periodStart") || undefined;
+    const periodEnd = url.searchParams.get("periodEnd") || undefined;
+
+    const metrics = await merchantReputationService.getMerchantQualityMetrics({ merchantId, periodStart, periodEnd });
+
+    json(res, 200, { data: metrics, error: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to compute merchant quality score";
     sendApiError(res, 500, "INTERNAL_ERROR", message, req);
   }
 }
