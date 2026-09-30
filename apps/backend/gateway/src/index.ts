@@ -2,7 +2,7 @@
  * @delegolabs/gateway — API entry point
  * Routes external requests to internal services.
  */
-import { createLogger, initTelemetry, startHttpServer, corsMiddleware, securityHeadersMiddleware } from "@delegolabs/utils";
+import { createLogger, initTelemetry, startHttpServer, corsMiddleware, securityHeadersMiddleware, ServiceMetricsRegistry } from "@delegolabs/utils";
 import { registerRoutes } from "../routes/index.js";
 import { bodyLimitMiddleware } from "../routes/api-v1.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
@@ -18,6 +18,7 @@ import { killSwitchMiddleware } from "../middleware/killSwitch.js";
 import { getEmergencyKillSwitchService } from "./emergency/killSwitch.js";
 import { registerGracefulShutdown } from "./shutdown.js";
 import { startMetricsSampling, adaptiveRateLimitingMiddleware } from "./rateLimit/adaptive.js";
+import { sequelize, initializeDbMetrics } from "./db.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -38,6 +39,10 @@ logger.info("Starting gateway", { port, nodeEnv, logLevel });
 getEmergencyKillSwitchService().start().catch((err) => {
   log.warn("Failed to initialize emergency kill-switch service", { error: err.message });
 });
+
+// Initialize database query latency metrics (Issue #387)
+const metricsRegistry = new ServiceMetricsRegistry();
+initializeDbMetrics(metricsRegistry);
 
 startMetricsSampling();
 

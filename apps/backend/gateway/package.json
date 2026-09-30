@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@delegolabs/utils": "workspace:*",
     "@aws-sdk/client-s3": "^3.758.0",
     "@aws-sdk/s3-request-presigner": "^3.758.0",
     "@simplewebauthn/server": "^13.1.0",
