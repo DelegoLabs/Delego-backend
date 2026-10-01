@@ -12,11 +12,11 @@
  * runbook document in docs/deployment/redis-cluster.md, not as code that
  * has been run against real infrastructure.
  */
-import { Cluster, Redis } from "ioredis";
+import { Cluster, Redis, Sentinel } from "ioredis";
 // @ts-ignore -- ioredis-mock has no first-party types
 import MockRedis from "ioredis-mock";
 import { createLogger } from "@delegolabs/utils";
-import type { RedisClusterConfig } from "./types.js";
+import type { RedisClusterConfig, SentinelNodeConfig } from "./types.js";
 
 const log = createLogger("cache:client", process.env.LOG_LEVEL ?? "info");
 
@@ -68,6 +68,113 @@ export function clusterConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Redi
   };
 }
 
+/**
+ * Parse Sentinel topology from environment variables (#401).
+ *
+ * Recognized variables:
+ * - `REDIS_SENTINELS` — comma-separated `host:port` list (required to enable Sentinel)
+ * - `REDIS_SENTINEL_MASTER` — master name (default `mymaster`)
+ * - `REDIS_SENTINEL_ROLE` — `master` | `slave` (default `master`)
+ * - `REDIS_PASSWORD` / `REDIS_USERNAME` — optional ACL credentials
+ *
+ * Returns `null` when `REDIS_SENTINELS` is unset so callers can fall back to
+ * single-node or cluster mode.
+ */
+export function sentinelConfigFromEnv(
+  env: NodeJS.ProcessEnv = process.env
+): SentinelNodeConfig | null {
+  const sentinelsRaw = env.REDIS_SENTINELS?.trim();
+  if (!sentinelsRaw) return null;
+
+  const sentinels = sentinelsRaw.split(",").map((entry) => {
+    const trimmed = entry.trim();
+    const sep = trimmed.indexOf(":");
+    if (sep <= 0 || sep === trimmed.length - 1) return null;
+    const host = trimmed.slice(0, sep);
+    const port = Number(trimmed.slice(sep + 1));
+    if (!host || Number.isNaN(port) || port <= 0) return null;
+    return { host, port };
+  });
+
+  if (sentinels.length === 0 || sentinels.some((s) => s === null)) {
+    throw new Error(
+      "REDIS_SENTINELS must be a comma-separated list of host:port entries"
+    );
+  }
+
+  const role = env.REDIS_SENTINEL_ROLE === "slave" ? "slave" : "master";
+
+  return {
+    sentinels: sentinels as Array<{ host: string; port: number }>,
+    masterName: env.REDIS_SENTINEL_MASTER ?? "mymaster",
+    role,
+    password: env.REDIS_PASSWORD || undefined,
+    username: env.REDIS_USERNAME || undefined,
+    sentinelTimeoutMs: Number(env.REDIS_SENTINEL_TIMEOUT_MS ?? 10_000),
+    maxDiscoveryWaitMs: Number(env.REDIS_SENTINEL_MAX_WAIT_MS ?? 30_000),
+  };
+}
+
+/** True when the process should connect through Sentinel rather than a fixed node. */
+export function isSentinelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.REDIS_SENTINELS?.trim());
+}
+
+let sentinelClient: CacheRedisClient | null = null;
+
+/**
+ * Connect via Redis Sentinel, which auto-discovers the active master (and
+ * optionally a replica) and reconnects across failover (#401).
+ *
+ * ioredis' `Sentinel` constructor watches topology changes: when the current
+ * master is promoted away, the client reconnects to the new master using the
+ * same master name. `enableOfflineQueue` keeps commands buffered during the
+ * brief failover window.
+ */
+export function getSentinelClient(
+  config: SentinelNodeConfig,
+  env: NodeJS.ProcessEnv = process.env
+): CacheRedisClient {
+  if (sentinelClient) return sentinelClient;
+
+  const role = config.role === "slave" ? "slave" : "master";
+  log.info("Connecting cache client in Redis Sentinel mode", {
+    masterName: config.masterName,
+    role,
+    sentinelCount: config.sentinels.length,
+  });
+
+  const client = new Sentinel(config.sentinels, {
+    name: config.masterName,
+    role,
+    sentinelPassword: config.password,
+    sentinelUsername: config.username,
+    password: config.password,
+    username: config.username,
+    sentinels: config.sentinels,
+    enableOfflineQueue: env.REDIS_ENABLE_OFFLINE_QUEUE !== "false",
+    connectTimeout: config.sentinelTimeoutMs ?? 10_000,
+    commandTimeout: Number(env.REDIS_COMMAND_TIMEOUT_MS ?? 5_000),
+    retryStrategy: defaultRetryStrategy,
+    // Failover reconnection: ioredis re-resolves the master via Sentinel.
+    maxRetriesPerRequest: 3,
+  }) as unknown as CacheRedisClient;
+
+  // Surface failover events for ops without throwing on transient blips.
+  const raw = client as unknown as NodeJS.EventEmitter;
+  if (typeof raw.on === "function") {
+    raw.on("error", (err: unknown) => {
+      log.error("Redis Sentinel client error", { err });
+    });
+    raw.on("+master", (info: unknown) => {
+      log.info("Redis Sentinel master changed", { info });
+    });
+  }
+
+  sentinelClient = client;
+  return client;
+}
+
 let client: CacheRedisClient | null = null;
 
 function shouldUseMock(env: NodeJS.ProcessEnv): boolean {
@@ -101,6 +208,13 @@ export function getCacheClient(
     log.info("Using in-memory mock Redis client for cache module");
     const MockRedisConstructor = MockRedis as new () => CacheRedisClient;
     client = new MockRedisConstructor();
+    return client;
+  }
+
+  // Sentinel auto-discovery takes priority when configured (#401).
+  const sentinelConfig = sentinelConfigFromEnv(env);
+  if (sentinelConfig) {
+    client = getSentinelClient(sentinelConfig, env);
     return client;
   }
 
@@ -141,6 +255,7 @@ export function _setCacheClientForTesting(testClient: CacheRedisClient): void {
 /** Test-only seam: drop the singleton so the next call reconstructs it. */
 export function _resetCacheClientForTesting(): void {
   client = null;
+  sentinelClient = null;
 }
 
 /** Gracefully close the underlying connection, if one is open. */

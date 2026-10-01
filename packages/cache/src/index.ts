@@ -10,7 +10,10 @@
 export type { CacheRedisClient } from "./client.js";
 export {
   getCacheClient,
+  getSentinelClient,
   clusterConfigFromEnv,
+  sentinelConfigFromEnv,
+  isSentinelEnabled,
   defaultRetryStrategy,
   disconnectCacheClient,
   _setCacheClientForTesting,
@@ -34,6 +37,7 @@ export {
 
 export type {
   RedisClusterConfig,
+  SentinelNodeConfig,
   CacheEntry,
   CacheInvalidation,
   ClusterMetrics,
