@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Backend microservices, agents, and shared SDK for [Delego](https://github.com/DelegoLabs/Delego) — AI-Powered Delegated Commerce on Stellar**
+**Backend microservices, agents, and shared SDK for [Delego](https://github.com/DelegoLabs/Delego) — AI-Powered Delegated Commerce on Stellars**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
