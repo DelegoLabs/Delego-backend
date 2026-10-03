@@ -14,6 +14,51 @@ export interface RedisClusterConfig {
   enableOfflineQueue: boolean;
   connectTimeout: number;
   commandTimeout: number;
+  /**
+   * When true, read-only commands are scaled across read replicas instead of
+   * being served by the master. Drives `scaleReads` in the ioredis `Cluster`
+   * options — see `resolveScaleReads` in ./clusterTopology.js.
+   */
+  enableReadOnlyReplicas: boolean;
+  /** Interval between automatic per-node health-check pings. */
+  healthCheckIntervalMs: number;
+  /** Per-ping timeout before a node is considered unreachable. */
+  healthCheckTimeoutMs: number;
+  /** Consecutive failed pings before a node is marked unhealthy. */
+  healthCheckFailureThreshold: number;
+  /** How often ioredis refreshes its slot map via `CLUSTER SLOTS`. */
+  slotsRefreshIntervalMs: number;
+  /** Optional `AUTH` password applied to every node connection. */
+  password?: string;
+}
+
+/**
+ * The cluster topology a client is configured against, as declared by the
+ * environment. ioredis discovers the *live* topology (and failover-driven
+ * master/replica promotion) itself via `CLUSTER SLOTS`; these lists are the
+ * configured seed points plus the replicas operators expect read traffic on.
+ */
+export interface RedisClusterTopology {
+  /** Seed/primary nodes as `host:port`, comma-separated in the environment. */
+  masters: string[];
+  /** Read-replica seed nodes as `host:port`. */
+  replicas: string[];
+  /** Whether read-only commands should be routed to the replicas above. */
+  enableReadOnlyReplicas: boolean;
+}
+
+/** Role of a single cluster node, as used for routing and health reporting. */
+export type RedisNodeRole = "master" | "replica";
+
+/** Health-check state tracked for one cluster node. */
+export interface RedisNodeHealth {
+  /** `host:port` identity of the node. */
+  id: string;
+  role: RedisNodeRole;
+  healthy: boolean;
+  consecutiveFailures: number;
+  lastError?: string;
+  lastCheckedAt?: string;
 }
 
 /**
