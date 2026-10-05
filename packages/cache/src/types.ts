@@ -61,6 +61,26 @@ export interface RedisNodeHealth {
   lastCheckedAt?: string;
 }
 
+/**
+ * Sentinel topology for HA Redis (#401).
+ *
+ * Mirrors the data type from the issue so downstream services share one
+ * canonical shape for Sentinel auto-discovery configuration.
+ */
+export interface SentinelNodeConfig {
+  sentinels: Array<{ host: string; port: number }>;
+  masterName: string;
+  role: "master" | "slave";
+  /** Optional password applied to both Sentinel and data-node connections. */
+  password?: string;
+  /** Optional username for ACL-enabled Redis (Redis 6+). */
+  username?: string;
+  /** Sentinel connection timeout in ms. */
+  sentinelTimeoutMs?: number;
+  /** How long to wait for a master to be discovered before failing. */
+  maxDiscoveryWaitMs?: number;
+}
+
 /** A single cached value plus the metadata needed for invalidation and observability. */
 export interface CacheEntry<T> {
   key: string;
