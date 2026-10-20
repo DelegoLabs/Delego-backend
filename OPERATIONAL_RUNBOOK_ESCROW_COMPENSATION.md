@@ -233,6 +233,47 @@ today.
 tail -100 /var/log/delego/notifications.log | grep "<txHash>"
 ```
 
+### Key Facts
+
+- Provider is `local`, `aws_kms`, or `vault` (env `ENCRYPTION_KEY_PROVIDER`).
+- The provider is **read-only after boot**: no automatic rotation. Rotation is
+  an explicit, operator-initiated run (below).
+- Denied decrypts are audited too, so access-control regressions are visible in
+  `encryption_audit_log`.
+- If `ENCRYPTION_MASTER_KEY` is absent in a non-dev environment, the local
+  provider refuses to boot (`defaultMasterSecret` throws) rather than
+  silently using an insecure default.
+
+## Key Rotation (zero-downtime, dual-encryption window)
+
+Rotation mints a new data-key version and keeps the previous one readable
+for the entire window — old rows decrypt until re-encryption backfills them.
+
+1. Prepare the new version's material.
+   - `local`: set `ENCRYPTION_MASTER_KEY_V<N+1>` and deploy config.
+   - `aws_kms`: nothing extra (envelope wraps under the same KMS key).
+   - `vault`: nothing extra (Transit derives per-version data keys).
+2. Deploy code and config **without** enabling re-encryption.
+3. Trigger rotation: start the rotation path (`KeyRotationManager.beginRotation`),
+   which mints version N+1, records it in `encryption_key_versions` (status
+   `active`), demotes N to `previous`, and promotes the provider's active
+   version so new writes target N+1. Because old rows keep their `keyVersion`
+   field, they still decrypt with N.
+4. Run the re-encryption backfill over PII columns:
+   ```sql
+   -- Match values whose key_version is still the previous one
+   SELECT table_name, column_name, id
+   FROM users u
+   WHERE u.encryption_key_version < N+1;
+   ```
+   Backfill operators must re-encrypt in old->new table order and update
+   each row's `keyVersion` atomically with its ciphertext.
+5. Verify dual decryption throughout the window (both `previous` and `active`
+   versions present).
+6. On completion, retire the old version: set status `retired`, and after the
+   retention period remove obsolete master secrets / wrapped keys.
+
+
 If the transaction hash exists in `payment_records` but no notification log
 line appears after a few polling intervals
 (`ESCROW_EVENT_POLL_INTERVAL_MS`, default 6s), check the listener's Redis
