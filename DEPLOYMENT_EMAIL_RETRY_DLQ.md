@@ -124,16 +124,7 @@ curl -X POST http://localhost:3015/notify/transaction-approval \
 Monitor the logs for the first hour of production traffic:
 
 ```bash
-# Watch logs for email dispatches
-tail -f /var/log/delego/notifications.log
-
-# Expected log patterns:
-# - "[notifications:email] DEBUG Email delivered successfully"
-# - "[notifications:config] INFO Email retry configuration loaded"
-
-# Alert conditions:
-# - "[notifications:dlq] WARN Email moved to Dead-Letter Queue"
-# - "[notifications:config] ERROR configuration validation failed"
+iguration validation failed"
 ```
 
 ### 7. Query DLQ to Verify Functionality
@@ -172,13 +163,7 @@ EMAIL_RETRY_BASE_DELAY_SECONDS=3
 
 If you want faster retries:
 
-```env
-# Decrease retry limit
-EMAIL_MAX_RETRIES=2
 
-# Decrease backoff delay (be careful with rate limiting)
-EMAIL_RETRY_BASE_DELAY_SECONDS=1
-```
 
 ### For Testing/Development
 
