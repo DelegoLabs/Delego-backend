@@ -1,6 +1,7 @@
 /**
  * Guardrail types — Issue #267
  * Sanitize untrusted merchant text and tool outputs against prompt injection.
+ * Invoice generation job types — Issue #invoice-worker
  */
 import { z } from "zod";
 
@@ -15,6 +16,29 @@ export interface GuardrailCheckResult {
   sanitizedText: string;
   /** 0.0 (clean) – 1.0 (highly suspicious) */
   riskScore: number;
+}
+
+// ── Invoice generation types ─────────────────────────────────────────────────
+
+export interface InvoiceGenerationJobData {
+  orderId: string;
+  merchantTaxId: string;
+  buyerName: string;
+  lineItems: Array<{
+    description: string;
+    qty: number;
+    unitPrice: string;
+    tax: string;
+  }>;
+  totalAmount: string;
+  currency: string;
+}
+
+export interface GeneratedInvoiceDTO {
+  invoiceNumber: string;
+  s3Url: string;
+  signatureHex: string;
+  generatedAt: string;
 }
 
 // ── Zod schemas for tool parameter validation ────────────────────────────────
@@ -37,6 +61,22 @@ export const InitiateCheckoutParamsSchema = z.object({
   totalAmountStroops: z.string().regex(/^\d+$/),
   assetCode: z.string().min(1).max(12),
   rationale: z.string().min(1).max(2048),
+});
+
+export const InvoiceLineItemSchema = z.object({
+  description: z.string().min(1).max(512),
+  qty: z.number().int().positive().max(9999),
+  unitPrice: z.string().regex(/^\d+(\.\d+)?$/),
+  tax: z.string().regex(/^\d+(\.\d+)?$/),
+});
+
+export const InvoiceGenerationJobDataSchema = z.object({
+  orderId: z.string().uuid(),
+  merchantTaxId: z.string().min(1).max(64),
+  buyerName: z.string().min(1).max(256),
+  lineItems: z.array(InvoiceLineItemSchema).min(1),
+  totalAmount: z.string().regex(/^\d+(\.\d+)?$/),
+  currency: z.string().min(1).max(12),
 });
 
 export type ToolName =
