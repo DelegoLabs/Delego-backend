@@ -9,6 +9,7 @@ import { encodeCursor, decodeCursor } from "../../src/base64Cursor.js";
 import { readJsonBody, InvalidJsonError, BodyTooLargeError } from "../../src/request.js";
 import { badRequest, notFound, unauthorized, forbidden, sendApiError } from "../../src/errors.js";
 import { Merchant, Product } from "../../src/models/index.js";
+import { getProductStockLevelHandler } from "../routes/products.js";
 
 const log = createLogger("gateway:catalog", process.env.LOG_LEVEL ?? "info");
 
@@ -387,6 +388,7 @@ export function registerCatalogRoutes(): Route[] {
     route("POST", "/api/v1/merchants/:merchantId/products", createProductHandler),
     route("GET", "/api/v1/merchants/:merchantId/products", listProductsHandler),
     route("GET", "/api/v1/products/:productId", getProductHandler),
+    route("GET", "/api/v1/products/:productId/stock-level", getProductStockLevelHandler),
     route("PUT", "/api/v1/products/:productId", updateProductHandler),
     route("DELETE", "/api/v1/products/:productId", deleteProductHandler),
   ];
