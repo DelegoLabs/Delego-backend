@@ -1,10 +1,11 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import {
   calculatePayoutFees,
   DEFAULT_BASE_PLATFORM_FEE_PERCENT,
   DEFAULT_NETWORK_GAS_RESERVE_STROOPS,
   DEFAULT_VOLUME_TIERS,
-} from "./feeCalculator.js";
+} from "./feeCalculator.ts";
 
 describe("feeCalculator - Issue #623", () => {
   it("guarantees netPayoutStroops + totalDeductions === grossAmountStroops invariant", () => {
@@ -30,8 +31,8 @@ describe("feeCalculator - Issue #623", () => {
         result.referralFeeStroops +
         result.networkGasReserveStroops;
 
-      expect(result.netPayoutStroops + totalDeductions).toBe(result.grossAmountStroops);
-      expect(result.netPayoutStroops >= 0n).toBe(true);
+      assert.strictEqual(result.netPayoutStroops + totalDeductions, result.grossAmountStroops);
+      assert.ok(result.netPayoutStroops >= 0n);
     }
   });
 
@@ -44,7 +45,7 @@ describe("feeCalculator - Issue #623", () => {
       basePlatformFeePercent: basePercent,
       monthlyVolumeStroops: 5_000_000_000n, // < 10,000,000,000
     });
-    expect(resultTier0.platformFeePercent).toBe(2.0);
+    assert.strictEqual(resultTier0.platformFeePercent, 2.0);
 
     // Tier 1: 10% discount (2.0 * 0.9 = 1.8%)
     const resultTier1 = calculatePayoutFees({
@@ -52,7 +53,7 @@ describe("feeCalculator - Issue #623", () => {
       basePlatformFeePercent: basePercent,
       monthlyVolumeStroops: 15_000_000_000n, // >= 10,000,000,000
     });
-    expect(resultTier1.platformFeePercent).toBe(1.8);
+    assert.strictEqual(resultTier1.platformFeePercent, 1.8);
 
     // Tier 2: 20% discount (2.0 * 0.8 = 1.6%)
     const resultTier2 = calculatePayoutFees({
@@ -60,7 +61,7 @@ describe("feeCalculator - Issue #623", () => {
       basePlatformFeePercent: basePercent,
       monthlyVolumeStroops: 60_000_000_000n, // >= 50,000,000,000
     });
-    expect(resultTier2.platformFeePercent).toBe(1.6);
+    assert.strictEqual(resultTier2.platformFeePercent, 1.6);
 
     // Tier 3: 30% discount (2.0 * 0.7 = 1.4%)
     const resultTier3 = calculatePayoutFees({
@@ -68,7 +69,7 @@ describe("feeCalculator - Issue #623", () => {
       basePlatformFeePercent: basePercent,
       monthlyVolumeStroops: 150_000_000_000n, // >= 100,000,000,000
     });
-    expect(resultTier3.platformFeePercent).toBe(1.4);
+    assert.strictEqual(resultTier3.platformFeePercent, 1.4);
   });
 
   it("handles combination of flat and percentage referral fees", () => {
@@ -81,29 +82,34 @@ describe("feeCalculator - Issue #623", () => {
     });
 
     // 0.5% of 1_000_000_000 is 5_000_000 + 500_000 flat = 5_500_000
-    expect(result.referralFeeStroops).toBe(5_500_000n);
+    assert.strictEqual(result.referralFeeStroops, 5_500_000n);
     // 1% of 1_000_000_000 is 10_000_000
-    expect(result.platformFeeStroops).toBe(10_000_000n);
-    expect(result.networkGasReserveStroops).toBe(100_000n);
-    expect(result.netPayoutStroops).toBe(
+    assert.strictEqual(result.platformFeeStroops, 10_000_000n);
+    assert.strictEqual(result.networkGasReserveStroops, 100_000n);
+    assert.strictEqual(
+      result.netPayoutStroops,
       1_000_000_000n - 10_000_000n - 5_500_000n - 100_000n
     );
   });
 
   it("throws error when deductions exceed gross amount", () => {
-    expect(() =>
-      calculatePayoutFees({
-        grossAmountStroops: 50_000n,
-        networkGasReserveStroops: 100_000n,
-      })
-    ).toThrow(/exceed gross balance/);
+    assert.throws(
+      () =>
+        calculatePayoutFees({
+          grossAmountStroops: 50_000n,
+          networkGasReserveStroops: 100_000n,
+        }),
+      /exceed gross balance/
+    );
   });
 
   it("throws error on negative gross amount", () => {
-    expect(() =>
-      calculatePayoutFees({
-        grossAmountStroops: -100n,
-      })
-    ).toThrow(/negative/);
+    assert.throws(
+      () =>
+        calculatePayoutFees({
+          grossAmountStroops: -100n,
+        }),
+      /negative/
+    );
   });
 });
