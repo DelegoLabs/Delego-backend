@@ -18,3 +18,5 @@ export type {
   EscrowSourceColumns,
   SettledEscrow,
 } from "./types.js";
+export { archiveCompletedEscrows, runArchivalCron } from "./archivalCron.js";
+export type { ArchivalCronOptions, ArchivalCronResult } from "./archivalCron.js";

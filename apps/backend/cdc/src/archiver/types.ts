@@ -9,6 +9,9 @@
  * Nothing is discarded: the archived row is stored as a full `to_jsonb` snapshot
  * of the source row, so columns added after this migration are captured too and
  * the audit history survives the move.
+ *
+ * The nightly runner lives in `apps/backend/src/workers/archivalCron.ts` and
+ * triggers at 02:00 UTC; the SQL function is created by the archival migration.
  */
 
 /**
@@ -87,6 +90,24 @@ export interface ArchiveRunResult {
   errors: string[];
 }
 
+/**
+ * Result of the post-run integrity check between the live and archive tables.
+ *
+ * Acceptance criteria require that archived rows remain searchable and that no
+ * row is lost or duplicated during the move, so the cron runner verifies the
+ * counts after each archival pass.
+ */
+export interface ArchiveIntegrityResult {
+  /** Rows still in the live table that are past the retention window. */
+  pendingRemaining: number;
+  /** Rows present in the archive table. */
+  archivedTotal: number;
+  /** True when the live + archive counts reconcile with the pre-run snapshot. */
+  consistent: boolean;
+  /** Human-readable detail for any mismatch detected. */
+  details: string[];
+}
+
 export const DEFAULT_ESCROW_ARCHIVER_CONFIG: EscrowArchiverConfig = {
   retentionDays: 90,
   batchSize: 500,
@@ -100,6 +121,17 @@ export const DEFAULT_ESCROW_ARCHIVER_CONFIG: EscrowArchiverConfig = {
     closedAt: "closed_at",
   },
 };
+
+/**
+ * Default cron schedule for the archival worker: 02:00 UTC daily.
+ *
+ * Kept here so the worker and any tests share a single source of truth for the
+ * schedule required by the issue.
+ */
+export const DEFAULT_ARCHIVAL_CRON_SCHEDULE = "0 2 * * *";
+
+/** IANA timezone the cron schedule is evaluated in. */
+export const DEFAULT_ARCHIVAL_CRON_TIMEZONE = "UTC";
 
 /** Raised when the archiver is configured with an unusable value. */
 export class EscrowArchiverConfigError extends Error {

@@ -20,6 +20,11 @@
 import { createLogger, type Logger } from "@delegolabs/utils";
 import type { Pool } from "pg";
 
+/**
+ * Default UTC hour at which the nightly archival cron fires (02:00 UTC).
+ */
+export const DEFAULT_ARCHIVAL_CRON_HOUR_UTC = 2;
+
 import { PostgresEscrowArchiveStore, type EscrowArchiveStore } from "./store.js";
 import {
   DEFAULT_ESCROW_ARCHIVER_CONFIG,
@@ -179,6 +184,77 @@ export function resolveEscrowArchiverConfig(
       closedAt:
         env.ESCROW_ARCHIVE_CLOSED_AT_COLUMN ?? DEFAULT_ESCROW_ARCHIVER_CONFIG.sourceColumns.closedAt,
     },
+  };
+}
+
+/**
+ * Computes the delay in milliseconds until the next occurrence of the given
+ * UTC hour (e.g. 02:00 UTC). Used to schedule the nightly archival cron.
+ */
+export function msUntilNextUtcHour(
+  hourUtc: number = DEFAULT_ARCHIVAL_CRON_HOUR_UTC,
+  now: Date = new Date()
+): number {
+  if (!Number.isInteger(hourUtc) || hourUtc < 0 || hourUtc > 23) {
+    throw new EscrowArchiverConfigError(`hourUtc must be an integer in [0, 23], got "${hourUtc}"`);
+  }
+  const next = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hourUtc, 0, 0, 0)
+  );
+  if (next.getTime() <= now.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return next.getTime() - now.getTime();
+}
+
+/**
+ * Schedules the archival job to run daily at 02:00 UTC. Returns a stop function
+ * that clears any pending timer. The first run is scheduled for the next
+ * 02:00 UTC boundary; subsequent runs re-arm themselves after each pass.
+ */
+export function scheduleEscrowArchivalCron(
+  archiver: EscrowArchiver,
+  hourUtc: number = DEFAULT_ARCHIVAL_CRON_HOUR_UTC,
+  logger?: Logger
+): () => void {
+  const log = logger ?? createLogger("cdc:archiver:cron", process.env.LOG_LEVEL ?? "info");
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+
+  const arm = (): void => {
+    if (stopped) return;
+    const delay = msUntilNextUtcHour(hourUtc);
+    log.info("Escrow archival cron scheduled", {
+      hourUtc,
+      nextRunInMs: delay,
+      nextRunAt: new Date(Date.now() + delay).toISOString(),
+    });
+    timer = setTimeout(() => {
+      void (async () => {
+        try {
+          await archiver.runOnce();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.error("Escrow archival cron run failed", { error: message });
+        } finally {
+          arm();
+        }
+      })();
+    }, delay);
+    // Do not keep the process alive solely for the cron timer.
+    if (typeof timer === "object" && timer !== null && "unref" in timer) {
+      (timer as { unref: () => void }).unref();
+    }
+  };
+
+  arm();
+
+  return () => {
+    stopped = true;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
   };
 }
 

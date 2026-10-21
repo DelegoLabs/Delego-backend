@@ -1,7 +1,7 @@
 /**
  * Nightly scheduling for the escrow snapshot archiver (Issue #290).
  *
- * The job runs once a day at a fixed UTC hour (default 03:00) rather than on a
+ * The job runs once a day at a fixed UTC hour (default 02:00) rather than on a
  * rolling interval, so the pruner always lands in the low-traffic window and
  * never drifts across the day. Exactly one timer is armed at any moment; an
  * in-flight run suppresses the next tick (re-arming the following slot) instead
@@ -14,10 +14,10 @@ import type { EscrowArchiver } from "./escrowArchiver.js";
 
 const log = createLogger("cdc:archiver:scheduler", process.env.LOG_LEVEL ?? "info");
 
-const DEFAULT_HOUR_UTC = 3;
+const DEFAULT_HOUR_UTC = 2;
 
 export interface EscrowArchiveSchedulerOptions {
-  /** UTC hour (0-23) to run at. Defaults to `ESCROW_ARCHIVE_HOUR_UTC`, else 03:00. */
+  /** UTC hour (0-23) to run at. Defaults to `ESCROW_ARCHIVE_HOUR_UTC`, else 02:00. */
   hourUtc?: number;
   /** Run a pass immediately on start, in addition to the nightly slot. */
   runOnStart?: boolean;
@@ -30,7 +30,7 @@ export interface EscrowArchiveSchedulerOptions {
 /**
  * Milliseconds from `now` until the next occurrence of `hourUtc` UTC. Returns
  * exactly 24h when `now` sits precisely on the hour, so a run that starts at
- * 03:00:00.000 schedules the following day instead of re-firing immediately.
+ * 02:00:00.000 schedules the following day instead of re-firing immediately.
  */
 export function msUntilNextRun(hourUtc: number, now: Date = new Date()): number {
   if (!Number.isInteger(hourUtc) || hourUtc < 0 || hourUtc > 23) {
