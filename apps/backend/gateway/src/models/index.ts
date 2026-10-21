@@ -19,6 +19,8 @@ import { DeliveryEvidence } from "./DeliveryEvidence.js";
 import { PaymentRecord } from "./PaymentRecord.js";
 import { Merchant } from "./Merchant.js";
 import { Discount } from "./Discount.js";
+import { Cart } from "./Cart.js";
+import { CartItem } from "./CartItem.js";
 
 // User <-> Wallet (One-to-Many)
 User.hasMany(Wallet, { foreignKey: "userId", as: "wallets" });
@@ -96,6 +98,14 @@ Review.belongsTo(PaymentRecord, { foreignKey: "orderId", targetKey: "orderId", a
 Merchant.hasMany(Discount, { foreignKey: "merchantId", as: "discounts" });
 Discount.belongsTo(Merchant, { foreignKey: "merchantId", as: "merchant" });
 
+// User <-> Cart (One-to-Many) — Issue #574
+User.hasMany(Cart, { foreignKey: "userId", as: "carts" });
+Cart.belongsTo(User, { foreignKey: "userId", as: "owner" });
+
+// Cart <-> CartItem (One-to-Many) — Issue #574
+Cart.hasMany(CartItem, { foreignKey: "cartId", as: "items" });
+CartItem.belongsTo(Cart, { foreignKey: "cartId", as: "cart" });
+
 export {
   User,
   Wallet,
@@ -116,4 +126,6 @@ export {
   PaymentRecord,
   Merchant,
   Discount,
+  Cart,
+  CartItem,
 };

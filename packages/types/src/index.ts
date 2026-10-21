@@ -63,3 +63,4 @@ export * from "./feeEstimator.js";
 export * from "./inventory-alerts.js";
 export * from "./inventory.js";
 export * from "./discount.js";
+export * from "./cart.js";
