@@ -460,3 +460,14 @@ export {
   type CreateDisbursementApprovalInput,
   type SubmitOfficerSignatureInput,
 } from "./disbursementApproval.js";
+
+export {
+  calculatePayoutFees,
+  DEFAULT_BASE_PLATFORM_FEE_PERCENT,
+  DEFAULT_NETWORK_GAS_RESERVE_STROOPS,
+  DEFAULT_VOLUME_TIERS,
+  type PayoutFeeCalculation,
+  type VolumeTierDiscount,
+  type CalculatePayoutFeeOptions,
+} from "./feeCalculator.js";
+
