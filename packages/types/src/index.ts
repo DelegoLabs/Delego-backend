@@ -21,7 +21,17 @@ export * from "./pact-contract.js";
 export * from "./performance.js";
 export * from "./chaos.js";
 export * from "./cicd.js";
-export * from "./security.js";
+export {
+  type PenTestSeverity,
+  type PenTestStatus,
+  type PenTestScope,
+  type PenTestFinding,
+  type PenTestSummary,
+  type PenTestReport,
+  type BugBountyProgram,
+  type EmergencyBroadcastSignal,
+} from "./security.js";
+export { type ContainerDigestVerification } from "./container-digest.js";
 export * from "./coverage.js";
 export * from "./integration-testing.js";
 export * from "./e2e-testing.js";
