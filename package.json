@@ -10,8 +10,8 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "build": "pnpm -r build",
-    "dev": "pnpm --parallel -r --filter './apps/backend/*' --filter './agents' dev",
+    "build": "node api.js && pnpm -r build",
+    "dev": "node api.js && pnpm --parallel -r --filter './apps/backend/*' --filter './agents' dev",
     "dev:gateway": "pnpm --filter @delegolabs/gateway dev",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

@@ -105,7 +105,7 @@ import {
   testTemplateHandler,
   templateDocumentationHandler,
 } from "../../orchestrator/src/templates/routes.js";
-import { oracleHealthHandler } from "../../monitoring/src/oracleHealth.js";
+import { oracleHealthStatusHandler } from "../../monitoring/src/oracleHealth.js";
 import { registerPaymentRoutes } from "./payment.js";
 import { registerRecoveryRoutes } from "./recovery.js";
 import { registerMultiCurrencyRoutes } from "./multi-currency.js";
@@ -132,6 +132,9 @@ import {
   dbMetricsConfigHandler,
   dbPrometheusMetricsHandler,
 } from "../src/metrics/dbRoutes.js";
+import { payoutHistoryHandler } from "./merchants.js";
+// Issue: GET /api/v1/merchants/:id/payouts/history (CSV streaming)
+// Route is registered below inside registerRoutes().
 /** Register all gateway routes */
 export function registerRoutes(): Route[] {
   return [
@@ -171,7 +174,7 @@ export function registerRoutes(): Route[] {
     ...registerRecoveryRoutes(),
     // Multi-currency routes
     ...registerMultiCurrencyRoutes(),
-    // Admin â€" rate-limit dashboard (#340)
+    // Admin — rate-limit dashboard (#340)
     route("GET", "/api/v1/admin/rate-limit/metrics", rateLimitMetricsHandler),
     // Admin — tiered token-bucket rate-limit metrics (#51)
     route(
@@ -273,50 +276,36 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/templates/:id", getTemplateHandler),
     route("GET", "/api/v1/templates/:id/versions", listTemplateVersionsHandler),
     route("DELETE", "/api/v1/templates/:id", deleteTemplateHandler),
-    route(
-      "POST",
-      "/api/v1/templates/:id/deprecate",
-      deprecateTemplateVersionHandler,
-    ),
-    route(
-      "POST",
-      "/api/v1/templates/:id/instantiate",
-      instantiateTemplateHandler,
-    ),
+    route("POST", "/api/v1/templates/:id/versions/:action", deprecateTemplateVersionHandler),
     route("POST", "/api/v1/templates/:id/rate", rateTemplateHandler),
+    route("POST", "/api/v1/templates/:id/instantiate", instantiateTemplateHandler),
     route("POST", "/api/v1/templates/:id/test", testTemplateHandler),
-    route("GET", "/api/v1/templates/:id/docs", templateDocumentationHandler),
-    // Storefront - merchant product catalog (Issue #112)
-    ...registerStorefrontRoutes(),
-    // Merchant profile updates (#360)
-    route(
-      "PATCH",
-      "/api/v1/merchants/:merchantId",
-      updateMerchantProfileHandler,
-    ),
-    // Storage - pre-signed URLs for uploads (Issue #112)
-    ...registerStorageRoutes(),
-    // Disputes - merchant response endpoint (Issue #112)
-    ...registerDisputeRoutes(),
-    // Merchants - registration & store management
+    route("GET", "/api/v1/templates/:id/documentation", templateDocumentationHandler),
+    // Merchant profile
+    route("PATCH", "/api/v1/merchants/:id", updateMerchantProfileHandler),
+    // Merchant payout history export (CSV streaming)
+    route("GET", "/api/v1/merchants/:id/payouts/history", payoutHistoryHandler),
+    // Merchant routes
     ...registerMerchantRoutes(),
-    // Catalog - product CRUD with cursor pagination
+    // Catalog routes
     ...registerCatalogRoutes(),
-    // Product variants - variable products (sizes, colors, materials)
     ...registerVariantRoutes(),
-    // Reviews with buyer verification
     ...registerReviewRoutes(),
-    // Delivery evidence with IPFS/Arweave upload
     ...registerDeliveryEvidenceRoutes(),
-    // Restock waitlist subscriptions
-    ...registerWaitlistRoutes(),
-    // Bulk CSV catalog import jobs
     ...registerBulkCatalogImportRoutes(),
-    // Agent Chat - SSE streaming for agent conversations
+    // Storefront routes
+    ...registerStorefrontRoutes(),
+    // Storage routes
+    ...registerStorageRoutes(),
+    // Dispute routes
+    ...registerDisputeRoutes(),
+    // Waitlist routes
+    ...registerWaitlistRoutes(),
+    // Agent chat routes
     ...registerAgentChatRoutes(),
-    // Courier webhooks - FedEx/DHL/UPS normalizer (Issue #577)
+    // Webhook routes
     ...registerWebhookRoutes(),
-    // Merchant Discounts - promotion campaigns
+    // Discount routes
     ...registerDiscountRoutes(),
   ];
 }
