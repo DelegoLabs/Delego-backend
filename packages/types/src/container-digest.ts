@@ -1,5 +1,11 @@
+/**
+ * Container Digest Verification
+ * Used for verifying container image digests before rollout
+ */
+
 export interface ContainerDigestVerification {
-  imageName: string;
-  expectedDigest: string;
+  imageUri: string;
+  digest: string;
+  signedBy: string;
   verified: boolean;
 }

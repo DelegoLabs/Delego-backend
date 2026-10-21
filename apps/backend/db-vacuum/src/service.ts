@@ -13,7 +13,7 @@
 import { createLogger, type Logger } from "@delegolabs/utils";
 import type {
   BloatAlert,
-  BloatASsessment,
+  BloatAssessment,
   TableBloatStats,
   VacuumMetrics,
   VacuumRunSummary,
@@ -141,13 +141,13 @@ export class DatabaseVacuumService {
   }
 
   /** Scans and classifies without vacuuming or alerting. */
-  async scan(): Promise<BloatASsessment[]> {
+  async scan(): Promise<BloatAssessment[]> {
     const stats = await this.scanner.scan();
     return assessTables(stats, { thresholds: this.thresholds });
   }
 
   /** Assessments from the most recent `runOnce()`, or `[]` before the first. */
-  assessments(): readonly BloatASsessment[] {
+  assessments(): readonly BloatAssessment[] {
     return this.lastAssessments;
   }
 
@@ -320,7 +320,7 @@ export class DatabaseVacuumService {
   }
 
   private async skipReason(
-    assessment: BloatASsessment,
+    assessment: BloatAssessment,
     target: VacuumTarget,
   ): Promise<string | null> {
     if (this.skipAutovacuumDisabled && !assessment.stats.autovacuumEnabled) {
