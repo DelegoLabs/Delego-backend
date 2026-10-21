@@ -294,3 +294,5 @@ export * from "./carrier/index.js";
 export * from "./containerDigest.js";
 export * from "./telemetry/index.js";
 export * from "./magicBytes.js";
+export * from "./security/nonceCache.js";
+
