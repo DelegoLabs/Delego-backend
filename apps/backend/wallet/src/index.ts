@@ -199,7 +199,24 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
+// Issue #527 — Stellar Horizon/Soroban RPC failover switcher
+export {
+  RpcNodePool,
+  chooseBestHealthyNode,
+  latencyToWeight,
+  readRpcPoolConfig,
+} from "./rpcFailover.js";
+export type {
+  RpcNodeHealth,
+  RpcNodePoolOptions,
+  FailoverEvent,
+} from "./rpcFailover.js";
+
 // Export DLQ triage worker components for external use
 export { DlqTriageWorker } from "./queue/dlqTriageWorker.js";
 export { DlqSlackAlerter } from "./queue/dlqSlackAlerter.js";
 export { classifyErrorAndDecide, calculateExponentialBackoff } from "./queue/dlqClassificationEngine.js";
+
+// Export Stellar trustline pre-flight utilities (Issue #594)
+export * from "./stellar/trustlines.js";
+

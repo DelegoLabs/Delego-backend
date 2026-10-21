@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Op } from "sequelize";
+import { Op, type Order } from "sequelize";
 import type { Route } from "@delegolabs/utils";
 import { route, createLogger } from "@delegolabs/utils";
 import { extractAuth } from "../../middleware/auth.js";
@@ -9,9 +9,31 @@ import { encodeCursor, decodeCursor } from "../../src/base64Cursor.js";
 import { readJsonBody, InvalidJsonError, BodyTooLargeError } from "../../src/request.js";
 import { badRequest, notFound, unauthorized, forbidden, sendApiError } from "../../src/errors.js";
 import { Merchant, Product } from "../../src/models/index.js";
-import { getProductStockLevelHandler } from "../routes/products.js";
+import { enqueueRestockNotification } from "../../../notifications/src/restock/queue.js";
 
 const log = createLogger("gateway:catalog", process.env.LOG_LEVEL ?? "info");
+
+/**
+ * Kick off waitlist notifications when stock crosses from 0 to >0. Never
+ * fails the caller's request: a missed enqueue is logged, not surfaced.
+ */
+export async function triggerRestockIfReplenished(
+  productId: string,
+  previousStock: number,
+  currentStock: number,
+): Promise<void> {
+  try {
+    const enqueued = await enqueueRestockNotification(productId, previousStock, currentStock);
+    if (enqueued) {
+      log.info("Restock waitlist notification enqueued", { productId, previousStock, currentStock });
+    }
+  } catch (err) {
+    log.error("Failed to enqueue restock waitlist notification", {
+      productId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 function formatProductResponse(product: Product): Record<string, unknown> {
   return {
@@ -188,7 +210,7 @@ export async function listProductsHandler(
     }
     const { limit, cursor, sort } = paginationResult.value;
 
-    const whereClause: Record<string, unknown> = {
+    const whereClause: Record<string | symbol, unknown> = {
       merchantId,
       isListed: true,
     };
@@ -213,7 +235,7 @@ export async function listProductsHandler(
       ];
     }
 
-    const order = sort === "asc"
+    const order: Order = sort === "asc"
       ? [["createdAt", "ASC"], ["id", "ASC"]]
       : [["createdAt", "DESC"], ["id", "DESC"]];
 
@@ -289,6 +311,7 @@ export async function updateProductHandler(
     }
 
     const { product } = ownership;
+    const previousStock = product.stockQuantity;
     const updateFields: Partial<Product> = {};
     if (body.sku !== undefined) updateFields.sku = body.sku;
     if (body.title !== undefined) updateFields.title = body.title;
@@ -314,6 +337,8 @@ export async function updateProductHandler(
     }
 
     log.info("Product updated", { productId, userId: auth.userId });
+    // Fire-and-forget: the merchant's update must not wait on the queue.
+    void triggerRestockIfReplenished(productId, previousStock, product.stockQuantity);
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({

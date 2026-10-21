@@ -16,6 +16,7 @@ import {
 import { getVapidPublicKey } from "../push/index.js";
 import { startPermissionEventListener } from "./permissionEventListener.js";
 import { startEscrowEventListener } from "./escrowEventListener.js";
+import { startEscrowReminderWorker, type EscrowReminderWorkerHandle } from "./escrowReminder.js";
 import {
   cancelScheduledNotification,
   catchUpMissedNotifications,
@@ -52,6 +53,8 @@ import {
   initSupportChatServer,
   getChatRedisClient,
 } from "./supportChat.js";
+import { startRestockWorker } from "./restock/worker.js";
+import { startLowStockWorker } from "./lowStock/worker.js";
 
 const SERVICE_NAME = "notifications";
 const DEFAULT_PORT = 3015;
@@ -104,6 +107,24 @@ if (rpcUrl && permissionsContractId) {
   );
 }
 
+// Issue #587 — opt-in escrow release reminder worker (BullMQ, needs Redis and
+// orders.escrow_deadline from migration 049). Enable with ESCROW_REMINDERS_ENABLED=true.
+let escrowReminderWorker: EscrowReminderWorkerHandle | null = null;
+if (process.env.ESCROW_REMINDERS_ENABLED === "true") {
+  startEscrowReminderWorker({ db: notificationDb })
+    .then((handle) => {
+      escrowReminderWorker = handle;
+      log.info("Escrow reminder worker started");
+    })
+    .catch((err: unknown) => {
+      log.error("Failed to start escrow reminder worker", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+} else {
+  log.info("Escrow reminder worker disabled (set ESCROW_REMINDERS_ENABLED=true to enable)");
+}
+
 // Issue #56 — opt-in escrow event listener.
 // Requires both STELLAR_RPC_URL and ESCROW_CONTRACT_ID to be set.
 const escrowContractId = process.env.ESCROW_CONTRACT_ID ?? "";
@@ -125,6 +146,17 @@ if (rpcUrl && escrowContractId) {
   log.info(
     "Escrow event listener disabled (set STELLAR_RPC_URL and ESCROW_CONTRACT_ID to enable)"
   );
+}
+
+// BullMQ workers: restock waitlist notifications and low-stock merchant alerts.
+const backgroundWorkers: Array<{ name: string; close(): Promise<void> }> = [];
+if (process.env.NODE_ENV !== "test") {
+  if (process.env.ENABLE_RESTOCK_WORKER !== "false") {
+    backgroundWorkers.push({ name: "restock-waitlist", ...startRestockWorker() });
+  }
+  if (process.env.ENABLE_LOW_STOCK_WORKER !== "false") {
+    backgroundWorkers.push({ name: "low-stock-alerts", ...startLowStockWorker() });
+  }
 }
 
 const server: Server = startHttpServer({
@@ -673,6 +705,15 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
       });
     }
   }
+  if (escrowReminderWorker) {
+    try {
+      await escrowReminderWorker.stop();
+    } catch (err) {
+      log.error("Failed to stop escrow reminder worker cleanly", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   if (escrowListener) {
     try {
       await escrowListener.stop();
@@ -682,7 +723,17 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
       });
     }
   }
-  
+  for (const worker of backgroundWorkers) {
+    try {
+      await worker.close();
+    } catch (err) {
+      log.error("Failed to stop background worker cleanly", {
+        worker: worker.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // Gracefully disconnect Redis clients
   try {
     await disconnectRedis();

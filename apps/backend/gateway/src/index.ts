@@ -7,6 +7,7 @@ import { sentryConfig } from "./instrument.js";
 import { createLogger, initTelemetry, startHttpServer, corsMiddleware, securityHeadersMiddleware, ServiceMetricsRegistry } from "@delegolabs/utils";
 import { registerRoutes } from "../routes/index.js";
 import { bodyLimitMiddleware } from "../routes/api-v1.js";
+import { courierWebhookBodyCapture } from "../routes/webhookBody.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
 import { idempotencyMiddleware } from "../middleware/idempotency.js";
 import { requestIdMiddleware } from "../middleware/requestId.js";
@@ -22,6 +23,8 @@ import { registerGracefulShutdown } from "./shutdown.js";
 import { startMetricsSampling, adaptiveRateLimitingMiddleware } from "./rateLimit/adaptive.js";
 import { sequelize, initializeDbMetrics } from "./db.js";
 import { withSentryMiddleware, withSentryRoutes } from "./observability/sentryRequest.js";
+import { startBulkCatalogImportWorker } from "./catalog/bulkImport/queue.js";
+import { validateRequest } from "./middleware/validateRequest.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -45,7 +48,7 @@ if (sentryConfig) {
 
 const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
-logger.info("Starting gateway", { port, nodeEnv, logLevel });
+logger.info({ port, nodeEnv, logLevel }, "Starting gateway");
 
 // Start emergency kill-switch subscriber
 getEmergencyKillSwitchService().start().catch((err) => {
@@ -58,6 +61,14 @@ initializeDbMetrics(metricsRegistry);
 
 startMetricsSampling();
 
+// Bulk CSV catalog imports run in-process; disable on API-only replicas with
+// ENABLE_CATALOG_IMPORT_WORKER=false and run a dedicated worker deployment.
+const catalogImportWorker =
+  process.env.ENABLE_CATALOG_IMPORT_WORKER !== "false" ? startBulkCatalogImportWorker() : null;
+process.once("SIGTERM", () => {
+  void catalogImportWorker?.close();
+});
+
 const server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
@@ -68,18 +79,23 @@ const server = startHttpServer({
     requestIdMiddleware(),
     corsMiddleware(),
     securityHeadersMiddleware(),
-    killSwitchMiddleware(),
+    killSwitchMiddleware() as unknown as Middleware,
     raspMiddleware(),
     // Version negotiation must run before auth and rate-limiting so that
     // sunset versions get 410 Gone before any further processing.
     versionNegotiationMiddleware(),
+    // Version negotiation must run before auth and rate-limiting so that
+    // sunset versions get 410 Gone before any further processing.
+    versionNegotiationMiddleware(),
+    // Buffers courier webhook bodies before any middleware drains the stream (Issue #577).
+    courierWebhookBodyCapture(),
     bodyLimitMiddleware(),
     // OpenAPI request validation - validates path, query, and body parameters
     validateRequest(),
     openApiValidationMiddleware({
       validateResponses: process.env.GATEWAY_VALIDATE_RESPONSES === "true",
     }),
-    adaptiveRateLimitingMiddleware(),
+    adaptiveRateLimitingMiddleware() as unknown as Middleware,
     rateLimitMiddleware(),
     // Deduplicates retried mutations (Issue #380): must wrap route handlers,
     // so it runs after auth/rate-limiting and before response capture points.

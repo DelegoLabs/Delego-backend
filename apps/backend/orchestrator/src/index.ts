@@ -9,14 +9,13 @@ import {
   startHttpServer,
   tracedFetch,
   initTelemetry,
-  createHealthRoutes,
   corsMiddleware,
   securityHeadersMiddleware,
   requireAuth,
 } from "@delegolabs/utils";
 import { Pool } from "pg";
 import { Redis } from "ioredis";
-import { getCacheClient } from "@delegolabs/cache";
+import { getCacheClient, acquireRedlock } from "@delegolabs/cache";
 import { createOrchestratorHealthRoutes } from "./health.js";
 import {
   createWorkflow,
@@ -46,7 +45,13 @@ import type { CheckoutContext } from "../workflows/checkout/index.js";
 import { PostgresTaskStore, tasksSequelize, TaskService, TaskEventBroker } from "./tasks/index.js";
 import { createTaskRoutes } from "./tasks/routes.js";
 import { DLQStore, DLQService, createDLQRoutes } from "./dlq/index.js";
+import { createMultiMerchantCheckoutRoutes } from "./routes/checkout.js";
 import type { ConnectionOptions } from "bullmq";
+import {
+  IdempotencyStore,
+  createCheckoutIdempotencyPreHandler,
+  type IdempotencyRedis,
+} from "./idempotency/index.js";
 
 const SERVICE_NAME = "orchestrator";
 const DEFAULT_PORT = 3010;
@@ -73,6 +78,19 @@ let checkoutSagaCoordinator: SagaCoordinator<CheckoutContext> = createCheckoutSa
 const outboxPool = new Pool({ connectionString: process.env.DATABASE_URL });
 setServiceEventOutboxStore(new PostgresServiceEventOutboxStore(outboxPool));
 let outboxRelay: OutboxRelayHandle | null = null;
+
+// ─── Checkout Idempotency ────────────────────────────────────────────────────
+// Collapses retried / double-submitted checkouts onto a single execution using
+// a Redis SET NX EX lease per request fingerprint; duplicates replay the
+// original response verbatim.
+const checkoutIdempotency = createCheckoutIdempotencyPreHandler({
+  store: new IdempotencyStore(
+    new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+    }) as unknown as IdempotencyRedis,
+  ),
+});
 
 // ─── Human Task Management ─────────────────────────────────────────────────
 // Durable store backed by human_tasks (database/migrations/027_human_tasks.sql),
@@ -496,6 +514,8 @@ async function main(): Promise<void> {
 
       ...(dlqService ? createDLQRoutes(dlqService) : []),
 
+      ...createMultiMerchantCheckoutRoutes(),
+
       route("POST", "/checkout", async (req, res) => {
         const authenticatedUserId = (req as typeof req & { userId?: string }).userId;
         if (!authenticatedUserId) {
@@ -540,17 +560,52 @@ async function main(): Promise<void> {
           return;
         }
 
+        const idempotency = await checkoutIdempotency(req, res, {
+          userId: authenticatedUserId,
+          walletAddress: input.buyerAddress,
+          items: body.items ?? body.inventoryItems ?? [],
+          nonce: typeof body.nonce === "string" ? body.nonce : input.orderId,
+        });
+        if (idempotency === "replied") return;
+
         try {
           const sagaId = `checkout:${input.orderId}`;
-          const workflowInput = createCheckoutWorkflowInput(input, authenticatedUserId);
-          const result = await checkoutWorkflow(workflowInput, checkoutSagaCoordinator, sagaId);
-          json(res, result.status === "completed" || result.status === "compensated" ? 200 : 502, {
-            data: serializeSagaExecution(result),
-            error:
-              result.status === "completed" || result.status === "compensated"
-                ? null
-                : { code: "CHECKOUT_SAGA_FAILED", message: result.error ?? "Checkout saga failed" },
+          const workflowInput = createCheckoutWorkflowInput(
+            {
+              orderId: input.orderId,
+              sourceAddress: input.sourceAddress,
+              buyerAddress: input.buyerAddress,
+              sellerAddress: input.sellerAddress,
+            },
+            authenticatedUserId,
+          );
+          const lock = await acquireRedlock(getCacheClient(), {
+            resource: `cart:${workflowInput.orderId}`,
+            ttlMs: 15_000,
+            retryCount: 0,
+            retryDelayMs: 50,
           });
+
+          if (!lock) {
+            json(res, 409, {
+              data: null,
+              error: { code: "CART_ALREADY_LOCKED", message: `Checkout already in progress for cart:${workflowInput.orderId}` },
+            });
+            return;
+          }
+
+          try {
+            const result = await checkoutWorkflow(workflowInput, checkoutSagaCoordinator, sagaId);
+            json(res, result.status === "completed" || result.status === "compensated" ? 200 : 502, {
+              data: serializeSagaExecution(result),
+              error:
+                result.status === "completed" || result.status === "compensated"
+                  ? null
+                  : { code: "CHECKOUT_SAGA_FAILED", message: result.error ?? "Checkout saga failed" },
+            });
+          } finally {
+            await lock.release();
+          }
         } catch (err) {
           if (err instanceof InsufficientStockError) {
             json(res, 409, {

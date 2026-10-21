@@ -1,3 +1,4 @@
+import type { HasManyOptions } from "sequelize";
 import { User } from "./User.js";
 import { Wallet } from "./Wallet.js";
 import { Delegation } from "./Delegation.js";
@@ -12,9 +13,12 @@ import { Product } from "./Product.js";
 import { ProductVariant } from "./ProductVariant.js";
 import { Review } from "./Review.js";
 import { ReviewAppeal } from "./ReviewAppeal.js";
+import { ReviewModerationAuditLog } from "./ReviewModerationAuditLog.js";
+export type { ReviewModerationVerdict } from "./ReviewModerationAuditLog.js";
 import { DeliveryEvidence } from "./DeliveryEvidence.js";
 import { PaymentRecord } from "./PaymentRecord.js";
 import { Merchant } from "./Merchant.js";
+import { Discount } from "./Discount.js";
 
 // User <-> Wallet (One-to-Many)
 User.hasMany(Wallet, { foreignKey: "userId", as: "wallets" });
@@ -80,9 +84,17 @@ ReviewAppeal.belongsTo(Review, { foreignKey: "reviewId", as: "review" });
 Merchant.hasMany(ReviewAppeal, { foreignKey: "merchantId", as: "appeals" });
 ReviewAppeal.belongsTo(Merchant, { foreignKey: "merchantId", as: "merchant" });
 
+// ReviewAppeal <-> ReviewModerationAuditLog (One-to-Many) — Issue #520
+ReviewAppeal.hasMany(ReviewModerationAuditLog, { foreignKey: "appealId", as: "auditLogs" });
+ReviewModerationAuditLog.belongsTo(ReviewAppeal, { foreignKey: "appealId", as: "appeal" });
+
 // PaymentRecord associations (for review buyer verification)
-PaymentRecord.hasMany(Review, { foreignKey: "orderId", targetKey: "orderId", as: "reviews" });
+PaymentRecord.hasMany(Review, { foreignKey: "orderId", targetKey: "orderId", as: "reviews" } as HasManyOptions);
 Review.belongsTo(PaymentRecord, { foreignKey: "orderId", targetKey: "orderId", as: "payment" });
+
+// Merchant <-> Discount (One-to-Many)
+Merchant.hasMany(Discount, { foreignKey: "merchantId", as: "discounts" });
+Discount.belongsTo(Merchant, { foreignKey: "merchantId", as: "merchant" });
 
 export {
   User,
@@ -99,7 +111,9 @@ export {
   ProductVariant,
   Review,
   ReviewAppeal,
+  ReviewModerationAuditLog,
   DeliveryEvidence,
   PaymentRecord,
   Merchant,
+  Discount,
 };

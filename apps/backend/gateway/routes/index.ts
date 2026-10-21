@@ -120,8 +120,13 @@ import { registerProductRoutes } from "../src/routes/products.js";
 import { registerVariantRoutes } from "../src/catalog/variants.js";
 import { registerReviewRoutes } from "../src/catalog/reviews.js";
 import { registerDeliveryEvidenceRoutes } from "../src/catalog/deliveryEvidence.js";
+import { registerWaitlistRoutes } from "../src/waitlist/routes.js";
+import { registerBulkCatalogImportRoutes } from "../src/catalog/bulkImport/routes.js";
 import { registerAgentChatRoutes } from "./agentChat.js";
+import { registerWebhookRoutes } from "./webhooks.js";
+import { registerDiscountRoutes } from "./discounts.js";
 import { registerMetricsRoutes } from "../src/metrics.js";
+import { registerOracleRateRoutes } from "../src/oracle/routes.js";
 import {
   dbSlaStatusHandler,
   dbSlowQueriesHandler,
@@ -259,6 +264,8 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/search/embedding-cache/metrics", embeddingCacheMetricsHandler),
     // Issue #299 — Delivery Oracle Health Check & Heartbeat Monitor
     route("GET", "/health/oracle", oracleHealthHandler),
+    // Issue #528 — Fiat currency conversion oracle cache
+    ...registerOracleRateRoutes(),
     // Workflow template system
     route("GET", "/api/v1/templates/catalog", catalogHandler),
     route("GET", "/api/v1/templates/categories", categoriesHandler),
@@ -304,7 +311,15 @@ export function registerRoutes(): Route[] {
     ...registerReviewRoutes(),
     // Delivery evidence with IPFS/Arweave upload
     ...registerDeliveryEvidenceRoutes(),
+    // Restock waitlist subscriptions
+    ...registerWaitlistRoutes(),
+    // Bulk CSV catalog import jobs
+    ...registerBulkCatalogImportRoutes(),
     // Agent Chat - SSE streaming for agent conversations
     ...registerAgentChatRoutes(),
+    // Courier webhooks - FedEx/DHL/UPS normalizer (Issue #577)
+    ...registerWebhookRoutes(),
+    // Merchant Discounts - promotion campaigns
+    ...registerDiscountRoutes(),
   ];
 }

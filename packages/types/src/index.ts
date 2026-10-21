@@ -3,6 +3,7 @@
  * All services and apps should import from this package.
  */
 
+export * from "./audit.js";
 export * from "./audit-chain.js";
 export * from "./assets.js";
 export * from "./user.js";
@@ -14,6 +15,7 @@ export * from "./payment.js";
 export * from "./recovery.js";
 export * from "./multi-currency.js";
 export * from "./agent.js";
+export * from "./llm.js";
 export * from "./api.js";
 export * from "./pact-contract.js";
 export * from "./performance.js";
@@ -58,4 +60,6 @@ export * from "./container-digest.js";
 export * from "./dlq.js";
 export * from "./storage.js";
 export * from "./feeEstimator.js";
+export * from "./inventory-alerts.js";
 export * from "./inventory.js";
+export * from "./discount.js";

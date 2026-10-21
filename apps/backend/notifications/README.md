@@ -118,6 +118,25 @@ is substituted so every template renders coherently.
   the listener, which advances the cursor by `processedLedger + 1` after
   each batch.
 
+## Escrow Release Reminders (Issue #587)
+
+A BullMQ worker emails buyers 48h and 12h before an `in_transit` order's
+`orders.escrow_deadline`, when the escrow auto-finalizes. It is off by default.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ESCROW_REMINDERS_ENABLED` | `false` | Set to `true` to start the worker (needs Redis) |
+| `ESCROW_REMINDER_SCAN_INTERVAL_MS` | `900000` | How often orders are scanned |
+| `APP_BASE_URL` | `http://localhost:3000` | Base of the `/orders/:id/confirm` link in the email |
+
+- Requires migration `049_escrow_release_reminders`; whatever moves an order to
+  `in_transit` must set `escrow_deadline`. Orders without one get no reminders.
+- A reminder is sent once per (order, window): deterministic BullMQ job id plus a
+  claim row in `escrow_reminders_sent`, released only if the send fails.
+- The order is re-checked at send time; confirmed, disputed or soft-deleted
+  orders get nothing.
+- Email text comes from the `escrow_release_reminder_*` keys in `src/i18n/*.json`.
+
 ## Push Subscription Cleanup (Issue #137)
 
 Push subscriptions are stored with delivery-health metadata (`failureCount`,
@@ -169,6 +188,18 @@ The retry behavior is configured via environment variables:
 | `EMAIL_DLQ_ENABLED` | boolean | true | true/false | Enable/disable DLQ logging (set to false for testing) |
 | `SENDGRID_API_KEY` | string | - | - | SendGrid API key for email dispatch |
 | `FROM_EMAIL` | string | noreply@delego.app | - | Sender email address |
+| `SMTP_HOST` | string | - | - | Enables pooled SMTP delivery; when unset, SendGrid is used |
+| `SMTP_PORT` | integer | 587 | 1-65535 | SMTP server port |
+| `SMTP_SECURE` | boolean | port-dependent | true/false | Use TLS immediately; defaults to true on port 465 |
+| `SMTP_USER` | string | - | - | Optional SMTP authentication username (set with `SMTP_PASSWORD`) |
+| `SMTP_PASSWORD` | string | - | - | Optional SMTP authentication password (set with `SMTP_USER`) |
+| `SMTP_RATE_LIMIT` | integer | 100 | 1+ | Maximum SMTP messages per second |
+
+When `SMTP_HOST` is configured it takes precedence over SendGrid. The service
+shares one Nodemailer pool with at most 10 connections, up to 100 messages per
+connection, and a 30-second socket inactivity timeout. Nodemailer replaces
+failed pool connections automatically. Without `SMTP_HOST`, delivery continues
+through the existing SendGrid client and requires `SENDGRID_API_KEY`.
 
 ### Retry Strategy
 
