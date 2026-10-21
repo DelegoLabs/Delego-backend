@@ -1,5 +1,5 @@
 /**
- * guardrails/ — Issue #267
+ * guardrails / Issue #267
  *
  * Note: The stock alert rules migration/repository work described in the
  * issue is implemented under database/migrations and apps/backend/src/stock.
