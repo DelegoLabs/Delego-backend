@@ -66,7 +66,7 @@ function escapeHtml(value: string): string {
 
 /** Stable per alert so a retried job reuses the same webhook event id. */
 export function lowStockEventId(payload: LowStockAlertPayload): string {
-  return `low-stock-${payload.merchantId}-${payload.productId}-${payload.triggeredAt}`;
+  return `low-stock-${payload.merchantId}-${payload.productId}-${payload.triggeredAt}-${payload.sku || ''}`;
 }
 
 export function buildLowStockEmail(
@@ -175,10 +175,10 @@ export function startLowStockWorker(): LowStockWorkerHandle {
     dashboardUrl: process.env.MERCHANT_DASHBOARD_URL ?? "https://merchant.delego.app",
   };
 
-  const worker = new Worker<LowStockAlertPayload, LowStockJobOutcome>(
+  const worker = new Worker<LowStockAlertPayload, LowStockJobOutcome, string>(
     LOW_STOCK_QUEUE_NAME,
-    async (job: Job<LowStockAlertPayload>) => {
-      const outcome = await processLowStockJob(job.name, job.data, deps);
+    async (job: Job<LowStockAlertPayload, string>) => {
+      const outcome = await processLowStockJob(job.name, job.data as LowStockAlertPayload, deps);
       log.info("Low-stock job processed", {
         job: job.name,
         merchantId: job.data.merchantId,

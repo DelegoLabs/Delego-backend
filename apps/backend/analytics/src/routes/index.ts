@@ -18,8 +18,8 @@ import {
   getRevenueMetricsHandler,
   getMerchantQualityScoreHandler,
   getMerchantSalesHandler,
-  getMerchantDailyGmvHandler,
 } from "./analyticsRoutes.js";
+import { getMerchantDailyGmvHandler } from "./merchantDailyGmv.js";
 export function registerAnalyticsRoutes(): Route[] {
   return [
     route("GET", "/api/v1/analytics/spend-summary", getSpendSummaryHandler),
