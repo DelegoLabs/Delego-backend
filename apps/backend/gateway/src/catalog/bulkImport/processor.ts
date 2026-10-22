@@ -120,12 +120,13 @@ export async function processBulkCatalogImport(
     finishedAt: undefined,
     failureReason: undefined,
   };
-  await deps.progressStore.save(status);
+  let rowsSinceProgressUpdate = 0;
 
   const publish = async () => {
     await deps.progressStore.save(status);
     await options.onProgress?.(status);
   };
+  await publish();
 
   const flush = async (batch: CatalogProductInput[]) => {
     if (batch.length === 0) return;
@@ -154,6 +155,7 @@ export async function processBulkCatalogImport(
       await deps.onStockTransition?.(transition);
     }
     await publish();
+    rowsSinceProgressUpdate = 0;
   };
 
   try {
@@ -169,6 +171,7 @@ export async function processBulkCatalogImport(
     for await (const raw of rows as AsyncIterable<Record<string, string>>) {
       rowNumber += 1;
       status.progress.totalRows += 1;
+      rowsSinceProgressUpdate += 1;
       if (deps.maxRows && status.progress.totalRows > deps.maxRows) {
         throw new BulkImportFatalError(`CSV exceeds the ${deps.maxRows}-row limit`);
       }
@@ -177,6 +180,10 @@ export async function processBulkCatalogImport(
       if (!validation.ok) {
         status.progress.processedRows += 1;
         appendRowErrors(status, [{ rowNumber, reason: validation.reason }]);
+        if (rowsSinceProgressUpdate >= batchSize) {
+          await publish();
+          rowsSinceProgressUpdate = 0;
+        }
         continue;
       }
 
@@ -185,6 +192,9 @@ export async function processBulkCatalogImport(
         const full = batch;
         batch = [];
         await flush(full);
+      } else if (rowsSinceProgressUpdate >= batchSize) {
+        await publish();
+        rowsSinceProgressUpdate = 0;
       }
     }
     await flush(batch);

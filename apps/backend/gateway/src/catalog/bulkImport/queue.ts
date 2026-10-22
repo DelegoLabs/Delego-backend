@@ -9,6 +9,7 @@ import { Queue, UnrecoverableError, Worker, type Job } from "bullmq";
 import { createLogger } from "@delegolabs/utils";
 import { sequelize } from "../../db.js";
 import { getRedisClient } from "../../rateLimit/redisClient.js";
+import { Merchant } from "../../models/index.js";
 import { redisConnectionFromUrl } from "../../../../notifications/src/restock/queue.js";
 import { triggerRestockIfReplenished } from "../routes.js";
 import { HttpImageVerifier } from "./imageVerifier.js";
@@ -53,6 +54,40 @@ export async function enqueueBulkCatalogImport(data: BulkCatalogJobData): Promis
   await getQueue().add("import-csv", data, { jobId: data.jobId });
 }
 
+async function publishCatalogImportProgress(
+  userId: string,
+  jobId: string,
+  status: BulkCatalogJobStatus,
+): Promise<void> {
+  const progress = status.progress;
+  const event = {
+    topic: `user:${userId}`,
+    type: "catalog_import_progress",
+    payload: {
+      jobId,
+      state: status.state,
+      progress: {
+        totalRows: progress.totalRows,
+        processedRows: progress.processedRows,
+        successCount: progress.successCount,
+        errorCount: progress.errorCount,
+      },
+    },
+    publishedAt: new Date().toISOString(),
+  };
+
+  try {
+    // The notifications service subscribes to this literal Redis channel.
+    await getRedisClient().publish("notifications:*", JSON.stringify(event));
+  } catch (err) {
+    log.error("Failed to publish bulk catalog import progress", {
+      jobId,
+      merchantId: status.merchantId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 async function openCsvStream(url: string) {
   let response;
   try {
@@ -85,6 +120,7 @@ export function startBulkCatalogImportWorker(): BulkCatalogWorkerHandle {
     async (job: Job<BulkCatalogJobData>) => {
       const attempts = job.opts.attempts ?? 1;
       try {
+        const merchant = await Merchant.findByPk(job.data.merchantId, { attributes: ["ownerUserId"] });
         const status = await processBulkCatalogImport(
           job.data,
           {
@@ -99,7 +135,12 @@ export function startBulkCatalogImportWorker(): BulkCatalogWorkerHandle {
           },
           {
             isFinalAttempt: job.attemptsMade + 1 >= attempts,
-            onProgress: (s) => job.updateProgress(s.progress),
+            async onProgress(s) {
+              await job.updateProgress(s.progress);
+              if (merchant?.ownerUserId) {
+                await publishCatalogImportProgress(merchant.ownerUserId, job.data.jobId, s);
+              }
+            },
           },
         );
         log.info("Bulk catalog import completed", {

@@ -83,6 +83,57 @@ describe("processBulkCatalogImport", () => {
     expect(await d.progressStore.get(job().jobId)).toEqual(status);
   });
 
+  it("streams 10,000 rows in batches of 500 and publishes progress", async () => {
+    async function* csvRows() {
+      yield HEADER;
+      for (let i = 0; i < 10_000; i += 1) {
+        yield `SKU-${i},Product ${i},,100,USDC,1,true,\n`;
+      }
+    }
+
+    const batchSizes: number[] = [];
+    const d = deps("", {
+      openCsvStream: async () => Readable.from(csvRows()),
+      repository: {
+        async upsertBatch(_merchantId, products) {
+          batchSizes.push(products.length);
+          return { successCount: products.length, failed: [], stockTransitions: [] };
+        },
+      },
+    });
+    const onProgress = vi.fn();
+
+    const status = await processBulkCatalogImport(job({ batchSize: 500 }), d, {
+      isFinalAttempt: true,
+      onProgress,
+    });
+
+    expect(batchSizes).toHaveLength(20);
+    expect(Math.max(...batchSizes)).toBe(500);
+    expect(status.progress).toMatchObject({
+      totalRows: 10_000,
+      processedRows: 10_000,
+      successCount: 10_000,
+      errorCount: 0,
+    });
+    expect(onProgress).toHaveBeenCalledTimes(22);
+  });
+
+  it("publishes progress while processing files containing only invalid rows", async () => {
+    const csv = HEADER + ",Missing SKU,,100,USDC,1,true,\n".repeat(1_001);
+    const d = deps(csv);
+    const onProgress = vi.fn();
+
+    const status = await processBulkCatalogImport(job({ batchSize: 500 }), d, {
+      isFinalAttempt: true,
+      onProgress,
+    });
+
+    expect(status.progress.totalRows).toBe(1_001);
+    expect(status.progress.errorCount).toBe(1_001);
+    expect(onProgress).toHaveBeenCalledTimes(4);
+  });
+
   it("reports invalid rows with their CSV line numbers and keeps going", async () => {
     const csv =
       HEADER +
@@ -99,6 +150,7 @@ describe("processBulkCatalogImport", () => {
     expect(status.progress.errors.map((e) => e.rowNumber)).toEqual([3, 4]);
     expect(status.progress.errors[0].reason).toMatch(/sku is required/);
     expect(status.progress.errors[1].reason).toMatch(/price_stroops/);
+    expect(await d.progressStore.get(job().jobId)).toEqual(status);
   });
 
   it("rejects rows whose image URL fails verification", async () => {
