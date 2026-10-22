@@ -22,6 +22,8 @@ export {
   type KeepAliveSocket,
   type PingPongSocket,
   type WebSocketStallMonitorHooks,
+  type StallReason,
+  type StallMonitorOptions,
 } from "./websocketMonitor.js";
 export { CORRELATION_ID_HEADER, correlationMiddleware, fetchWithCorrelation } from "./correlation.js";
 export { stroopsToDisplay, displayToStroops } from "./currency.js";
