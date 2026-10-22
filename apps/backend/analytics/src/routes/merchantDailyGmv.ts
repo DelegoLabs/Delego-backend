@@ -1,5 +1,7 @@
 import { createLogger } from "@delegolabs/utils";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { sequelize } from "../db.js";
+import { json } from "@delegolabs/utils";
 
 const log = createLogger("analytics:merchantDailyGmv");
 
@@ -88,9 +90,9 @@ export class MerchantDailyGmvService {
       },
       type: "SELECT",
     })) as [Array<Record<string, unknown>>, unknown];
-    const queryTimeMs = performance.now() - started;
+    const queryTimeMs = performance.now() - startedAt;
 
-    const days: MerchantDailyGmvRow = rows.map((r) => ({
+    const days: MerchantDailyGmvRow[] = rows.map((r) => ({
       bucketDay: new Date(r.bucket_day as string).toISOString(),
       merchantId: String(r.merchant_id),
       currency: String(r.currency),
@@ -132,28 +134,39 @@ export class MerchantDailyGmvService {
 
 export const merchantDailyGmvService = new MerchantDailyGmvService();
 
-export async function getMerchantDailyGmvHandler(ctx: any): Promise<unknown> {
-  const merchantId = ctx.params.merchantId as string | undefined;
+export async function getMerchantDailyGmvHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>
+): Promise<void> {
+  const merchantId = params.merchantId as string | undefined;
   if (!merchantId) {
-    return { status: 400, body: { error: "merchantId is required" } };
+    json(res, 400, { error: "merchantId is required" });
+    return;
   }
 
-  const query = (ctx.query ?? {}) as Record<string, string | undefined>;
-  const limitRaw = query.limit ? Number(query.limit) : undefined;
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  const currency = url.searchParams.get("currency");
+  const limitRaw = url.searchParams.get("limit");
+  const limit = limitRaw ? Number(limitRaw) : undefined;
 
   try {
     const result = await merchantDailyGmvService.getMerchantDailyGmvImpl(merchantId, {
-      from: query.from,
-      to: query.to,
-      currency: query.currency,
-      limit: Number.isFinite(limitRaw) ? (limitRaw as number) : undefined,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      currency: currency ?? undefined,
+      limit,
     });
-    return { status: 200, body: result };
+    json(res, 200, { data: result });
+    return;
   } catch (err) {
     log.error("failed to query merchant daily gmv", {
       merchantId,
       error: (err as Error).message,
     });
-    return { status: 500, body: { error: "internal error" } };
+    json(res, 500, { error: "internal error" });
+    return;
   }
 }

@@ -1,4 +1,4 @@
-import type { ContainerDigestVerification } from "@delegolabs/types";
+import type { ContainerDigestVerificationResult } from "@delegolabs/types";
 import { exec } from "child_process";
 
 export class ContainerRolloutVerifier {
@@ -25,7 +25,7 @@ export class ContainerRolloutVerifier {
   public async verifyDigestBeforeRollout(
     imageName: string,
     expectedDigest: string
-  ): Promise<ContainerDigestVerification> {
+  ): Promise<ContainerDigestVerificationResult> {
     const actualDigest = await this.inspectImageDigest(imageName);
     const verified = actualDigest === expectedDigest;
 
@@ -34,9 +34,8 @@ export class ContainerRolloutVerifier {
     }
 
     return {
-      imageUri: imageName,
-      digest: actualDigest,
-      signedBy: "",
+      imageName: imageName,
+      expectedDigest: expectedDigest,
       verified,
     };
   }

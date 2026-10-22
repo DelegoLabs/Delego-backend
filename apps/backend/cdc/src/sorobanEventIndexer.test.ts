@@ -1,5 +1,5 @@
 ﻿import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SorobanEventIndexer } from "./sorobanEventIndexer";
+import { SorobanEventIndexer } from "./sorobanEventIndexer.js";
 
 vi.mock("@stellar/stellar-sdk", () => {
   return {

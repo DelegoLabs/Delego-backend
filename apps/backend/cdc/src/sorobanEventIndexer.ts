@@ -37,19 +37,15 @@ export interface IndexerCheckpoint {
 export class SorobanEventIndexer {
   private rpcServer: rpc.Server;
   private dbPool?: Pool;
-  private isRunning = false;
-  private pollIntervalMs: number;
   private currentLedger = 0;
 
   constructor(options: {
     rpcUrl: string;
     dbPool?: Pool;
-    pollIntervalMs?: number;
     startLedger?: number;
   }) {
     this.rpcServer = new rpc.Server(options.rpcUrl);
     this.dbPool = options.dbPool;
-    this.pollIntervalMs = options.pollIntervalMs || 5000;
     this.currentLedger = options.startLedger || 0;
   }
 
@@ -104,8 +100,8 @@ export class SorobanEventIndexer {
    */
   parseEvent(rawEvent: rpc.Api.GetEventsResponse["events"][0]): ParsedEscrowEvent | null {
     try {
-      const topicVals = (rawEvent.topic || []).map((t) => {
-        const val = xdr.ScVal.fromXDR(t, "base64");
+      const topicVals = (rawEvent.topic || []).map((t: any) => {
+        const val: any = xdr.ScVal.fromXDR(t, "base64");
         return scValToNative(val);
       });
 
@@ -117,8 +113,7 @@ export class SorobanEventIndexer {
 
       let dataVal: any = {};
       if (rawEvent.value) {
-        const parsedScVal = xdr.ScVal.fromXDR(rawEvent.value, "base64");
-        dataVal = scValToNative(parsedScVal) || {};
+        dataVal = scValToNative(rawEvent.value) || {};
       }
 
       return {
