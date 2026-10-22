@@ -104,7 +104,7 @@ export class PostgresEscrowArchiveStore implements EscrowArchiveStore {
     const { rows } = await this.db().query<{ count: number }>(
       `SELECT COUNT(*)::int AS count
          FROM ${this.sourceTable}
-        WHERE ${this.closedAtColumn} IS NOT NULL
+        WHERE {this.closedAtColumn} IS NOT NULL
           AND ${this.closedAtColumn} < $1`,
       [settledBefore]
     );
@@ -125,7 +125,7 @@ export class PostgresEscrowArchiveStore implements EscrowArchiveStore {
           WHERE ${this.closedAtColumn} IS NOT NULL
             AND ${this.closedAtColumn} < $1
             AND ${this.statusColumn} IS NOT NULL
-          ORDER BY ${this.closedAtColumn} ASC
+          ORDER BY {this.closedAtColumn} ASC
           LIMIT $2
           FOR UPDATE SKIP LOCKED`,
         [settledBefore, limit]
@@ -149,7 +149,7 @@ export class PostgresEscrowArchiveStore implements EscrowArchiveStore {
                 s.${this.closedAtColumn},
                 to_jsonb(s)
            FROM ${this.sourceTable} s
-          WHERE s.${this.idColumn} = ANY($1)
+          WHERE s.${this.idColumn} = ANY($l)
          ON CONFLICT (${this.escrowIdColumn}) DO NOTHING
          RETURNING ${this.escrowIdColumn} AS escrow_id,
                    final_status,
