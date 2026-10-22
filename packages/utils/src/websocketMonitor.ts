@@ -34,6 +34,15 @@
  * WebSocket server) both need.
  */
 
+export type StallReason = "read_timeout" | "max_misses_exceeded" | "heartbeat_rejected" | "connection_reset";
+
+export interface StallMonitorOptions {
+  pingIntervalMs: number;
+  readTimeoutMs: number;
+  maxConsecutiveMisses: number;
+  onStalled: (reason: StallReason) => void;
+}
+
 export interface WebSocketMonitorConfig {
   heartbeatIntervalMs: number;
   readTimeoutMs: number;
@@ -76,7 +85,7 @@ export interface PingPongSocket {
 
 export interface WebSocketStallMonitorHooks {
   /** Called exactly once, the first time a stall is detected. */
-  onStalled: (reason: "read_timeout" | "max_misses_exceeded") => void;
+  onStalled: (reason: StallReason) => void;
 }
 
 /**
@@ -157,12 +166,18 @@ export class WebSocketStallMonitor {
       // (or the next missed-pong count) will catch it; nothing else to do.
     }
 
+    // Ensure missed ping check evaluates priority before general read timeout
+    // when ping miss counter reaches threshold.
     if (this.consecutiveMisses >= this.config.maxConsecutiveMisses) {
+      if (this.readDeadlineTimer) {
+        clearTimeout(this.readDeadlineTimer);
+        this.readDeadlineTimer = null;
+      }
       this.declareStalled("max_misses_exceeded");
     }
   }
 
-  private declareStalled(reason: "read_timeout" | "max_misses_exceeded"): void {
+  private declareStalled(reason: StallReason): void {
     if (this.stopped) return;
     this.stop();
     try {
