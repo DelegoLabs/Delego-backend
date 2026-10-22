@@ -413,6 +413,7 @@ export function registerCatalogRoutes(): Route[] {
     route("POST", "/api/v1/merchants/:merchantId/products", createProductHandler),
     route("GET", "/api/v1/merchants/:merchantId/products", listProductsHandler),
     route("GET", "/api/v1/products/:productId", getProductHandler),
+    route("GET", "/api/v1/products/:productId/stock-level", getProductStockLevelHandler),
     route("PUT", "/api/v1/products/:productId", updateProductHandler),
     route("DELETE", "/api/v1/products/:productId", deleteProductHandler),
   ];
