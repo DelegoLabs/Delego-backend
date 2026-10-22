@@ -124,6 +124,7 @@ import { registerBulkCatalogImportRoutes } from "../src/catalog/bulkImport/route
 import { registerAgentChatRoutes } from "./agentChat.js";
 import { registerWebhookRoutes } from "./webhooks.js";
 import { registerDiscountRoutes } from "./discounts.js";
+import { registerCartRoutes } from "./cart.js";
 import { registerMetricsRoutes } from "../src/metrics.js";
 import { registerOracleRateRoutes } from "../src/oracle/routes.js";
 import {
@@ -318,5 +319,7 @@ export function registerRoutes(): Route[] {
     ...registerWebhookRoutes(),
     // Merchant Discounts - promotion campaigns
     ...registerDiscountRoutes(),
+    // Cart sync - multi-device cart merge (Issue #574)
+    ...registerCartRoutes(),
   ];
 }

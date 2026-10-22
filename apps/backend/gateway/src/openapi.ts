@@ -306,6 +306,43 @@ const RejectOrderResponse = ApiResponse({
 });
 
 // ---------------------------------------------------------------------------
+// Cart schemas (Issue #574)
+// ---------------------------------------------------------------------------
+
+const CartLineItemSchema = {
+  type: "object",
+  properties: {
+    merchantId: { type: "string", maxLength: 64 },
+    productId: { type: "string", maxLength: 64 },
+    skuId: { type: "string", maxLength: 64 },
+    quantity: { type: "integer", minimum: 0 },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+  required: ["merchantId", "productId", "quantity", "updatedAt"],
+};
+
+const CartSyncRequest = {
+  type: "object",
+  properties: {
+    cartId: { type: "string", maxLength: 64 },
+    clientVersion: { type: "integer", minimum: 0 },
+    items: { type: "array", items: CartLineItemSchema, maxItems: 200 },
+  },
+  required: ["cartId", "clientVersion", "items"],
+};
+
+const CartSyncResponse = {
+  type: "object",
+  properties: {
+    cartId: { type: "string" },
+    serverVersion: { type: "integer" },
+    items: { type: "array", items: CartLineItemSchema },
+    conflictsResolved: { type: "boolean" },
+  },
+  required: ["cartId", "serverVersion", "items", "conflictsResolved"],
+};
+
+// ---------------------------------------------------------------------------
 // Full OpenAPI 3.0 Document
 // ---------------------------------------------------------------------------
 
@@ -1029,6 +1066,37 @@ Rate limit headers are included in all responses:
         },
       },
     },
+    "/api/v1/cart/sync": {
+      post: {
+        tags: ["Cart"],
+        summary: "Synchronise a cart across devices",
+        description:
+          "Merges the cart a device holds with the cart the gateway stores. The device sends the cart version it last saw as `clientVersion`; when that version is behind, the gateway merges both states line by line (last write wins per line) instead of overwriting the stored cart.",
+        operationId: "syncCart",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: CartSyncRequest } },
+        },
+        responses: {
+          "200": {
+            description: "Cart synchronised — the merged cart and the new cart version",
+            content: { "application/json": { schema: ApiResponse(CartSyncResponse) } },
+          },
+          "400": {
+            description: "Validation error",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "401": {
+            description: "Authentication required",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "403": {
+            description: "The cart belongs to another user",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -1047,6 +1115,7 @@ Rate limit headers are included in all responses:
     { name: "Wallets", description: "Wallet operations, payments, HD key derivation, and HSM health" },
     { name: "Fees", description: "Dynamic transaction fee estimation" },
     { name: "Orders", description: "Order management and lifecycle operations" },
+    { name: "Cart", description: "Shopping cart synchronisation across devices" },
     { name: "Admin", description: "Administrative endpoints (admin role required)" },
   ],
 };
