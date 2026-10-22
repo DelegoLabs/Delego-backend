@@ -1,4 +1,4 @@
-/**
+/*
  * Archive storage for the escrow snapshot archiver (Issue #290).
  *
  * Two implementations ship here:
@@ -254,7 +254,7 @@ export class InMemoryEscrowArchiveStore implements EscrowArchiveStore {
         archivePayload: { ...candidate.payload },
         archivedAt: new Date().toISOString(),
       });
-      // Prune by row identity, mirroring the Postgres store's `DELETE ... WHERE id = ANY(...)`:
+      // Prune by row identity, mirroring the Postgres store's `DELETE ... WHERE id = ANY(...) `: 
       // an unarchived duplicate that shares the escrow id survives the batch.
       const index = this.live.indexOf(candidate);
       if (index >= 0) this.live.splice(index, 1);
@@ -284,7 +284,7 @@ function isSettledBefore(row: SettledEscrow, settledBefore: Date): boolean {
   return Number.isFinite(settledAt) && settledAt < settledBefore.getTime();
 }
 
-/** Postgres hands back `TIMESTAMPTZ` as a `Date`; tolerate an already-ISO string. */
+/** Postgres hands back `TIMESTAMPZ` as a `Date`; tolerate an already-ISO string. */
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : String(value);
 }
