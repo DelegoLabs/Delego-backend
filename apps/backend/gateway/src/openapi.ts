@@ -608,6 +608,63 @@ Rate limit headers are included in all responses:
         },
       },
     },
+    "/api/v1/auth/revoke-all-sessions": {
+      post: {
+        tags: ["Auth"],
+        summary: "Revoke all sessions for a user",
+        description:
+          "Deletes every Redis session for the user, revokes all refresh tokens, rejects previously issued JWTs via a per-user cutoff, and publishes auth:sessions:revoked so WebSocket servers close affected connections. Non-admin callers may only revoke their own sessions.",
+        operationId: "revokeAllSessions",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["userId", "reason"],
+                properties: {
+                  userId: { type: "string", minLength: 1, maxLength: 128 },
+                  reason: {
+                    type: "string",
+                    enum: ["password_reset", "security_compromise", "user_requested"],
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Sessions revoked",
+            content: {
+              "application/json": {
+                schema: ApiResponse({
+                  type: "object",
+                  properties: {
+                    sessionsRevokedCount: { type: "integer" },
+                    revokedAt: { type: "string", format: "date-time" },
+                  },
+                }),
+              },
+            },
+          },
+          "400": {
+            description: "Invalid request body",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "401": {
+            description: "Not authenticated",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "403": {
+            description: "Cannot revoke another user's sessions",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+        },
+      },
+    },
     "/api/v1/auth/.well-known/jwks.json": {
       get: {
         tags: ["Auth"],

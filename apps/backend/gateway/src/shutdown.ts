@@ -17,6 +17,7 @@ import { createLogger } from "@delegolabs/utils";
 import { sequelize } from "./db.js";
 import { disconnectRedis } from "./rateLimit/redisClient.js";
 import { closeGlobalRateLimiter } from "./rateLimit/globalRedis.js";
+import { stopSessionRevocationListener } from "./auth/sessionRevocation.js";
 import { sseClientPool } from "./sse/clientPool.js";
 
 const log = createLogger("gateway:shutdown", process.env.LOG_LEVEL ?? "info");
@@ -74,7 +75,7 @@ export function registerGracefulShutdown(
 ): void {
   const {
     closeDb = () => sequelize.close(),
-    closeRedis = async () => { await Promise.all([disconnectRedis(), closeGlobalRateLimiter()]); },
+    closeRedis = async () => { await Promise.all([disconnectRedis(), closeGlobalRateLimiter(), stopSessionRevocationListener()]); },
     drainTimeoutMs = DRAIN_TIMEOUT_MS,
     exit = (code) => process.exit(code),
     logger = log,

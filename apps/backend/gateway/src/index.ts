@@ -19,6 +19,7 @@ import { versionNegotiationMiddleware } from "./middleware/versioning.js";
 import { metricsMiddleware } from "./metrics.js";
 import { killSwitchMiddleware } from "../middleware/killSwitch.js";
 import { getEmergencyKillSwitchService } from "./emergency/killSwitch.js";
+import { startSessionRevocationListener } from "./auth/sessionRevocation.js";
 import { registerGracefulShutdown } from "./shutdown.js";
 import { startMetricsSampling, adaptiveRateLimitingMiddleware } from "./rateLimit/adaptive.js";
 import { sequelize, initializeDbMetrics } from "./db.js";
@@ -53,6 +54,13 @@ logger.info({ port, nodeEnv, logLevel }, "Starting gateway");
 // Start emergency kill-switch subscriber
 getEmergencyKillSwitchService().start().catch((err) => {
   log.warn("Failed to initialize emergency kill-switch service", { error: err.message });
+});
+
+// Keep per-user JWT revocation cutoffs in sync across gateway replicas.
+startSessionRevocationListener().catch((err) => {
+  log.warn("Failed to initialize session revocation listener", {
+    error: err instanceof Error ? err.message : String(err),
+  });
 });
 
 // Initialize database query latency metrics (Issue #387)

@@ -55,6 +55,7 @@ import {
 } from "./supportChat.js";
 import { startRestockWorker } from "./restock/worker.js";
 import { startLowStockWorker } from "./lowStock/worker.js";
+import { startArbiterNotificationWorker } from "./arbiterNotifications.js";
 
 const SERVICE_NAME = "notifications";
 const DEFAULT_PORT = 3015;
@@ -148,7 +149,7 @@ if (rpcUrl && escrowContractId) {
   );
 }
 
-// BullMQ workers: restock waitlist notifications and low-stock merchant alerts.
+// BullMQ workers: restock waitlist, low-stock merchant alerts, and arbiter dispute alerts.
 const backgroundWorkers: Array<{ name: string; close(): Promise<void> }> = [];
 if (process.env.NODE_ENV !== "test") {
   if (process.env.ENABLE_RESTOCK_WORKER !== "false") {
@@ -156,6 +157,9 @@ if (process.env.NODE_ENV !== "test") {
   }
   if (process.env.ENABLE_LOW_STOCK_WORKER !== "false") {
     backgroundWorkers.push({ name: "low-stock-alerts", ...startLowStockWorker() });
+  }
+  if (process.env.ENABLE_ARBITER_NOTIFICATION_WORKER !== "false") {
+    backgroundWorkers.push({ name: "arbiter-notifications", ...startArbiterNotificationWorker() });
   }
 }
 
