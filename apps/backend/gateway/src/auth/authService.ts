@@ -1,6 +1,8 @@
 import bcrypt from "bcryptjs";
 import { RefreshToken } from "../models/RefreshToken.js";
 import { User } from "../models/User.js";
+import { getRedisPubSubManager } from "@delegolabs/utils";
+import { getRedisClient } from "../rateLimit/redisClient.js";
 import {
   getJwks,
   getTokenConfig,
@@ -214,5 +216,56 @@ export async function loginUser(
     tokenType: tokens.tokenType,
     scope: tokens.scope,
     token: tokens.accessToken, // Backward compatibility
+  };
+}
+
+export interface RevokeAllSessionsResult {
+  sessionsRevokedCount: number;
+  revokedAt: string;
+}
+
+export async function revokeAllSessions(
+  userId: string,
+  reason: "password_reset" | "security_compromise" | "user_requested",
+): Promise<RevokeAllSessionsResult> {
+  const redis = getRedisClient();
+  const pattern = `session:${userId}:*`;
+  const keys: string[] = [];
+
+  let cursor = "0";
+  do {
+    const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);
+    cursor = result[0];
+    const batch = result[1];
+    keys.push(...batch);
+  } while (cursor !== "0");
+
+  let sessionsRevokedCount = 0;
+  if (keys.length > 0) {
+    const pipeline = redis.pipeline();
+    for (const key of keys) {
+      pipeline.del(key);
+    }
+    const results = await pipeline.exec();
+    sessionsRevokedCount = results?.filter(([, err]) => !err).length ?? 0;
+  }
+
+  const revokedAt = new Date().toISOString();
+
+  const pubSub = getRedisPubSubManager();
+  await pubSub.publish(
+    "auth:sessions:revoked",
+    "sessions_revoked",
+    {
+      userId,
+      reason,
+      sessionsRevokedCount,
+      revokedAt,
+    },
+  );
+
+  return {
+    sessionsRevokedCount,
+    revokedAt,
   };
 }

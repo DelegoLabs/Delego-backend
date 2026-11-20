@@ -406,3 +406,13 @@ export const DeliveryEvidenceSchema: any = {
   required: ["fileName", "mimeType", "fileSizeBytes"],
   additionalProperties: false,
 };
+
+export const RevokeAllSessionsSchema: any = {
+  type: "object",
+  properties: {
+    userId: { type: "string", minLength: 1 },
+    reason: { type: "string", enum: ["password_reset", "security_compromise", "user_requested"] },
+  },
+  required: ["userId", "reason"],
+  additionalProperties: false,
+};

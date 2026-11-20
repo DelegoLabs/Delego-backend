@@ -12,6 +12,7 @@ import {
   RegisterSchema,
   LoginSchema,
   OAuthCallbackSchema,
+  RevokeAllSessionsSchema,
 } from "../src/validation.js";
 import {
   readJsonBody,
@@ -32,6 +33,7 @@ export const authDependencies = {
   logoutUser: authService.logoutUser,
   introspectToken: authService.introspectToken,
   revokeTokens: authService.revokeTokens,
+  revokeAllSessions: authService.revokeAllSessions,
   getJwks: authService.getJwks,
   handleOAuthCallback: oauthService.handleOAuthCallback,
   buildAuthorizationUrl: oauthService.buildAuthorizationUrl,
@@ -507,4 +509,64 @@ export function jwksHandler(
     "Cache-Control": "public, max-age=300",
   });
   res.end(JSON.stringify({ keys }));
+}
+
+/**
+ * POST /api/v1/auth/revoke-all-sessions — atomically invalidate all active
+ * sessions and refresh tokens for a user across all devices.
+ *
+ * This endpoint is called when:
+ * - A user resets their password
+ * - Compromised credentials are detected
+ * - A user explicitly requests to sign out from all devices
+ *
+ * Uses Redis SCAN to find all session keys matching `session:{userId}:*`,
+ * deletes them in a pipeline for atomicity, and publishes a revocation message
+ * to the `auth:sessions:revoked` pub/sub channel to alert WebSocket servers.
+ */
+export async function revokeAllSessionsHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const requestId = resolveRequestId(req);
+
+  try {
+    const body = await readJsonBody(req);
+    const validation = validateSchema(RevokeAllSessionsSchema, body);
+    if (!validation.valid) {
+      publishAuthAuditEvent({
+        action: AUTH_AUDIT_ACTIONS.LOGOUT,
+        success: false,
+        requestId,
+      });
+      badRequest(res, "Invalid request body", req, validation.errors);
+      return;
+    }
+
+    const auth = extractAuth(req);
+    const result = await authDependencies.revokeAllSessions(body.userId, body.reason);
+
+    publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.LOGOUT,
+      success: true,
+      requestId,
+      userId: body.userId,
+    });
+
+    json(res, 200, {
+      data: result,
+      error: null,
+    });
+  } catch (err: any) {
+    publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.LOGOUT,
+      success: false,
+      requestId,
+    });
+    if (err instanceof InvalidJsonError || err instanceof BodyTooLargeError) {
+      badRequest(res, err.message, req);
+    } else {
+      sendApiError(res, 400, "REVOCATION_ERROR", err.message, req);
+    }
+  }
 }
