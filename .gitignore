@@ -169,3 +169,6 @@ pr_*.md
 
 # Local issue-change summaries
 ISSUE_CHANGES_*.md
+
+# Implementation notes
+IMPLEMENTATION_NOTES.md

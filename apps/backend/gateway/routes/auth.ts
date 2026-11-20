@@ -35,6 +35,7 @@ export const authDependencies = {
   introspectToken: authService.introspectToken,
   revokeTokens: authService.revokeTokens,
   revokeAllUserSessions: authService.revokeAllUserSessions,
+  revokeAllSessions: authService.revokeAllSessions,
   getJwks: authService.getJwks,
   handleOAuthCallback: oauthService.handleOAuthCallback,
   buildAuthorizationUrl: oauthService.buildAuthorizationUrl,

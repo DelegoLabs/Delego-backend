@@ -49,7 +49,7 @@ if (sentryConfig) {
 
 const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
-logger.info({ port, nodeEnv, logLevel }, "Starting gateway");
+log.info({ port, nodeEnv, logLevel }, "Starting gateway");
 
 // Start emergency kill-switch subscriber
 getEmergencyKillSwitchService().start().catch((err) => {
