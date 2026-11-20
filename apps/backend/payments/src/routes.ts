@@ -1606,5 +1606,136 @@ export function registerRoutes(): Route[] {
     route("GET", "/exchange-rates/health", async (_req, res) => {
       json(res, 200, { data: getExchangeRateHealth(), error: null });
     }),
+
+    // ─── Issue #521 — Public Product Review Feed ─────────────────────────────
+
+    route("GET", "/api/v1/reviews", async (req, res) => {
+      try {
+        const { getReviewFeed, validateReviewFeedQuery } = await import("./reviews/reviewFeed.js");
+        const qs = Object.fromEntries(
+          new URL(req.url ?? "/", "http://localhost").searchParams.entries()
+        );
+        const query = validateReviewFeedQuery(qs);
+        const page = await getReviewFeed(query);
+        json(res, 200, { data: page, error: null });
+      } catch (err) {
+        sendOperationError(res, "REVIEW_FEED_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/reviews/:id/helpful", async (req, res, params) => {
+      try {
+        const { voteHelpful } = await import("./reviews/reviewFeed.js");
+        const body = await readJsonBody(req);
+        const voterIp = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+          ?? (req.socket.remoteAddress ?? null);
+        const voterWallet = typeof body.voterWallet === "string" ? body.voterWallet : null;
+        const result = await voteHelpful(params.id, voterIp, voterWallet);
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("not found")) {
+          json(res, 404, { data: null, error: { code: "REVIEW_NOT_FOUND", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "REVIEW_HELPFUL_VOTE_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #531 — Multi-Merchant Price Comparison ────────────────────────
+
+    route("GET", "/api/v1/catalog/compare", async (req, res) => {
+      try {
+        const { searchAndRankOffers, validateSearchQuery } = await import("./catalog/multiMerchantSearch.js");
+        const qs = Object.fromEntries(
+          new URL(req.url ?? "/", "http://localhost").searchParams.entries()
+        );
+        const query = validateSearchQuery(qs);
+        const offers = await searchAndRankOffers(query);
+        json(res, 200, { data: offers, error: null });
+      } catch (err) {
+        if (err instanceof Error && (err.message.includes("required") || err.message.includes("invalid"))) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "CATALOG_COMPARE_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #534 — Purchase Proposal Generation ───────────────────────────
+
+    route("POST", "/api/v1/agent/proposals", async (req, res) => {
+      try {
+        const {
+          createPurchaseProposal,
+          validateCreateProposalInput,
+        } = await import("./proposals/purchaseProposal.js");
+        const body = await readJsonBody(req);
+        const input = validateCreateProposalInput(body);
+        const proposal = await createPurchaseProposal(input);
+        json(res, 201, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message.includes("required")) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_CREATE_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #532 — Buyer Memory Vector Search ──────────────────────────────
+
+    route("POST", "/api/v1/agent/memories", async (req, res) => {
+      try {
+        const {
+          upsertMemoryWithEmbedding,
+          validateUpsertMemoryInput,
+        } = await import("../../agents/buyer-agent/src/memory/embeddingService.js");
+        const { Pool: PgPool } = await import("pg");
+        const db = new PgPool({
+          connectionString:
+            process.env.DATABASE_URL ?? "postgresql://delego:delego@localhost:5432/delego",
+        });
+        const body = await readJsonBody(req);
+        const input = validateUpsertMemoryInput(body);
+        const memory = await upsertMemoryWithEmbedding(db, input);
+        json(res, 201, { data: memory, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("required")) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "MEMORY_UPSERT_FAILED", err);
+      }
+    }),
+
+    route("GET", "/api/v1/agent/memories/search", async (req, res) => {
+      try {
+        const {
+          searchMemories,
+          validateMemorySearchInput,
+        } = await import("../../agents/buyer-agent/src/memory/embeddingService.js");
+        const { Pool: PgPool } = await import("pg");
+        const db = new PgPool({
+          connectionString:
+            process.env.DATABASE_URL ?? "postgresql://delego:delego@localhost:5432/delego",
+        });
+        const qs = Object.fromEntries(
+          new URL(req.url ?? "/", "http://localhost").searchParams.entries()
+        );
+        const input = validateMemorySearchInput(qs);
+        const memories = await searchMemories(db, input);
+        json(res, 200, { data: memories, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("required")) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "MEMORY_SEARCH_FAILED", err);
+      }
+    }),
   ];
 }
