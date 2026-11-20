@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as tls from "node:tls";
-import { configureAuditLogTransport, createCefSyslogTransport, formatCef } from "./cefExporter.js";
+import {
+  configureAuditLogTransport,
+  createCefSyslogTransport,
+  formatCef,
+  formatCefEvent,
+  createSecurityEventSyslogTlsTransport,
+  createSecurityEventSyslogUdpTransport,
+  configureSecurityEventTransport,
+  dispatchSecurityEvent,
+  isHighSeverityCefEvent,
+  type CefEvent,
+} from "./cefExporter.js";
 import { recordAuditEntry } from "./auditLogStore.js";
 import type { AuditLogEntry } from "./types.js";
 import type { Queryable } from "../softDelete/types.js";
@@ -115,5 +126,202 @@ describe("CEF exporter", () => {
       operation: "INSERT",
       transactionId: "tx-1",
     })).resolves.toMatchObject({ id: "event-1" });
+  });
+});
+
+const sampleSecurityEvent: CefEvent = {
+  deviceVendor: "DelegoLabs",
+  deviceProduct: "Gateway",
+  deviceVersion: "1.0",
+  deviceEventClassId: "AUTH_FAILURE",
+  name: "Unauthorized access attempt",
+  severity: "high",
+  extension: {
+    srcIp: "203.0.113.5",
+    suser: "merchant|operator",
+    act: "login",
+    msg: "token=abc\ninvalid signature",
+    customFields: { reason: "signature=mismatch" },
+  },
+};
+
+describe("formatCefEvent (Issue #619)", () => {
+  it("formats a valid CEF:0 log line with the declared vendor/product/severity", () => {
+    const cef = formatCefEvent(sampleSecurityEvent);
+
+    expect(cef).toContain("CEF:0|DelegoLabs|Gateway|1.0|AUTH_FAILURE|Unauthorized access attempt|8");
+    expect(cef).toContain("src=203.0.113.5");
+    expect(cef).toContain("act=login");
+  });
+
+  it("escapes pipes in header fields and equals/newlines in extension values", () => {
+    const cef = formatCefEvent(sampleSecurityEvent);
+
+    expect(cef).toContain("suser=merchant\\|operator");
+    expect(cef).toContain("msg=token\\=abc\\ninvalid signature");
+    expect(cef).toContain("reason=signature\\=mismatch");
+  });
+
+  it("maps every severity level to a distinct CEF integer in range", () => {
+    const severities: CefEvent["severity"][] = ["low", "medium", "high", "critical"];
+    const values = severities.map((severity) =>
+      Number(formatCefEvent({ ...sampleSecurityEvent, severity }).split("|")[6])
+    );
+
+    expect(new Set(values).size).toBe(4);
+    for (const value of values) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(10);
+    }
+    // Higher named severities must carry a higher (or equal) numeric value.
+    expect(values[0]).toBeLessThan(values[2]);
+    expect(values[2]).toBeLessThanOrEqual(values[3]);
+  });
+
+  it("omits extension fields that were not supplied", () => {
+    const cef = formatCefEvent({
+      ...sampleSecurityEvent,
+      extension: { msg: "key rotated" },
+    });
+
+    expect(cef).toContain("msg=key rotated");
+    expect(cef).not.toContain("src=");
+    expect(cef).not.toContain("suser=");
+    expect(cef).not.toContain("act=");
+  });
+});
+
+describe("isHighSeverityCefEvent", () => {
+  it("treats high and critical as high severity", () => {
+    expect(isHighSeverityCefEvent({ ...sampleSecurityEvent, severity: "high" })).toBe(true);
+    expect(isHighSeverityCefEvent({ ...sampleSecurityEvent, severity: "critical" })).toBe(true);
+  });
+
+  it("treats low and medium as not high severity", () => {
+    expect(isHighSeverityCefEvent({ ...sampleSecurityEvent, severity: "low" })).toBe(false);
+    expect(isHighSeverityCefEvent({ ...sampleSecurityEvent, severity: "medium" })).toBe(false);
+  });
+});
+
+describe("createSecurityEventSyslogTlsTransport", () => {
+  it("streams the formatted CEF event over a verified TLS connection", async () => {
+    const listeners = new Map<string, (...args: unknown[]) => void>();
+    let sentMessage = "";
+    const socket = {
+      setTimeout: vi.fn(),
+      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+        listeners.set(event, listener);
+        return socket;
+      }),
+      end: vi.fn((message: string, callback: () => void) => {
+        sentMessage = message;
+        callback();
+      }),
+      destroy: vi.fn(),
+    } as unknown as tls.TLSSocket;
+    const connect = vi.fn(() => socket) as unknown as typeof tls.connect;
+
+    const transport = createSecurityEventSyslogTlsTransport({ host: "siem.example", port: 6514 }, connect);
+    const sendPromise = transport(sampleSecurityEvent);
+    listeners.get("secureConnect")?.();
+    await sendPromise;
+
+    expect(connect).toHaveBeenCalledWith(expect.objectContaining({
+      host: "siem.example",
+      port: 6514,
+      rejectUnauthorized: true,
+      servername: "siem.example",
+    }));
+    expect(sentMessage).toContain("CEF:0|DelegoLabs|Gateway|1.0|AUTH_FAILURE|");
+    expect(sentMessage.endsWith("\n")).toBe(true);
+  });
+
+  it("rejects when the TLS connection errors", async () => {
+    const listeners = new Map<string, (...args: unknown[]) => void>();
+    const socket = {
+      setTimeout: vi.fn(),
+      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+        listeners.set(event, listener);
+        return socket;
+      }),
+      end: vi.fn(),
+      destroy: vi.fn(),
+    } as unknown as tls.TLSSocket;
+    const connect = vi.fn(() => socket) as unknown as typeof tls.connect;
+
+    const transport = createSecurityEventSyslogTlsTransport({ host: "siem.example", port: 6514 }, connect);
+    const sendPromise = transport(sampleSecurityEvent);
+    listeners.get("error")?.(new Error("ECONNREFUSED"));
+
+    await expect(sendPromise).rejects.toThrow("ECONNREFUSED");
+    expect(socket.destroy).toHaveBeenCalled();
+  });
+});
+
+describe("createSecurityEventSyslogUdpTransport", () => {
+  it("sends the formatted CEF event as a single UDP datagram", async () => {
+    let sentMessage = "";
+    let sentPort = 0;
+    let sentHost = "";
+    const socket = {
+      once: vi.fn(),
+      send: vi.fn((message: Buffer, port: number, host: string, callback: (error?: Error) => void) => {
+        sentMessage = message.toString("utf8");
+        sentPort = port;
+        sentHost = host;
+        callback();
+      }),
+      close: vi.fn(),
+    };
+    const createUdpSocket = vi.fn(() => socket) as unknown as typeof import("node:dgram").createSocket;
+
+    const transport = createSecurityEventSyslogUdpTransport({ host: "siem.example", port: 514 }, createUdpSocket);
+    await transport(sampleSecurityEvent);
+
+    expect(sentHost).toBe("siem.example");
+    expect(sentPort).toBe(514);
+    expect(sentMessage).toContain("CEF:0|DelegoLabs|Gateway|1.0|AUTH_FAILURE|");
+    expect(sentMessage.endsWith("\n")).toBe(true);
+    expect(socket.close).toHaveBeenCalled();
+  });
+
+  it("rejects when the UDP socket reports a send error", async () => {
+    const socket = {
+      once: vi.fn(),
+      send: vi.fn((_message: Buffer, _port: number, _host: string, callback: (error?: Error) => void) => {
+        callback(new Error("ENETUNREACH"));
+      }),
+      close: vi.fn(),
+    };
+    const createUdpSocket = vi.fn(() => socket) as unknown as typeof import("node:dgram").createSocket;
+
+    const transport = createSecurityEventSyslogUdpTransport({ host: "siem.example", port: 514 }, createUdpSocket);
+
+    await expect(transport(sampleSecurityEvent)).rejects.toThrow("ENETUNREACH");
+    expect(socket.close).toHaveBeenCalled();
+  });
+});
+
+describe("dispatchSecurityEvent", () => {
+  afterEach(() => configureSecurityEventTransport(undefined));
+
+  it("does nothing when no transport is configured", () => {
+    expect(() => dispatchSecurityEvent(sampleSecurityEvent)).not.toThrow();
+  });
+
+  it("forwards the event to the configured transport instantly (no buffering)", () => {
+    const transport = vi.fn();
+    configureSecurityEventTransport(transport);
+
+    dispatchSecurityEvent(sampleSecurityEvent);
+
+    expect(transport).toHaveBeenCalledWith(sampleSecurityEvent);
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+
+  it("never throws back to the caller when the transport rejects", async () => {
+    configureSecurityEventTransport(() => Promise.reject(new Error("SIEM unreachable")));
+
+    expect(() => dispatchSecurityEvent(sampleSecurityEvent)).not.toThrow();
   });
 });

@@ -10,8 +10,17 @@ export {
   configureAuditLogTransport,
   createCefSyslogTransport,
   formatCef,
+  formatCefEvent,
+  createSecurityEventSyslogTlsTransport,
+  createSecurityEventSyslogUdpTransport,
+  configureSecurityEventTransport,
+  dispatchSecurityEvent,
+  isHighSeverityCefEvent,
   type AuditLogTransport,
   type CefSyslogOptions,
+  type CefEvent,
+  type CefSyslogUdpOptions,
+  type SecurityEventTransport,
 } from "./cefExporter.js";
 
 export {
