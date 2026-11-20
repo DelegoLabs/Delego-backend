@@ -29,6 +29,16 @@ import { registerOracleRoutes } from "./oracle/routes.js";
 import { ContractInvocationError } from "../escrow/errors.js";
 import { settleOrder, refundOrder } from "../settlement/index.js";
 import { getEscrowFundingLockManager } from "./escrowCoordinator/escrowFundingLock.js";
+import { cancelOrder, OrderAlreadyShippedError, OrderNotCancellableError } from "./orders/cancelOrder.js";
+import {
+  createPartialRefundProposal,
+  counterPartialRefundProposal,
+  signPartialRefundProposal,
+  expirePartialRefundProposals,
+  ArithmeticImbalanceError,
+  ProposalNotFoundError,
+  ProposalNotOpenError,
+} from "./disputes/partialRefundNegotiation.js";
 import {
   acquireLock,
   releaseLock,
@@ -503,6 +513,40 @@ export function registerRoutes(): Route[] {
       }
     }),
 
+    // Issue #503 — Pre-shipment order cancellation with escrow refund.
+    route("POST", "/api/v1/orders/:orderId/cancel", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { buyerAddress, reason } = body;
+
+        if (typeof buyerAddress !== "string" || !buyerAddress) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "buyerAddress is required" });
+          return;
+        }
+        if (typeof reason !== "string" || !reason) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "reason is required" });
+          return;
+        }
+
+        const result = await cancelOrder({ orderId: params.orderId, buyerAddress, reason });
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof OrderAlreadyShippedError) {
+          json(res, 409, { data: null, error: { code: "ORDER_ALREADY_SHIPPED", message: err.message } });
+          return;
+        }
+        if (err instanceof OrderNotCancellableError) {
+          json(res, 409, { data: null, error: { code: "ORDER_NOT_CANCELLABLE", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "ORDER_CANCEL_FAILED", err);
+      }
+    }),
+
     route("POST", "/api/v1/orders/:orderId/refund", async (req, res, params) => {
       try {
         const body = await readJsonBody(req);
@@ -817,6 +861,120 @@ export function registerRoutes(): Route[] {
         }
         if (sendDisputeError(res, err)) return;
         sendOperationError(res, "DISPUTE_AUTO_MEDIATION_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #504 — Partial Refund Dispute Settlement Negotiation ──────────
+
+    route("POST", "/api/v1/orders/:orderId/partial-refund-proposals", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { escrowId, totalOrderStroops, proposerRole, buyerRefundStroops, merchantPayoutStroops, signature, expiresAt } = body;
+
+        if (!escrowId || !totalOrderStroops || !proposerRole || !buyerRefundStroops || !merchantPayoutStroops || !signature) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "escrowId, totalOrderStroops, proposerRole, buyerRefundStroops, merchantPayoutStroops, and signature are required" });
+          return;
+        }
+
+        const proposal = await createPartialRefundProposal({
+          orderId: params.orderId,
+          escrowId: String(escrowId),
+          totalOrderStroops: String(totalOrderStroops),
+          proposerRole: proposerRole as "buyer" | "merchant",
+          buyerRefundStroops: String(buyerRefundStroops),
+          merchantPayoutStroops: String(merchantPayoutStroops),
+          signature: String(signature),
+          expiresAt: typeof expiresAt === "string" ? expiresAt : undefined,
+        });
+        json(res, 201, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof ArithmeticImbalanceError) {
+          json(res, 400, { data: null, error: { code: "ARITHMETIC_IMBALANCE", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_CREATE_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/partial-refund-proposals/:proposalId/counter", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { counterRole, buyerRefundStroops, merchantPayoutStroops, signature } = body;
+
+        if (!counterRole || !buyerRefundStroops || !merchantPayoutStroops || !signature) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "counterRole, buyerRefundStroops, merchantPayoutStroops, and signature are required" });
+          return;
+        }
+
+        const proposal = await counterPartialRefundProposal(
+          params.proposalId,
+          counterRole as "buyer" | "merchant",
+          { buyerRefundStroops: String(buyerRefundStroops), merchantPayoutStroops: String(merchantPayoutStroops), signature: String(signature) }
+        );
+        json(res, 200, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof ArithmeticImbalanceError) {
+          json(res, 400, { data: null, error: { code: "ARITHMETIC_IMBALANCE", message: err.message } });
+          return;
+        }
+        if (err instanceof ProposalNotFoundError) {
+          json(res, 404, { data: null, error: { code: "PROPOSAL_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof ProposalNotOpenError) {
+          json(res, 409, { data: null, error: { code: "PROPOSAL_NOT_OPEN", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_COUNTER_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/partial-refund-proposals/:proposalId/sign", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { role, signature } = body;
+
+        if (!role || !signature) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "role and signature are required" });
+          return;
+        }
+
+        const proposal = await signPartialRefundProposal(params.proposalId, {
+          role: role as "buyer" | "merchant",
+          signature: String(signature),
+        });
+        json(res, 200, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof ProposalNotFoundError) {
+          json(res, 404, { data: null, error: { code: "PROPOSAL_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof ProposalNotOpenError) {
+          json(res, 409, { data: null, error: { code: "PROPOSAL_NOT_OPEN", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_SIGN_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/orders/:orderId/partial-refund-proposals/expire", async (_req, res, params) => {
+      try {
+        const count = await expirePartialRefundProposals(params.orderId);
+        json(res, 200, { data: { expiredCount: count }, error: null });
+      } catch (err) {
+        sendOperationError(res, "PROPOSAL_EXPIRE_FAILED", err);
       }
     }),
 
