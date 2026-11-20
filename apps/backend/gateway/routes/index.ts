@@ -12,6 +12,7 @@ import {
   oauthAuthorizeHandler,
   introspectHandler,
   revokeHandler,
+  revokeAllSessionsHandler,
   jwksHandler,
 } from "./auth.js";
 import {
@@ -149,6 +150,7 @@ export function registerRoutes(): Route[] {
     // JWT management (Issue #77)
     route("POST", "/api/v1/auth/introspect", introspectHandler),
     route("POST", "/api/v1/auth/revoke", revokeHandler),
+    route("POST", "/api/v1/auth/revoke-all-sessions", revokeAllSessionsHandler),
     route("GET", "/api/v1/auth/.well-known/jwks.json", jwksHandler),
     route("GET", "/.well-known/jwks.json", jwksHandler),
     route("GET", "/api/v1/auth/oauth/authorize", oauthAuthorizeHandler),

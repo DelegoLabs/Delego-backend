@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { Op } from "sequelize";
 import { RefreshToken } from "../models/RefreshToken.js";
 import { User } from "../models/User.js";
 import {
@@ -15,6 +16,11 @@ import {
   type JwtValidationConfig,
 } from "./tokenManager.js";
 import type { TokenBinding, TokenPair } from "./tokenTypes.js";
+import {
+  revokeRedisSessionsForUser,
+  type RevokeAllSessionsRequest,
+  type RevokeAllSessionsResponse,
+} from "./sessionRevocation.js";
 
 export {
   getJwks,
@@ -64,7 +70,7 @@ export async function generateTokens(
 export function verifyToken(
   token: string,
   config: JwtValidationConfig = getJwtValidationConfig(),
-): { userId: string; email?: string; roles?: string[]; jti?: string; permissions?: string[] } {
+): { userId: string; email?: string; roles?: string[]; jti?: string; iat?: number; permissions?: string[] } {
   const decoded = verifyWithStore(token, {
     clockTolerance: config.clockToleranceSeconds,
     issuer: config.issuer,
@@ -76,6 +82,7 @@ export function verifyToken(
       email: typeof decoded.email === "string" ? decoded.email : undefined,
       roles: Array.isArray(decoded.roles) ? (decoded.roles as string[]) : undefined,
       jti: typeof decoded.jti === "string" ? decoded.jti : undefined,
+      iat: typeof decoded.iat === "number" ? decoded.iat : undefined,
       permissions: Array.isArray(decoded.permissions) ? (decoded.permissions as string[]) : undefined,
     };
   }
@@ -84,6 +91,35 @@ export function verifyToken(
 
 export async function revokeTokenFamily(familyId: string): Promise<void> {
   await RefreshToken.update({ revokedAt: new Date() }, { where: { familyId } });
+}
+
+/** Revokes every unexpired refresh-token row for a user across all devices. */
+export async function revokeAllRefreshTokensForUser(userId: string): Promise<number> {
+  const [affectedCount] = await RefreshToken.update(
+    { revokedAt: new Date() },
+    { where: { userId, revokedAt: { [Op.is]: null } } },
+  );
+  return affectedCount;
+}
+
+/**
+ * Revokes all Redis sessions for a user, marks the JWT cutoff, revokes all
+ * refresh tokens, and publishes the WebSocket revocation notification.
+ */
+export async function revokeAllUserSessions(
+  request: RevokeAllSessionsRequest,
+): Promise<RevokeAllSessionsResponse> {
+  const revokedAt = new Date();
+  const sessionsRevokedCount = await revokeRedisSessionsForUser(
+    request.userId,
+    revokedAt,
+    request.reason,
+  );
+  await revokeAllRefreshTokensForUser(request.userId);
+  return {
+    sessionsRevokedCount,
+    revokedAt: revokedAt.toISOString(),
+  };
 }
 
 export async function refreshAccessToken(

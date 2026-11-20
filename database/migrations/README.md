@@ -83,6 +83,7 @@ The incremental migrations are:
 | `060_webhook_secret_rotation.sql` | Merchant webhook HMAC signing-secret rotation state and grace periods (#381) |
 | `061_product_variants.sql` | Product variants (sizes, colors, materials) with attribute and barcode indexes |
 | `062_soroban_contract_events.sql` | Durable, idempotent store for ingested Soroban contract events |
+| `064_order_dispute_fields.sql` | On-chain dispute references on orders: evidence hash, dispute ID, reason code, ledger sequence, and dispute timestamp |
 | `20261020_webhook_delivery_forensic_logs.sql` | Granular per-attempt webhook delivery forensic log (`webhook_delivery_logs`): payload SHA-256 hash, HTTP status, latency, response body sample, and error message, with a partial index over failed attempts (`http_status >= 400 OR http_status IS NULL`) |
 
 ### Passkey / WebAuthn configuration (#367)

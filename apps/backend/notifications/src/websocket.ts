@@ -51,6 +51,8 @@ export function resolveJwtSecret(
 
 const JWT_SECRET = resolveJwtSecret();
 const HEARTBEAT_TIMEOUT = 60_000; // 60 seconds
+const AUTH_SESSIONS_REVOKED_CHANNEL = "auth:sessions:revoked";
+const SESSION_REVOKED_CLOSE_CODE = 4401;
 
 /**
  * Issue #343 — a network drop can silently kill the TCP connection
@@ -108,8 +110,19 @@ if (process.env.NODE_ENV !== "test" && process.env.CI !== "true" && process.env.
       log.info("Subscribed to Redis notifications channel");
     }
   });
+  redisSubscriber.subscribe(AUTH_SESSIONS_REVOKED_CHANNEL, (err: Error | null | undefined) => {
+    if (err) {
+      log.error("Failed to subscribe to session revocation channel", { error: err });
+    } else {
+      log.info("Subscribed to session revocation channel", { channel: AUTH_SESSIONS_REVOKED_CHANNEL });
+    }
+  });
 
-  redisSubscriber.on("message", (_channel: string, message: string) => {
+  redisSubscriber.on("message", (channel: string, message: string) => {
+    if (channel === AUTH_SESSIONS_REVOKED_CHANNEL) {
+      handleSessionRevocationMessage(message);
+      return;
+    }
     try {
       const event: PushNotificationEvent = JSON.parse(message);
       broadcastToTopic(event.topic, event);
@@ -154,6 +167,44 @@ export function broadcastNotificationToUser(
     publishedAt: event.publishedAt ?? new Date().toISOString(),
   };
   broadcastToTopic(notification.topic, notification);
+}
+
+/** Closes every WebSocket connection authenticated as `userId`. */
+export function closeConnectionsForUser(userId: string): number {
+  let closed = 0;
+  for (const connection of connections.values()) {
+    if (connection.userId !== userId) continue;
+    if (connection.heartbeatTimeout) {
+      clearTimeout(connection.heartbeatTimeout);
+      connection.heartbeatTimeout = undefined;
+    }
+    try {
+      connection.ws.close(SESSION_REVOKED_CLOSE_CODE, "Session revoked");
+      closed += 1;
+    } catch (err) {
+      log.warn("Failed to close revoked WebSocket connection", {
+        connectionId: connection.connectionId,
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  if (closed > 0) {
+    log.info("Closed WebSocket connections for revoked user", { userId, closed });
+  }
+  return closed;
+}
+
+/** Handles `auth:sessions:revoked` pub/sub payloads. */
+export function handleSessionRevocationMessage(message: string): void {
+  try {
+    const parsed = JSON.parse(message) as { userId?: unknown };
+    if (typeof parsed.userId === "string" && parsed.userId) {
+      closeConnectionsForUser(parsed.userId);
+    }
+  } catch (err) {
+    log.error("Failed to process session revocation message", { error: err });
+  }
 }
 
 export function getWebSocketMetrics(): WebSocketMetrics {

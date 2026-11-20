@@ -166,3 +166,6 @@ out/
 # Ignore pull request description file
 .prs/PR*.md
 pr_*.md
+
+# Local issue-change summaries
+ISSUE_CHANGES_*.md

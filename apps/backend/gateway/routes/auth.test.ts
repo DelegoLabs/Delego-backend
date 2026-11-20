@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { loginHandler, registerHandler, logoutHandler } from "./auth.js";
+import { loginHandler, registerHandler, logoutHandler, revokeAllSessionsHandler } from "./auth.js";
 import {
   clearPublishedAuthAuditEvents,
   publishedAuthAuditEvents,
@@ -16,6 +16,7 @@ vi.mock("../src/auth/authService.js", async (importOriginal) => {
     loginUser: vi.fn(),
     refreshAccessToken: vi.fn(),
     logoutUser: vi.fn(),
+    revokeAllUserSessions: vi.fn(),
   };
 });
 
@@ -35,9 +36,14 @@ vi.mock("../src/request.js", async (importOriginal) => {
   };
 });
 
-import { registerUser, loginUser, logoutUser } from "../src/auth/authService.js";
+import { registerUser, loginUser, logoutUser, revokeAllUserSessions } from "../src/auth/authService.js";
 import { readJsonBody } from "../src/request.js";
 import { generateToken } from "../src/auth/authService.js";
+import { extractAuth } from "../middleware/auth.js";
+import {
+  markUserSessionsRevoked,
+  resetSessionRevocationStateForTests,
+} from "../src/auth/sessionRevocation.js";
 
 type MockResponse = ServerResponse & {
   statusCode: number;
@@ -227,5 +233,120 @@ describe("auth route audit events", () => {
       success: false,
       requestId: "req-logout-2",
     });
+  });
+});
+
+describe("revokeAllSessionsHandler", () => {
+  beforeEach(() => {
+    clearPublishedAuthAuditEvents();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    clearPublishedAuthAuditEvents();
+  });
+
+  it("revokes all sessions for the authenticated user", async () => {
+    vi.mocked(readJsonBody).mockResolvedValue({
+      userId: "user-1",
+      reason: "security_compromise",
+    });
+    vi.mocked(revokeAllUserSessions).mockResolvedValue({
+      sessionsRevokedCount: 2,
+      revokedAt: "2026-01-02T03:04:05.000Z",
+    });
+
+    const accessToken = generateToken("user-1", "user@example.com");
+    const req = createMockReq({
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "x-request-id": "req-revoke-all-1",
+      },
+    });
+    const res = createMockRes();
+
+    await revokeAllSessionsHandler(req, res);
+
+    expect(revokeAllUserSessions).toHaveBeenCalledWith({
+      userId: "user-1",
+      reason: "security_compromise",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data).toEqual({
+      sessionsRevokedCount: 2,
+      revokedAt: "2026-01-02T03:04:05.000Z",
+    });
+    expect(res.headers["Set-Cookie"]).toContain("refresh_token=");
+    expect(publishedAuthAuditEvents[0]).toMatchObject({
+      action: AUTH_AUDIT_ACTIONS.REVOKE_ALL_SESSIONS,
+      success: true,
+      userId: "user-1",
+    });
+  });
+
+  it("rejects unauthenticated requests", async () => {
+    vi.mocked(readJsonBody).mockResolvedValue({
+      userId: "user-1",
+      reason: "user_requested",
+    });
+
+    const req = createMockReq({ headers: { "x-request-id": "req-revoke-all-2" } });
+    const res = createMockRes();
+
+    await revokeAllSessionsHandler(req, res);
+
+    expect(res.statusCode).toBe(401);
+    expect(revokeAllUserSessions).not.toHaveBeenCalled();
+  });
+
+  it("rejects revoking another user's sessions for non-admins", async () => {
+    vi.mocked(readJsonBody).mockResolvedValue({
+      userId: "user-2",
+      reason: "user_requested",
+    });
+
+    const accessToken = generateToken("user-1", "user@example.com");
+    const req = createMockReq({
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    const res = createMockRes();
+
+    await revokeAllSessionsHandler(req, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(revokeAllUserSessions).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid bodies", async () => {
+    vi.mocked(readJsonBody).mockResolvedValue({
+      userId: "",
+      reason: "not-a-reason",
+    });
+
+    const req = createMockReq();
+    const res = createMockRes();
+
+    await revokeAllSessionsHandler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(revokeAllUserSessions).not.toHaveBeenCalled();
+  });
+});
+
+describe("extractAuth session revocation cutoff", () => {
+  afterEach(() => {
+    resetSessionRevocationStateForTests();
+  });
+
+  it("rejects a previously valid JWT after the user's sessions are revoked", () => {
+    const userId = "user-session-revoked";
+    const accessToken = generateToken(userId, "revoked@example.com");
+    markUserSessionsRevoked(userId, new Date());
+
+    const req = createMockReq({
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+
+    expect(extractAuth(req).userId).toBeNull();
   });
 });
