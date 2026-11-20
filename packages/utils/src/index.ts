@@ -179,6 +179,16 @@ export {
   type RateLimitResult,
 } from "./rateLimit/slidingWindowRateLimiter.js";
 export {
+  DEFAULT_TIMESTAMP_TOLERANCE_SECONDS,
+  buildNonceCacheKey,
+  isTimestampFresh,
+  validateNonce,
+  type NonceCacheRedisClient,
+  type NonceValidationOptions,
+  type NonceValidationResult,
+  type NonceRejectionReason,
+} from "./security/nonceCache.js";
+export {
   RedisSessionStore,
   type SessionRedisClient,
   type Session,
