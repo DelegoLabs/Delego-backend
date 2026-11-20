@@ -201,6 +201,15 @@ export {
   type CreateSessionInput,
 } from "./session/redisSessionStore.js";
 export {
+  parseScVal,
+  scValToBigInt,
+  scValToAddress,
+  scValParser,
+  ScValParseError,
+  type ParsedScVal,
+  type ScValParser,
+} from "./soroban/scvalParser.js";
+export {
   ServiceMetricsRegistry,
   type Counter,
   type Gauge,

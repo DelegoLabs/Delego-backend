@@ -13,3 +13,10 @@ export {
   type ContractUpgradeListenerConfig,
   type CreateContractUpgradeListenerOptions,
 } from "./contractUpgrade.js";
+export {
+  BlendYieldListener,
+  createBlendYieldListener,
+  type BlendYieldEvent,
+  type YieldDistributionRecord,
+  type BlendYieldListenerConfig,
+} from "./blendYield.js";
