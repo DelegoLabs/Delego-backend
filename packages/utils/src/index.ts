@@ -90,6 +90,21 @@ export * from "./compression/index.js";
 // Synthetic Monitoring
 export * from "./synthetic/index.js";
 
+export {
+  REDACTED_SECRET_PLACEHOLDER,
+  defaultQueryLogSanitizer,
+  createSanitizingQueryLogger,
+  type QueryLogSanitizer,
+} from "./logger/sqlSanitizer.js";
+export {
+  isPrivateOrReservedIp,
+  validateSsrfUrl,
+  createPinnedLookup,
+  dispatchWithSsrfProtection,
+  type SsrfValidationResult,
+  type SsrfRejectionReason,
+  type SsrfSafeDispatchResult,
+} from "./security/ssrfGuard.js";
 export * from "./pentest.js";
 export * from "./coverageGate.js";
 export * from "./integrationFixtures.js";
