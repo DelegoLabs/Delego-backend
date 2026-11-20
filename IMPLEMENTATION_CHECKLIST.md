@@ -233,3 +233,10 @@ All items completed. Implementation is production-ready.
 **Estimated Review Time**: 20-30 minutes
 **Estimated Implementation Time**: 2-4 hours (wallet service integration)
 **Risk Level**: Low (backward compatible, well-tested)
+| Alert | Threshold | Action |
+|-------|-----------|--------|
+| DLQ creation rate | > 60/hour | Investigate SendGrid service or email configuration |
+| Email dispatch failure rate | > 5% overall | Check SENDGRID_API_KEY validity and rate limits |
+| Retry success rate | < 70% | Review error classification or increase EMAIL_MAX_RETRIES |
+| Database connection failures | Any | Check DATABASE_URL and network connectivity |
+| Configuration validation failed | Any | Check environment variables on startup |
