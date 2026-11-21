@@ -15,6 +15,13 @@ import {
   revokeAllSessionsHandler,
   jwksHandler,
 } from "./auth.js";
+import {
+  createErasureRequestHandler,
+  confirmErasureHandler,
+  getErasureStatusHandler,
+  getErasureCertificateHandler,
+  deleteAccountHandler,
+} from "./erasure.js";
 import { stellarFeePredictionHandler } from "./stellar.js";
 import {
   beginRegistrationHandler,
@@ -258,6 +265,13 @@ export function registerRoutes(): Route[] {
     // Admin — audit log query API (#66)
     route("GET", "/api/v1/admin/audit-log", auditLogQueryHandler),
     route("GET", "/api/v1/admin/audit-log/verify", auditLogVerifyHandler),
+    // GDPR Account Erasure routes
+    route("POST", "/api/v1/user/account/erasure-request", createErasureRequestHandler),
+    route("POST", "/api/v1/user/account/confirm-erasure", confirmErasureHandler),
+    route("GET", "/api/v1/user/account/erasure-status/:requestId", getErasureStatusHandler),
+    route("GET", "/api/v1/user/account/erasure-certificate/:certificateHash", getErasureCertificateHandler),
+    // Direct account deletion endpoint
+    route("DELETE", "/api/v1/user/account", deleteAccountHandler),
     // Emergency Kill-Switch Broadcast API (#375)
     route("POST", "/api/v1/admin/emergency/broadcast", emergencyBroadcastHandler),
     route("GET", "/api/v1/admin/emergency/status", emergencyStatusHandler),

@@ -309,6 +309,7 @@ export {
   LogChunkCompressionError,
   UnsupportedLogChunkCompressionError,
   DEFAULT_LOG_CHUNK_COMPRESSION_ALGORITHM,
+  SUPPORTED_LOG_COMPRESSION_ALGORITHMS,
   type LogChunkCompressionAlgorithm,
   type LogChunkCompressionOptions,
   type CompressedLogChunk,
