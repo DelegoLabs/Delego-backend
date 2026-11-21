@@ -1,6 +1,7 @@
 import { Sequelize, Transaction } from "sequelize";
 import { createLogger } from "@delegolabs/utils";
 import { ServiceMetricsRegistry } from "@delegolabs/utils";
+import { createSanitizingQueryLogger } from "@delegolabs/utils";
 import {
   configureDbMetrics,
   instrumentSequelize,
@@ -52,9 +53,16 @@ function buildPoolOverrides(max?: number) {
   };
 }
 
+// Query debug logs flow through the secret-scanning sanitizer (Issue #616)
+// before reaching the logger — Sequelize's `logging` callback receives the
+// fully-interpolated SQL string, which can otherwise carry decrypted
+// private keys, mnemonic seeds, or plaintext passwords straight into
+// log aggregation (Datadog/CloudWatch).
+const sanitizedQueryLogger = createSanitizingQueryLogger((msg) => log.debug(msg));
+
 const baseSequelizeOptions = {
   dialect: "postgres" as const,
-  logging: (msg: string) => log.debug(msg),
+  logging: sanitizedQueryLogger,
   define: {
     underscored: true,
     timestamps: true,

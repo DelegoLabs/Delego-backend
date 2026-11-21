@@ -35,6 +35,10 @@ import { startOutboxRelay, type OutboxRelayHandle } from "./events/outboxRelay.j
 import { PostgresServiceEventOutboxStore } from "./events/postgres-service-event-outbox.js";
 import { setServiceEventOutboxStore } from "./events/service-event-outbox.js";
 import {
+  createDisputeRaisedHandler,
+  DisputeRaisedStreamListener,
+} from "./eventHandlers/disputeRaised.js";
+import {
   DistributedLockManager,
   createLockRoutes,
   distributedLocksEnabled,
@@ -78,6 +82,9 @@ let checkoutSagaCoordinator: SagaCoordinator<CheckoutContext> = createCheckoutSa
 const outboxPool = new Pool({ connectionString: process.env.DATABASE_URL });
 setServiceEventOutboxStore(new PostgresServiceEventOutboxStore(outboxPool));
 let outboxRelay: OutboxRelayHandle | null = null;
+let disputeRaisedListener: DisputeRaisedStreamListener | null = null;
+let disputeRaisedRedis: Redis | null = null;
+let closeDisputeRaisedHandler: (() => Promise<void>) | null = null;
 
 // ─── Checkout Idempotency ────────────────────────────────────────────────────
 // Collapses retried / double-submitted checkouts onto a single execution using
@@ -471,6 +478,40 @@ async function main(): Promise<void> {
     outboxRelay = startOutboxRelay({ redisClient, log });
   }
 
+  // Consume normalized Soroban dispute events and freeze settlement state.
+  if (process.env.ENABLE_DISPUTE_RAISED_LISTENER !== "false") {
+    let closeHandler: (() => Promise<void>) | undefined;
+    try {
+      const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+      const created = createDisputeRaisedHandler({ redisUrl, logger: log });
+      closeHandler = created.close;
+      const redisClient = new Redis(redisUrl, {
+        lazyConnect: true,
+        maxRetriesPerRequest: 3,
+      });
+      disputeRaisedRedis = redisClient;
+      const listener = new DisputeRaisedStreamListener({
+        redis: redisClient as never,
+        handler: created.handler,
+        logger: log,
+      });
+      await listener.start();
+      disputeRaisedListener = listener;
+      closeDisputeRaisedHandler = created.close;
+    } catch (err) {
+      if (closeHandler) {
+        await closeHandler().catch((closeErr) =>
+          log.warn("Failed to close dispute raised handler after startup error", {
+            error: closeErr instanceof Error ? closeErr.message : String(closeErr),
+          })
+        );
+      }
+      log.warn("Dispute raised listener unavailable", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // Real-time task inbox broker: publishes lifecycle events to Redis channels
   // (`human-task:*`) for live UI updates. Disabled when ENABLE_TASK_EVENTS=false or
   // when Redis is unavailable — the service still works, just without live events.
@@ -831,6 +872,29 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
     }
   }
 
+  if (disputeRaisedListener) {
+    try {
+      disputeRaisedListener.stop();
+    } catch (err) {
+      log.error("Error stopping dispute raised listener", { error: (err as Error).message });
+    }
+  }
+  if (disputeRaisedRedis) {
+    try {
+      disputeRaisedRedis.disconnect();
+    } catch (err) {
+      log.error("Error disconnecting dispute raised redis client", { error: (err as Error).message });
+    }
+    disputeRaisedRedis = null;
+  }
+  if (closeDisputeRaisedHandler) {
+    try {
+      await closeDisputeRaisedHandler();
+    } catch (err) {
+      log.error("Error closing dispute raised handler", { error: (err as Error).message });
+    }
+  }
+
   if (dlqService) {
     try {
       await dlqService.close();
@@ -858,3 +922,5 @@ export { publishWorkflowEvent, createWorkflowCorrelationId } from "./workflow-ev
 export type { WorkflowEventEnvelope } from "./workflow-events.js";
 export { PurchaseWorkflowMachine } from "../state/index.js";
 export type { PurchaseState, PurchaseEvent } from "../state/index.js";
+export { handleDisputeRaised, DisputeRaisedEventHandler } from "./eventHandlers/disputeRaised.js";
+export type { DisputeRaisedPayload } from "./eventHandlers/disputeRaised.js";

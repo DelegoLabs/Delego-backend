@@ -26,6 +26,16 @@ export {
 export { StellarMerklePublisher, createStellarPublisherFromEnv } from "./stellarPublisher.js";
 
 export {
+  DEFAULT_BATCH_SIZE as MERKLE_BATCH_DEFAULT_SIZE,
+  buildMerkleTree,
+  generateMerkleProof,
+  verifyMerkleProof,
+  batchItems,
+  type MerkleTree,
+  type MerkleProofStep,
+} from "./merkleTree.js";
+
+export {
   verifyStoredChain,
   formatChainVerificationReport,
   DEFAULT_VERIFY_PAGE_SIZE,

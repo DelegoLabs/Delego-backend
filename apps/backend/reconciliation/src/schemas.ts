@@ -117,3 +117,37 @@ export interface AuditLog {
 
 export interface LedgerReconciliationDiscrepancy { escrowId: string; dbAmount: bigint; onChainAmount: bigint; difference: bigint; }
 
+// ── Partial Refund Reconciliation (Issue #624) ────────────────────────────────
+
+/**
+ * Per-order snapshot used to reconcile a partial-refund settlement.
+ * All monetary values are in stroops (1 XLM = 10_000_000 stroops).
+ */
+export interface PartialRefundReconciliation {
+  /** Internal order identifier */
+  orderId: string;
+  /** Original escrow balance recorded in the database (stroops) */
+  totalOrderStroops: bigint;
+  /** Buyer refund share recorded in the database (stroops) */
+  buyerRefundStroops: bigint;
+  /** Merchant disbursement share recorded in the database (stroops) */
+  merchantDisbursementStroops: bigint;
+  /** Actual buyer disbursement observed on-chain (stroops) */
+  contractDisbursedBuyer: bigint;
+  /** Actual merchant disbursement observed on-chain (stroops) */
+  contractDisbursedMerchant: bigint;
+  /** True when buyer + merchant on-chain totals equal the original escrow */
+  isBalanced: boolean;
+}
+
+export interface PartialRefundReconciliationResult {
+  orderId: string;
+  record: PartialRefundReconciliation;
+  /** Rounding leakage in stroops (may be negative if on-chain > db) */
+  roundingLeakage: bigint;
+  /** Whether the buyer on-chain amount matches the db expectation */
+  buyerMatch: boolean;
+  /** Whether the merchant on-chain amount matches the db expectation */
+  merchantMatch: boolean;
+}
+

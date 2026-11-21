@@ -168,6 +168,19 @@ export const OAuthCallbackSchema: any = {
   additionalProperties: false,
 };
 
+export const RevokeAllSessionsSchema: any = {
+  type: "object",
+  properties: {
+    userId: { type: "string", minLength: 1, maxLength: 128 },
+    reason: {
+      type: "string",
+      enum: ["password_reset", "security_compromise", "user_requested"],
+    },
+  },
+  required: ["userId", "reason"],
+  additionalProperties: false,
+};
+
 export const CreateDelegationSchema: any = {
   type: "object",
   properties: {

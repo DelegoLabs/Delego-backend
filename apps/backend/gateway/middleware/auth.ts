@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { verifyToken } from "../src/auth/authService.js";
 import { isTokenRevokedSync } from "../src/auth/tokenBlacklist.js";
+import { isUserSessionRevokedSync } from "../src/auth/sessionRevocation.js";
 import {
   resolveMerchantTeamPermissions,
   type MerchantTeamPermission,
@@ -45,6 +46,9 @@ export function extractAuth(req: IncomingMessage): AuthContext {
   try {
     const decoded = verifyToken(token);
     if (decoded.jti && isTokenRevokedSync(decoded.jti)) {
+      return { userId: null, token: null };
+    }
+    if (isUserSessionRevokedSync(decoded.userId, decoded.iat)) {
       return { userId: null, token: null };
     }
     authenticatedUserContexts.set(req, {

@@ -90,6 +90,21 @@ export * from "./compression/index.js";
 // Synthetic Monitoring
 export * from "./synthetic/index.js";
 
+export {
+  REDACTED_SECRET_PLACEHOLDER,
+  defaultQueryLogSanitizer,
+  createSanitizingQueryLogger,
+  type QueryLogSanitizer,
+} from "./logger/sqlSanitizer.js";
+export {
+  isPrivateOrReservedIp,
+  validateSsrfUrl,
+  createPinnedLookup,
+  dispatchWithSsrfProtection,
+  type SsrfValidationResult,
+  type SsrfRejectionReason,
+  type SsrfSafeDispatchResult,
+} from "./security/ssrfGuard.js";
 export * from "./pentest.js";
 export * from "./coverageGate.js";
 export * from "./integrationFixtures.js";
@@ -179,12 +194,31 @@ export {
   type RateLimitResult,
 } from "./rateLimit/slidingWindowRateLimiter.js";
 export {
+  DEFAULT_TIMESTAMP_TOLERANCE_SECONDS,
+  buildNonceCacheKey,
+  isTimestampFresh,
+  validateNonce,
+  type NonceCacheRedisClient,
+  type NonceValidationOptions,
+  type NonceValidationResult,
+  type NonceRejectionReason,
+} from "./security/nonceCache.js";
+export {
   RedisSessionStore,
   type SessionRedisClient,
   type Session,
   type SessionConfig,
   type CreateSessionInput,
 } from "./session/redisSessionStore.js";
+export {
+  parseScVal,
+  scValToBigInt,
+  scValToAddress,
+  scValParser,
+  ScValParseError,
+  type ParsedScVal,
+  type ScValParser,
+} from "./soroban/scvalParser.js";
 export {
   ServiceMetricsRegistry,
   type Counter,
