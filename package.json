@@ -13,6 +13,7 @@
     "build": "pnpm -r build",
     "dev": "pnpm --parallel -r --filter './apps/backend/*' --filter './agents' dev",
     "dev:gateway": "pnpm --filter @delegolabs/gateway dev",
+    "dev:chat-archival": "pnpm --filter @delegolabs/chat-archival dev",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
