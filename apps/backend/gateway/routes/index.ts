@@ -117,6 +117,7 @@ import { registerStorageRoutes } from "./storage.js";
 import { registerDisputeRoutes } from "./disputes.js";
 import { searchProductsHandler, embeddingCacheMetricsHandler } from "../src/search/routes.js";
 import { registerMerchantRoutes } from "../src/merchant/routes.js";
+import { registerMerchantWebhookRoutes } from "../src/merchant/webhooks.js";
 import { registerCatalogRoutes } from "../src/catalog/routes.js";
 import { registerProductRoutes } from "../src/routes/products.js";
 import { registerVariantRoutes } from "../src/catalog/variants.js";
@@ -307,6 +308,8 @@ export function registerRoutes(): Route[] {
     ...registerDisputeRoutes(),
     // Merchants - registration & store management
     ...registerMerchantRoutes(),
+    // Merchant webhooks - outbound webhook management & delivery inspection
+    ...registerMerchantWebhookRoutes(),
     // Catalog - product CRUD with cursor pagination
     ...registerCatalogRoutes(),
     // Product stock-level cache-aside endpoint
