@@ -54,6 +54,8 @@ import {
   renewSubscription,
   resumeSubscription,
 } from "./subscriptions/service.js";
+import { calculateTax } from "./tax/engine.js";
+import { validateTaxCalculationParams } from "./tax/validation.js";
 import {
   SubscriptionNotActiveError,
   SubscriptionNotFoundError,
@@ -942,6 +944,34 @@ export function registerRoutes(): Route[] {
           data: null,
           error: { code: "TIMEOUT_REFUND_SWEEP_FAILED", message },
         });
+      }
+    }),
+
+    // ─── Issue #505 — Sales Tax & VAT Computation Engine ─────────────────────
+    // POST /checkout/tax-quote
+    // Accepts TaxCalculationParams and returns a TaxCalculationResult.
+    // No side-effects — this is a pure read-only quote endpoint.
+    route("POST", "/checkout/tax-quote", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+        const validated = validateTaxCalculationParams(body);
+        if (!validated.ok) {
+          sendValidationError(res, validated.error);
+          return;
+        }
+
+        const result = calculateTax(validated.value);
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "TAX_QUOTE_FAILED", err);
       }
     }),
   ];
