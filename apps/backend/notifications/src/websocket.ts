@@ -1,10 +1,15 @@
 
 import type { Server, IncomingMessage } from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
-import { Redis } from "ioredis";
 import { randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
-import { createLogger } from "@delegolabs/utils";
+import {
+  createLogger,
+  enableSocketKeepAlive,
+  WebSocketStallMonitor,
+  type WebSocketMonitorConfig,
+} from "@delegolabs/utils";
+import { getSubscriberClient } from "./redis/client.js";
 
 const SERVICE_NAME = "notifications";
 const log = createLogger(SERVICE_NAME, process.env.LOG_LEVEL ?? "info");
@@ -46,6 +51,24 @@ export function resolveJwtSecret(
 
 const JWT_SECRET = resolveJwtSecret();
 const HEARTBEAT_TIMEOUT = 60_000; // 60 seconds
+const AUTH_SESSIONS_REVOKED_CHANNEL = "auth:sessions:revoked";
+const SESSION_REVOKED_CLOSE_CODE = 4401;
+
+/**
+ * Issue #343 — a network drop can silently kill the TCP connection
+ * underneath a client's WebSocket without either side ever seeing a
+ * `close`/`error` event: the app-level JSON `{type: "ping"}` heartbeat
+ * above only catches this if the *client* is still alive enough to send
+ * one. This config drives a server-initiated, protocol-level ping/pong
+ * check (native WebSocket ping frames) that detects and recycles a
+ * genuinely stalled socket within 30 seconds, independent of the client.
+ */
+const STALL_MONITOR_CONFIG: WebSocketMonitorConfig = {
+  heartbeatIntervalMs: 10_000,
+  readTimeoutMs: 30_000,
+  reconnectBackoffMs: 1_000,
+  maxConsecutiveMisses: 3,
+};
 
 export interface PushConnection {
   connectionId: string;
@@ -55,6 +78,7 @@ export interface PushConnection {
   lastHeartbeatAt: string;
   ws: WebSocket;
   heartbeatTimeout?: NodeJS.Timeout;
+  stallMonitor?: WebSocketStallMonitor;
 }
 
 export interface PushNotificationEvent {
@@ -76,7 +100,7 @@ let messagesSent = 0;
 let messagesReceived = 0;
 
 const connections = new Map<string, PushConnection>();
-const redisSubscriber = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", { lazyConnect: true });
+const redisSubscriber = getSubscriberClient();
 
 if (process.env.NODE_ENV !== "test" && process.env.CI !== "true" && process.env.MOCK_REDIS !== "true") {
   redisSubscriber.subscribe("notifications:*", (err: Error | null | undefined) => {
@@ -86,8 +110,19 @@ if (process.env.NODE_ENV !== "test" && process.env.CI !== "true" && process.env.
       log.info("Subscribed to Redis notifications channel");
     }
   });
+  redisSubscriber.subscribe(AUTH_SESSIONS_REVOKED_CHANNEL, (err: Error | null | undefined) => {
+    if (err) {
+      log.error("Failed to subscribe to session revocation channel", { error: err });
+    } else {
+      log.info("Subscribed to session revocation channel", { channel: AUTH_SESSIONS_REVOKED_CHANNEL });
+    }
+  });
 
-  redisSubscriber.on("message", (_channel: string, message: string) => {
+  redisSubscriber.on("message", (channel: string, message: string) => {
+    if (channel === AUTH_SESSIONS_REVOKED_CHANNEL) {
+      handleSessionRevocationMessage(message);
+      return;
+    }
     try {
       const event: PushNotificationEvent = JSON.parse(message);
       broadcastToTopic(event.topic, event);
@@ -132,6 +167,44 @@ export function broadcastNotificationToUser(
     publishedAt: event.publishedAt ?? new Date().toISOString(),
   };
   broadcastToTopic(notification.topic, notification);
+}
+
+/** Closes every WebSocket connection authenticated as `userId`. */
+export function closeConnectionsForUser(userId: string): number {
+  let closed = 0;
+  for (const connection of connections.values()) {
+    if (connection.userId !== userId) continue;
+    if (connection.heartbeatTimeout) {
+      clearTimeout(connection.heartbeatTimeout);
+      connection.heartbeatTimeout = undefined;
+    }
+    try {
+      connection.ws.close(SESSION_REVOKED_CLOSE_CODE, "Session revoked");
+      closed += 1;
+    } catch (err) {
+      log.warn("Failed to close revoked WebSocket connection", {
+        connectionId: connection.connectionId,
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  if (closed > 0) {
+    log.info("Closed WebSocket connections for revoked user", { userId, closed });
+  }
+  return closed;
+}
+
+/** Handles `auth:sessions:revoked` pub/sub payloads. */
+export function handleSessionRevocationMessage(message: string): void {
+  try {
+    const parsed = JSON.parse(message) as { userId?: unknown };
+    if (typeof parsed.userId === "string" && parsed.userId) {
+      closeConnectionsForUser(parsed.userId);
+    }
+  } catch (err) {
+    log.error("Failed to process session revocation message", { error: err });
+  }
 }
 
 export function getWebSocketMetrics(): WebSocketMetrics {
@@ -190,6 +263,38 @@ function handleConnection(ws: WebSocket, req: IncomingMessage) {
     connectionId,
     userId: decoded.userId,
   });
+
+  // Issue #343 — TCP keep-alive on the raw socket underneath this
+  // connection, so a genuinely dead peer is reported by the OS instead of
+  // hanging indefinitely with no close/error event.
+  enableSocketKeepAlive(req.socket);
+
+  // Issue #343 — server-initiated protocol-level ping/pong monitoring.
+  // Detects a silently stalled connection (no close/error event fired,
+  // but nothing is getting through) within 30s and recycles it, instead
+  // of relying solely on the client-driven JSON heartbeat below.
+  const stallMonitor = new WebSocketStallMonitor(
+    ws,
+    {
+      onStalled: (reason) => {
+        log.warn("Stalled WebSocket connection detected, recycling", {
+          connectionId,
+          userId: decoded.userId,
+          reason,
+        });
+        if (connection.heartbeatTimeout) {
+          clearTimeout(connection.heartbeatTimeout);
+        }
+        connections.delete(connectionId);
+        if (![...connections.values()].some((item) => item.userId === decoded.userId)) {
+          broadcastPresence(decoded.userId, false);
+        }
+      },
+    },
+    STALL_MONITOR_CONFIG
+  );
+  stallMonitor.start();
+  connection.stallMonitor = stallMonitor;
 
   const resetHeartbeat = () => {
     if (connection.heartbeatTimeout) {

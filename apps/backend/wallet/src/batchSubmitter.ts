@@ -1,7 +1,8 @@
 import { Operation, TransactionBuilder, Keypair, Networks, Address, nativeToScVal } from "@stellar/stellar-sdk";
 import type { TransactionRequest, TransactionResult } from "@delegolabs/types";
 import { vaultService } from "./vault.js";
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, withSpan } from "@delegolabs/utils";
+import { createHorizonServer, isMockModeEnabled } from "../stellar/mockHorizon.js";
 
 const log = createLogger("wallet:batchSubmitter", process.env.LOG_LEVEL ?? "info");
 
@@ -117,9 +118,8 @@ export async function submitTransactionBatch(
   const secret = await vaultService.getKey(sourceAddress);
   const signerKeypair = Keypair.fromSecret(secret);
 
-  const { Horizon, rpc } = await import("@stellar/stellar-sdk");
   const horizonUrl = process.env.STELLAR_HORIZON_URL ?? "https://horizon-testnet.stellar.org";
-  const server = new Horizon.Server(horizonUrl);
+  const server = isMockModeEnabled() ? createHorizonServer(horizonUrl) : new (await import("@stellar/stellar-sdk")).Horizon.Server(horizonUrl);
   const account = await server.loadAccount(sourceAddress);
 
   let builder = new TransactionBuilder(account, {
@@ -137,7 +137,7 @@ export async function submitTransactionBatch(
   const rpcUrl = process.env.STELLAR_RPC_URL ?? "https://soroban-testnet.stellar.org";
   const rpcServer = new rpc.Server(rpcUrl);
 
-  const sendRes = await rpcServer.sendTransaction(tx);
+  const sendRes = await withSpan("stellar.sendTransaction", () => rpcServer.sendTransaction(tx), { "peer.service": "stellar-rpc" });
   if (sendRes.status === "ERROR") {
     throw new Error(`Batch submission failed: ${JSON.stringify(sendRes)}`);
   }

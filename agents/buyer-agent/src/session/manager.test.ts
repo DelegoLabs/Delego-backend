@@ -1,7 +1,7 @@
 /**
  * Session Manager tests — Issue #268
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { SessionManager, SessionNotFoundError } from "./manager.js";
 import type { AgentSessionState, LLMMessage } from "./types.js";
 
@@ -183,7 +183,9 @@ describe("SessionManager.applyWindowingPolicy", () => {
   });
 
   it("drops oldest user/assistant turns first", () => {
-    const mgr = new SessionManager({} as any, 60); // tight budget
+    // 34 estimated tokens total (5 system + 10 + 10 + 9), so a 30-token budget
+    // forces exactly the oldest turn to be dropped.
+    const mgr = new SessionManager({} as any, 30); // tight budget
     const messages: LLMMessage[] = [
       { role: "system", content: "S" }, // preserved
       { role: "user", content: "First user message — old" }, // should be dropped first
