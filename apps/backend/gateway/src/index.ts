@@ -12,6 +12,8 @@ import { openApiValidationMiddleware } from "../middleware/openApiValidation.js"
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
+// Issue #530 — Bidirectional WebSocket protocol for buyer-agent tool confirmation
+import { attachAgentWebSocketServer } from "./agents/wsServer.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -23,7 +25,7 @@ const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
 log.info("Starting gateway", { port, nodeEnv });
 
-startHttpServer({
+const httpServer = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
   middleware: [
@@ -44,3 +46,7 @@ startHttpServer({
   ],
   routes: registerRoutes(),
 });
+
+// Attach the agent WebSocket server to the same HTTP server so both REST and
+// WebSocket traffic share a single port and TLS termination point.
+attachAgentWebSocketServer(httpServer);

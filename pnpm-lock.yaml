@@ -200,6 +200,12 @@ importers:
       '@delegolabs/utils':
         specifier: workspace:*
         version: link:../../../packages/utils
+      '@aws-sdk/client-s3':
+        specifier: ^3.758.0
+        version: 3.782.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.758.0
+        version: 3.782.0
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -224,6 +230,9 @@ importers:
       sequelize:
         specifier: ^6.37.8
         version: 6.37.8(pg-hstore@2.3.4)(pg@8.23.0)
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
     devDependencies:
       '@types/bcryptjs':
         specifier: ^3.0.0
@@ -246,6 +255,12 @@ importers:
       '@types/validator':
         specifier: ^13.15.10
         version: 13.15.10
+      '@types/ws':
+        specifier: ^8.5.14
+        version: 8.18.1
+      '@aws-sdk/client-s3':
+        specifier: ^3.758.0
+        version: 3.782.0
       ioredis-mock:
         specifier: ^8.13.1
         version: 8.13.1(@types/ioredis-mock@8.2.8(ioredis@5.11.1))(ioredis@5.11.1)
