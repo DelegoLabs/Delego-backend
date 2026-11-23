@@ -51,6 +51,45 @@ export interface DebeziumSource {
   read(limit: number): Promise<DebeziumEnvelope[]>;
 }
 
+/**
+ * Serializes error objects into structured JSON for diagnostic logging.
+ * Prevents [object Object] logs by extracting error details.
+ */
+export function serializeError(error: unknown, context?: { walLsn?: string; slotName?: string }): Record<string, unknown> {
+  const serialized: Record<string, unknown> = {
+    timestamp: new Date().toISOString(),
+    errorType: 'unknown',
+  };
+
+  if (context) {
+    serialized.context = {
+      ...context,
+    };
+  }
+
+  if (error instanceof Error) {
+    serialized.errorType = error.constructor.name;
+    serialized.message = error.message;
+    serialized.stack = error.stack;
+    
+    // Capture additional error properties
+    const errorObj = error as unknown as Record<string, unknown>;
+    Object.keys(errorObj).forEach((key) => {
+      if (!['message', 'stack', 'name'].includes(key)) {
+        serialized[key] = errorObj[key];
+      }
+    });
+  } else if (typeof error === 'object' && error !== null) {
+    serialized.errorType = 'object';
+    serialized.details = JSON.parse(JSON.stringify(error));
+  } else {
+    serialized.errorType = typeof error;
+    serialized.value = String(error);
+  }
+
+  return serialized;
+}
+
 /** Maps a Debezium `op` code onto our canonical op kind. */
 export function mapDebeziumOp(op: string | undefined): "INSERT" | "UPDATE" | "DELETE" | null {
   switch (op) {
@@ -144,35 +183,66 @@ export class DebeziumConnector implements CDCConnector {
   }
 
   async initialize(resumeLsn?: string): Promise<string> {
-    // Debezium owns the slot; we just track where we should resume from.
-    this.startingLsn = resumeLsn ?? "0/0";
-    this.latestLsn = this.startingLsn;
-    this.log.info("Debezium connector initialized", {
-      publication: this.config.publication,
-      resumeLsn: this.startingLsn,
-    });
-    return this.startingLsn;
+    try {
+      // Debezium owns the slot; we just track where we should resume from.
+      this.startingLsn = resumeLsn ?? "0/0";
+      this.latestLsn = this.startingLsn;
+      this.log.info({
+        publication: this.config.publication,
+        resumeLsn: this.startingLsn,
+        walLsn: this.latestLsn,
+        slotName: this.slotName,
+      }, "Debezium connector initialized");
+      return this.startingLsn;
+    } catch (error) {
+      const errorDetails = serializeError(error, {
+        walLsn: this.latestLsn,
+        slotName: this.slotName,
+      });
+      
+      this.log.error({
+        ...errorDetails,
+        operation: 'initialize',
+        resumeLsn,
+      }, 'CDC initialize failed with structured error details');
+      
+      throw error;
+    }
   }
 
   async readBatch(): Promise<RawChangeBatch | null> {
-    const envelopes = await this.source.read(this.batchLimit);
-    if (!envelopes || envelopes.length === 0) {
-      return null;
-    }
-
-    const changes: RawChange[] = [];
-    for (let i = 0; i < envelopes.length; i++) {
-      const parsed = envelopeToRawChange(envelopes[i], this.slotName, i + 1);
-      if (parsed) {
-        changes.push(parsed);
-        this.latestLsn = parsed.source.lsn;
-        this.lastEventAt = parsed.source.timestamp;
+    try {
+      const envelopes = await this.source.read(this.batchLimit);
+      if (!envelopes || envelopes.length === 0) {
+        return null;
       }
+
+      const changes: RawChange[] = [];
+      for (let i = 0; i < envelopes.length; i++) {
+        const parsed = envelopeToRawChange(envelopes[i], this.slotName, i + 1);
+        if (parsed) {
+          changes.push(parsed);
+          this.latestLsn = parsed.source.lsn;
+          this.lastEventAt = parsed.source.timestamp;
+        }
+      }
+
+      if (changes.length === 0) return null;
+
+      return { changes, confirmedFlushLsn: this.latestLsn };
+    } catch (error) {
+      const errorDetails = serializeError(error, {
+        walLsn: this.latestLsn,
+        slotName: this.slotName,
+      });
+      
+      this.log.error({ 
+        ...errorDetails,
+        operation: 'readBatch',
+      }, 'CDC readBatch failed with structured error details');
+      
+      throw error;
     }
-
-    if (changes.length === 0) return null;
-
-    return { changes, confirmedFlushLsn: this.latestLsn };
   }
 
   async commit(_confirmedFlushLsn: string): Promise<void> {

@@ -15,7 +15,7 @@ import {
 } from "@stellar/stellar-sdk";
 import type { TransactionRequest, TransactionResult } from "@delegolabs/types";
 import { vaultService } from "../vault.js";
-import { createLogger } from "@delegolabs/utils";
+import { createLogger, withSpan } from "@delegolabs/utils";
 import {
   classifySubmissionFailure,
   type SubmissionFailure,
@@ -31,10 +31,52 @@ import {
 } from "./sequenceMonitoring.js";
 import { addToDLQ } from "./transactionDLQ.js";
 import { insertAuditLog } from "../transactions/auditLog.js";
+import { createHorizonServer, isMockModeEnabled, type MockHorizonServer } from "../../stellar/mockHorizon.js";
 
 export { classifySubmissionFailure, type SubmissionFailure } from "./submissionFailure.js";
 
 const log = createLogger("wallet:queue", process.env.LOG_LEVEL ?? "info");
+
+/**
+ * BullMQ worker lock/retry configuration — Issue #340.
+ *
+ * `lockDuration` / `lockRenewTime` are passed straight to the BullMQ
+ * `Worker`; `attempts` / `backoff` describe the job-level retry policy
+ * already in effect below. Surfaced as a type so the deadlock-prevention
+ * settings have one documented, testable shape instead of being scattered
+ * magic numbers.
+ */
+export interface QueueRetryConfig {
+  attempts: number;
+  backoff: { type: "exponential"; delay: number };
+  lockDuration: number;
+  lockRenewTime: number;
+}
+
+export const DEFAULT_QUEUE_RETRY_CONFIG: QueueRetryConfig = {
+  attempts: 5,
+  backoff: { type: "exponential", delay: 2000 },
+  // A job lock is held for 30s; renewed every 10s. If a worker can't renew
+  // (e.g. its connection is mid-reconnect during a Sentinel failover), the
+  // lock expires in bounded time instead of being held forever, so BullMQ's
+  // stalled-job detection can reclaim it rather than deadlock.
+  lockDuration: 30_000,
+  lockRenewTime: 10_000,
+};
+
+/**
+ * Parse `REDIS_SENTINELS` ("host:port,host:port,...") into the ioredis
+ * `sentinels` option shape. Returns `null` when unset so callers fall back
+ * to a plain single-node connection.
+ */
+function sentinelNodesFromEnv(): Array<{ host: string; port: number }> | null {
+  const raw = process.env.REDIS_SENTINELS?.trim();
+  if (!raw) return null;
+  return raw.split(",").map((entry) => {
+    const [host, portStr] = entry.trim().split(":");
+    return { host, port: Number(portStr ?? 26379) };
+  });
+}
 
 export interface XdrValidationResult {
   valid: boolean;
@@ -128,6 +170,15 @@ function throwClassifiedSubmissionFailure(
 const QUEUE_NAME = "stellar-tx-queue";
 
 function getStellarConfig() {
+  // Return mock config early if mock mode is enabled
+  if (isMockModeEnabled()) {
+    return {
+      horizonUrl: "mock://horizon",
+      rpcUrl: "mock://soroban-rpc",
+      networkPassphrase: Networks.TESTNET,
+    };
+  }
+
   const network = (process.env.STELLAR_NETWORK ?? "testnet").toLowerCase();
   let horizonUrl = "https://horizon-testnet.stellar.org";
   let rpcUrl = "https://soroban-testnet.stellar.org";
@@ -187,15 +238,44 @@ export function getRedisConnection(): Redis {
     const MockRedisConstructor = MockRedis as any;
     redisClient = new MockRedisConstructor();
   } else {
-    log.info("Connecting to real Redis", { redisUrl, redisHost, redisPort });
-    if (redisUrl) {
-      redisClient = new Redis(redisUrl, { maxRetriesPerRequest: null });
-    } else {
+    const sentinels = sentinelNodesFromEnv();
+
+    if (sentinels) {
+      // Issue #340: a Sentinel-aware connection re-discovers the promoted
+      // master automatically when Sentinel fails over, instead of staying
+      // pinned to the old (now demoted) master's host:port. That stale
+      // pinning is what previously left BullMQ workers hanging indefinitely
+      // while trying to renew job locks against a dead connection.
+      const masterName = process.env.REDIS_SENTINEL_MASTER ?? "mymaster";
+      log.info("Connecting to real Redis via Sentinel", { sentinels, masterName });
+
       redisClient = new Redis({
-        host: redisHost,
-        port: redisPort,
-        maxRetriesPerRequest: null
+        sentinels,
+        name: masterName,
+        role: "master",
+        password: process.env.REDIS_PASSWORD || undefined,
+        maxRetriesPerRequest: null,
+        // Bounds how long any single command (including a lock-renewal
+        // command issued mid-failover) can hang before failing fast.
+        commandTimeout: Number(process.env.REDIS_COMMAND_TIMEOUT_MS ?? 5000),
+        sentinelRetryStrategy: (times: number) => Math.min(times * 100, 2000),
+        retryStrategy: (times: number) => Math.min(times * 100, 2000),
       });
+
+      redisClient.on("+switch-master", (...args: unknown[]) => {
+        log.warn("Redis Sentinel promoted a new master — reconnected automatically", { args });
+      });
+    } else {
+      log.info("Connecting to real Redis", { redisUrl, redisHost, redisPort });
+      if (redisUrl) {
+        redisClient = new Redis(redisUrl, { maxRetriesPerRequest: null });
+      } else {
+        redisClient = new Redis({
+          host: redisHost,
+          port: redisPort,
+          maxRetriesPerRequest: null
+        });
+      }
     }
 
     redisClient.on("error", (err: any) => {
@@ -248,7 +328,7 @@ export async function reserveSequenceBlock(
   address: string,
   size: number,
   redis: Redis,
-  horizonServer: Horizon.Server
+  horizonServer: Pick<Horizon.Server, "loadAccount">
 ): Promise<SequenceReservation> {
   const accountKey = `seq:reservations:${address}`;
   const lockKey = `seq:lock:${address}`;
@@ -391,7 +471,7 @@ async function getNextSequenceFromReservation(
 
 // Synchronize and manage sequence numbers thread-safely per source address in Redis
 async function getNextSequenceNumber(
-  horizonServer: Horizon.Server,
+  horizonServer: Pick<Horizon.Server, "loadAccount">,
   sourceAddress: string,
   redis: Redis,
   attempt: number
@@ -484,13 +564,67 @@ async function getNextSequenceNumber(
   return { sequence: buildSequence, resetCache };
 }
 
+/**
+ * True when `err` looks like a Soroban RPC gateway timeout (HTTP 504) or
+ * service-unavailable (503) — the class of error Issue #336 reports being
+ * treated as a permanent submission failure even though the transaction may
+ * already have reached the network.
+ */
+function isRpcGatewayTimeout(err: unknown): boolean {
+  const status = (err as { response?: { status?: number }; status?: number } | undefined)?.response
+    ?.status ?? (err as { status?: number } | undefined)?.status;
+  if (status === 504 || status === 503) return true;
+
+  const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return /\b(504|503)\b/.test(message) || /gateway timeout|service unavailable/i.test(message);
+}
+
+/**
+ * After a gateway timeout on submission, polls transaction status by hash
+ * before giving up — the envelope may have reached consensus even though
+ * the RPC call that submitted it never returned. Returns the confirmed
+ * result when found, or `null` when the transaction genuinely isn't on
+ * chain (safe to let the caller surface a retryable failure).
+ */
+async function reconcileTimedOutSubmission(
+  rpcServer: rpc.Server,
+  txHash: string
+): Promise<TransactionResult | null> {
+  const maxAttempts = process.env.NODE_ENV === "test" ? 2 : 6; // ~30s of polling in production
+  const delayMs = process.env.NODE_ENV === "test" ? 10 : 5000;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const status = await rpcServer.getTransaction(txHash);
+      if (status.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+        const successTx = status as rpc.Api.GetSuccessfulTransactionResponse;
+        log.info("Timed-out submission confirmed on-chain; treating as success (no resubmission)", { txHash });
+        return { hash: txHash, ledger: successTx.ledger, success: true };
+      }
+      if (status.status === rpc.Api.GetTransactionStatus.FAILED) {
+        log.warn("Timed-out submission resolved to FAILED on-chain", { txHash });
+        return null;
+      }
+      // NOT_FOUND — keep polling; the ledger may not have closed yet.
+    } catch (err: unknown) {
+      log.warn("Status reconciliation lookup failed after gateway timeout; will retry", {
+        txHash,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  return null;
+}
+
 async function executeTxJob(
   request: TransactionRequest, 
   attempt: number, 
   connection: Redis
 ): Promise<TransactionResult> {
   const { horizonUrl, rpcUrl, networkPassphrase } = getStellarConfig();
-  const horizonServer = new Horizon.Server(horizonUrl);
+  const horizonServer = createHorizonServer(horizonUrl);
   const rpcServer = new rpc.Server(rpcUrl);
 
   // 1. Fetch private key from Vault
@@ -563,9 +697,54 @@ async function executeTxJob(
     tx = rpc.assembleTransaction(tx, simRes).build();
     tx.sign(signerKeypair);
 
+    // Compute the hash before submission so it's available for status
+    // reconciliation even when the RPC call itself throws (Issue #336) —
+    // previously `txHash` only got set from `sendRes.hash` on a clean
+    // response, so a gateway timeout left us with no hash to check status
+    // against.
+    txHash = tx.hash().toString("hex");
+
     // 7. Submit transaction to RPC server
-    log.info("Submitting transaction to Stellar network...", { hash: tx.hash().toString("hex") });
-    let sendRes = await rpcServer.sendTransaction(tx);
+    log.info("Submitting transaction to Stellar network...", { hash: txHash });
+
+    let sendRes: Awaited<ReturnType<typeof rpcServer.sendTransaction>>;
+    try {
+      sendRes = await withSpan("stellar.sendTransaction", () => rpcServer.sendTransaction(tx), { "peer.service": "stellar-rpc" });
+    } catch (sendErr: unknown) {
+      if (isRpcGatewayTimeout(sendErr)) {
+        // The RPC node (or an intermediary gateway) timed out before
+        // confirming receipt. The envelope may still have reached the
+        // network — assuming failure here would resubmit under a stale
+        // sequence, colliding with the original transaction once it lands.
+        // Reconcile via status lookup instead of treating this as a
+        // permanent failure.
+        log.warn("Soroban RPC gateway timeout on submit; reconciling via status lookup instead of failing immediately", {
+          txHash,
+          error: sendErr instanceof Error ? sendErr.message : String(sendErr),
+        });
+        const reconciled = await reconcileTimedOutSubmission(rpcServer, txHash);
+        if (reconciled) {
+          // Audit: record successful signing (gateway-timeout reconciliation path)
+          if (request.walletId) {
+            try {
+              await insertAuditLog({ walletId: request.walletId, status: "SUCCESS", txHash });
+            } catch (auditErr: any) {
+              log.error("Failed to insert signing audit log (success, timeout reconciliation)", { error: auditErr.message });
+            }
+          } else {
+            log.warn("walletId not available; skipping signing audit log (success, timeout reconciliation)");
+          }
+          return reconciled;
+        }
+
+        throw new Error(
+          `Submission failed: RPC gateway timeout (504/503) and transaction not found on-chain: ${
+            sendErr instanceof Error ? sendErr.message : String(sendErr)
+          }`
+        );
+      }
+      throw sendErr;
+    }
 
     if (sendRes.status === "ERROR") {
       const errorMsg = JSON.stringify(sendRes);
@@ -579,13 +758,29 @@ async function executeTxJob(
     // 8. Poll for transaction result
     txHash = sendRes.hash;
     log.info("Waiting for transaction confirmation...", { txHash });
-    
+
     let retries = 12; // Poll for ~1 minute (5s intervals)
-    
+
     while (retries > 0) {
       await new Promise((resolve) => setTimeout(resolve, process.env.NODE_ENV === "test" ? 10 : 5000));
-      const txStatus = await rpcServer.getTransaction(txHash);
-      
+
+      let txStatus: Awaited<ReturnType<typeof rpcServer.getTransaction>>;
+      try {
+        txStatus = await rpcServer.getTransaction(txHash);
+      } catch (statusErr: unknown) {
+        if (isRpcGatewayTimeout(statusErr)) {
+          // A transient gateway blip while polling shouldn't abort the whole
+          // job — just consume a retry slot and poll again.
+          log.warn("Soroban RPC gateway timeout while polling transaction status; retrying poll", {
+            txHash,
+            retriesLeft: retries - 1,
+          });
+          retries--;
+          continue;
+        }
+        throw statusErr;
+      }
+
       if (txStatus.status === rpc.Api.GetTransactionStatus.SUCCESS) {
         const successTx = txStatus as rpc.Api.GetSuccessfulTransactionResponse;
         log.info("Transaction completed successfully", { txHash });
@@ -714,13 +909,15 @@ async function runTestJob(request: TransactionRequest, connection: Redis): Promi
 
 async function verifyLedgerSubmission(hash: string): Promise<boolean> {
   const { horizonUrl } = getStellarConfig();
-  const horizonServer = new Horizon.Server(horizonUrl);
+  const horizonServer = createHorizonServer(horizonUrl);
 
   try {
     await horizonServer.transactions().transaction(hash).call();
     return true;
   } catch (err: any) {
-    if (err?.response?.status === 404) {
+    // Handle both real Horizon errors and mock errors
+    const isNotFound = err.response?.status === 404 || err.message?.includes("not found");
+    if (isNotFound) {
       return false;
     }
     return false;
@@ -740,11 +937,8 @@ export function initQueue() {
   txQueue = new Queue(QUEUE_NAME, {
     connection: connection as any,
     defaultJobOptions: {
-      attempts: 5,
-      backoff: {
-        type: "exponential",
-        delay: 2000, // Start with 2s backoff
-      },
+      attempts: DEFAULT_QUEUE_RETRY_CONFIG.attempts,
+      backoff: DEFAULT_QUEUE_RETRY_CONFIG.backoff,
       removeOnComplete: true,
       removeOnFail: false,
     }
@@ -761,6 +955,15 @@ export function initQueue() {
     {
       connection: connection as any,
       concurrency: 1, // Strict sequential processing
+      // Issue #340: explicit lock duration/renew time bound how long a job
+      // lock can be held without a successful renewal. Combined with
+      // stalled-job detection below, a worker whose connection hangs during
+      // a Redis Sentinel failover loses its lock and has the job reclaimed
+      // instead of deadlocking indefinitely.
+      lockDuration: DEFAULT_QUEUE_RETRY_CONFIG.lockDuration,
+      lockRenewTime: DEFAULT_QUEUE_RETRY_CONFIG.lockRenewTime,
+      maxStalledCount: 2,
+      stalledInterval: DEFAULT_QUEUE_RETRY_CONFIG.lockDuration,
     }
   );
 

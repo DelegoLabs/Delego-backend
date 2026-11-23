@@ -25,6 +25,7 @@ export const AUTH_AUDIT_ACTIONS = {
   REFRESH: "refresh",
   OAUTH_LOGIN: "oauth_login",
   OAUTH_REGISTER: "oauth_register",
+  REVOKE_ALL_SESSIONS: "revoke_all_sessions",
 } as const;
 
 /** In-memory sink for auth audit events — swap for Redis publish in production. */

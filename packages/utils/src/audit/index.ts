@@ -6,6 +6,51 @@ export {
 } from "./auditLogStore.js";
 
 export { computeEntryHash, verifyChain, type HashableAuditFields } from "./hashChain.js";
+export {
+  configureAuditLogTransport,
+  createCefSyslogTransport,
+  formatCef,
+  formatCefEvent,
+  createSecurityEventSyslogTlsTransport,
+  createSecurityEventSyslogUdpTransport,
+  configureSecurityEventTransport,
+  dispatchSecurityEvent,
+  isHighSeverityCefEvent,
+  type AuditLogTransport,
+  type CefSyslogOptions,
+  type CefEvent,
+  type CefSyslogUdpOptions,
+  type SecurityEventTransport,
+} from "./cefExporter.js";
+
+export {
+  computeCurrentHash,
+  buildEntry,
+  verifyChain as verifyAuditChain,
+  verifyChainOnStartup,
+  computeMerkleRoot,
+  verifyEntry,
+} from "./auditChain.js";
+
+export { StellarMerklePublisher, createStellarPublisherFromEnv } from "./stellarPublisher.js";
+
+export {
+  DEFAULT_BATCH_SIZE as MERKLE_BATCH_DEFAULT_SIZE,
+  buildMerkleTree,
+  generateMerkleProof,
+  verifyMerkleProof,
+  batchItems,
+  type MerkleTree,
+  type MerkleProofStep,
+} from "./merkleTree.js";
+
+export {
+  verifyStoredChain,
+  formatChainVerificationReport,
+  DEFAULT_VERIFY_PAGE_SIZE,
+  type VerifyStoredChainOptions,
+  type StoredChainVerificationResult,
+} from "./verifyStoredChain.js";
 
 export type {
   AuditOperation,
