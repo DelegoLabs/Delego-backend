@@ -37,7 +37,7 @@ export function buildAlerts(
 ): BloatAlert[] {
   const service = options.service ?? "db-vacuum";
   const now = options.now ?? new Date();
-  const idFactory = options.idFactory ?? randomUUID;
+  const idFactory: () => string = options.idFactory ?? randomUUID;
   const bloatBytesThreshold = options.bloatBytesThreshold ?? BLOAT_BYTES_ALERT_THRESHOLD;
   const raisedAt = now.toISOString();
   const alerts: BloatAlert[] = [];
@@ -92,7 +92,7 @@ export function buildAlerts(
     }
 
     if (assessment.unusedIndexes.length > 0) {
-      const names = assessment.unusedIndexes.map((index) => index.indexname);
+      const names = assessment.unusedIndexes.map((index: { indexname: string }) => index.indexname);
       alerts.push({
         ...base,
         id: idFactory(),
@@ -103,7 +103,12 @@ export function buildAlerts(
         title: `Unused indexes on ${assessment.qualifiedName}`,
         message:
           `Indexes with zero scans since the last stats reset: ${names.join(", ")} ` +
-          `(${formatBytes(assessment.unusedIndexes.reduce((sum, i) => sum + i.indexSizeBytes, 0))} total). ` +
+          `(${formatBytes(
+            assessment.unusedIndexes.reduce(
+              (sum: number, i: { indexSizeBytes: number }) => sum + i.indexSizeBytes,
+              0,
+            ),
+          )} total). ` +
           `Review manually — the worker never drops indexes.`,
         labels,
       });
@@ -148,7 +153,7 @@ export class DeduplicatingAlertRouter {
   }
 
   raiseAll(alerts: BloatAlert[]): BloatAlert[] {
-    return alerts.filter((alert) => this.raise(alert));
+    return alerts.filter((alert: BloatAlert) => this.raise(alert));
   }
 
   suppressed(): number {
@@ -200,7 +205,7 @@ export class RecordingAlertSink implements AlertSink {
   }
 
   byRule(rule: BloatAlert["rule"]): BloatAlert[] {
-    return this.alerts.filter((alert) => alert.rule === rule);
+    return this.alerts.filter((alert: BloatAlert) => alert.rule === rule);
   }
 
   clear(): void {

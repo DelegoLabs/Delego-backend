@@ -181,7 +181,7 @@ export function assessTable(
 
   const unusedIndexes = findUnusedIndexes(stats, thresholds);
   if (unusedIndexes.length > 0) {
-    const names = unusedIndexes.map((index) => index.indexname);
+    const names = unusedIndexes.map((index: IndexBloatStats) => index.indexname);
     reasons.push(
       `${unusedIndexes.length} index(es) with zero scans since last stats reset: ${names.join(", ")}`,
     );
@@ -210,8 +210,8 @@ export function assessTables(
   options: AssessOptions = {},
 ): BloatAssessment[] {
   return stats
-    .map((table) => assessTable(table, options))
-    .sort((a, b) => b.deadTupleRatio - a.deadTupleRatio);
+    .map((table: TableBloatStats) => assessTable(table, options))
+    .sort((a: BloatAssessment, b: BloatAssessment) => b.deadTupleRatio - a.deadTupleRatio);
 }
 
 function clampRatio(value: number): number {
