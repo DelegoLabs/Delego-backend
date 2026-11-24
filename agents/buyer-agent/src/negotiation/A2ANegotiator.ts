@@ -14,7 +14,17 @@ export const SIGNATURE_ALGORITHM = "SHA256";
 export const DEFAULT_BASE_URL = "http://localhost:3000";
 
 function canonicalizeObject(obj: unknown): string {
-  return JSON.stringify(obj, Object.keys(obj as object).sort());
+  if (Array.isArray(obj)) {
+    return "[" + obj.map(canonicalizeObject).join(",") + "]";
+  }
+  if (obj !== null && typeof obj === "object") {
+    const sortedKeys = Object.keys(obj as object).sort();
+    const pairs = sortedKeys.map(
+      (key) => JSON.stringify(key) + ":" + canonicalizeObject((obj as Record<string, unknown>)[key]),
+    );
+    return "{" + pairs.join(",") + "}";
+  }
+  return JSON.stringify(obj);
 }
 
 function sha256Hex(data: string): string {
