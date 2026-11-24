@@ -85,8 +85,6 @@ import {
   renewSubscription,
   resumeSubscription,
 } from "./subscriptions/service.js";
-import { calculateTax } from "./tax/engine.js";
-import { validateTaxCalculationParams } from "./tax/validation.js";
 import {
   SubscriptionNotActiveError,
   SubscriptionNotFoundError,
@@ -1853,7 +1851,7 @@ export function registerRoutes(): Route[] {
         const {
           upsertMemoryWithEmbedding,
           validateUpsertMemoryInput,
-        } = await import("../../agents/buyer-agent/src/memory/embeddingService.js");
+        } = await import("../../../../agents/buyer-agent/src/memory/embeddingService.js");
         const { Pool: PgPool } = await import("pg");
         const db = new PgPool({
           connectionString:
@@ -1877,7 +1875,7 @@ export function registerRoutes(): Route[] {
         const {
           searchMemories,
           validateMemorySearchInput,
-        } = await import("../../agents/buyer-agent/src/memory/embeddingService.js");
+        } = await import("../../../../agents/buyer-agent/src/memory/embeddingService.js");
         const { Pool: PgPool } = await import("pg");
         const db = new PgPool({
           connectionString:
