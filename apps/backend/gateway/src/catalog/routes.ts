@@ -10,6 +10,11 @@ import { readJsonBody, InvalidJsonError, BodyTooLargeError } from "../../src/req
 import { badRequest, notFound, unauthorized, forbidden, sendApiError } from "../../src/errors.js";
 import { Merchant, Product } from "../../src/models/index.js";
 import { enqueueRestockNotification } from "../../../notifications/src/restock/queue.js";
+import { getRedisClient } from "../../src/rateLimit/redisClient.js";
+import {
+  fetchProductStockLevelFromDb,
+  getProductStockLevel,
+} from "../../src/routes/products.js";
 
 const log = createLogger("gateway:catalog", process.env.LOG_LEVEL ?? "info");
 
@@ -405,6 +410,40 @@ export async function deleteProductHandler(
     });
     sendApiError(res, 500, "PRODUCT_DELETE_FAILED",
       err instanceof Error ? err.message : "Failed to delete product", req);
+  }
+}
+
+export async function getProductStockLevelHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>,
+): Promise<void> {
+  const productId = params.productId;
+  if (!productId) {
+    badRequest(res, "productId path parameter is required", req);
+    return;
+  }
+
+  try {
+    const stockLevel = await getProductStockLevel(productId, {
+      redis: getRedisClient(),
+      lookupProductStock: fetchProductStockLevelFromDb,
+    });
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: stockLevel, error: null }));
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("not found")) {
+      notFound(res, "Product not found", req);
+      return;
+    }
+
+    log.error("Failed to fetch product stock level", {
+      error: err instanceof Error ? err.message : String(err),
+      productId,
+    });
+    sendApiError(res, 500, "PRODUCT_STOCK_FETCH_FAILED",
+      err instanceof Error ? err.message : "Failed to fetch product stock level", req);
   }
 }
 
