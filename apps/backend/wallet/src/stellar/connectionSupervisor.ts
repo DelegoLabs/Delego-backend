@@ -42,6 +42,13 @@ export interface ConnectionSupervisorDependencies {
   nowLedger?: () => number;
 }
 
+/**
+ * Dependencies after defaults are applied: stream and poll factories always
+ * resolve to an implementation, while `nowLedger` has no default and stays optional.
+ */
+type ResolvedDependencies = Required<Pick<ConnectionSupervisorDependencies, "createStream" | "poll">> &
+  Pick<ConnectionSupervisorDependencies, "nowLedger">;
+
 const MISSED_PING_THRESHOLD = 3;
 const RECONNECT_INTERVAL_MS = 60_000;
 
@@ -88,7 +95,7 @@ const defaultPoll: PollFactory = async (url, cursor) => {
 
 export class ConnectionSupervisor extends EventEmitter {
   private readonly options: ConnectionSupervisorOptions;
-  private readonly dependencies: Required<ConnectionSupervisorDependencies>;
+  private readonly dependencies: ResolvedDependencies;
   private mode: SupervisorMode;
   private stream?: StreamHandle;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
@@ -162,7 +169,7 @@ export class ConnectionSupervisor extends EventEmitter {
     if (type === "ping" || type === "pong") {
       return;
     }
-    this.trackLessageLedger(message);
+    this.trackMessageLedger(message);
     this.dispatchEvent({
       type: "stream",
       data: message,
@@ -258,7 +265,7 @@ export class ConnectionSupervisor extends EventEmitter {
   private scheduleReconnect(): void {
     this.clearReconnect();
     this.reconnectTimer = setInterval(() => {
-      void this.attempReconnect();
+      void this.attemptReconnect();
     }, RECONNECT_INTERVAL_MS);
   }
 
