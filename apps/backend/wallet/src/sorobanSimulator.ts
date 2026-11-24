@@ -264,12 +264,13 @@ export class SorobanTransactionSimulator {
         }
         
         if (this.config.metricsRegistry) {
-          this.config.metricsRegistry.recordContractLatency({
-            contract: contractId,
-            functionName: method,
-            durationMs,
-            success: SorobanRpc.Api.isSimulationSuccess(simulation)
-          });
+          this.config.metricsRegistry
+            .histogram("contract_invocation_latency_ms")
+            .observe(durationMs, {
+              contract: contractId,
+              function: method,
+              success: String(SorobanRpc.Api.isSimulationSuccess(simulation)),
+            });
         }
         
         return simulation;
