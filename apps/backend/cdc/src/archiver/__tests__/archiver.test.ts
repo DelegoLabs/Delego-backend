@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertSqlIdentifier,
+  archiveCompletedEscrows,
   DEFAULT_ESCROW_ARCHIVER_CONFIG,
   EscrowArchiver,
   EscrowArchiverConfigError,
   InMemoryEscrowArchiveStore,
   msUntilNextRun,
   resolveEscrowArchiverConfig,
+  runArchivalCron,
   startEscrowArchiveScheduler,
 } from "../index.js";
 import type {
@@ -273,6 +275,33 @@ describe("EscrowArchiver.runOnce", () => {
       EscrowArchiverConfigError
     );
     expect(() => new EscrowArchiver(store, { batchSize: -1 })).toThrow(EscrowArchiverConfigError);
+  });
+});
+
+describe("archival cron exports", () => {
+  it("runs an archival pass through archiveCompletedEscrows", async () => {
+    const store = new InMemoryEscrowArchiveStore([settledEscrow("E-1", 120)]);
+    const archiver = new EscrowArchiver(store, { retentionDays: 90 });
+
+    const result = await archiveCompletedEscrows(archiver, NOW);
+
+    expect(result.archived).toBe(1);
+    expect(result.errors).toEqual([]);
+    expect(store.getArchivedEscrows()).toHaveLength(1);
+  });
+
+  it("starts the daily schedule through runArchivalCron", async () => {
+    vi.useFakeTimers();
+    let current = new Date("2026-09-27T02:00:00.000Z");
+    const runOnce = vi.fn().mockResolvedValue(emptyResult());
+    const archiver = { runOnce } as unknown as EscrowArchiver;
+
+    const stop = runArchivalCron(archiver, { hourUtc: 3, now: () => current });
+    current = new Date("2026-09-27T03:00:00.000Z");
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+    expect(runOnce).toHaveBeenCalledTimes(1);
+    stop();
   });
 });
 
