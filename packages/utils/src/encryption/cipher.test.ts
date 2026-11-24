@@ -10,6 +10,9 @@ import {
   blindIndex,
   serializeContext,
   contextAad,
+  hasEncryptionEnvelope,
+  stripEncryptionEnvelope,
+  ENCRYPTION_ENVELOPE_PREFIX,
   EncryptionError,
   GCM_IV_LENGTH,
   CBC_IV_LENGTH,
@@ -56,11 +59,14 @@ describe("encryptField / decryptField (AES-256-GCM)", () => {
 
   it("fails decryption when ciphertext is tampered with", () => {
     const field = encryptField("value", KEY, "AES-256-GCM");
-    const bytes = Buffer.from(field.ciphertext, "base64");
+    const bytes = Buffer.from(stripEncryptionEnvelope(field.ciphertext), "base64");
     bytes[0] ^= 0xff;
-    expect(() => decryptField({ ...field, ciphertext: bytes.toString("base64") }, KEY)).toThrow(
-      EncryptionError
-    );
+    expect(() =>
+      decryptField(
+        { ...field, ciphertext: ENCRYPTION_ENVELOPE_PREFIX + bytes.toString("base64") },
+        KEY
+      )
+    ).toThrow(EncryptionError);
   });
 
   it("rejects an empty plaintext and a wrong-size key", () => {
@@ -70,14 +76,26 @@ describe("encryptField / decryptField (AES-256-GCM)", () => {
 
   it("matches a reference OpenSSL implementation (cross-check)", () => {
     const field = encryptField("payload", KEY, "AES-256-GCM", { row: "r1" });
+    expect(hasEncryptionEnvelope(field.ciphertext)).toBe(true);
+    const rawCiphertext = stripEncryptionEnvelope(field.ciphertext);
     const decipher = crypto.createDecipheriv("aes-256-gcm", KEY, Buffer.from(field.iv, "base64"));
     decipher.setAAD(contextAad({ row: "r1" }));
     decipher.setAuthTag(Buffer.from(field.authTag, "base64"));
     const plain = Buffer.concat([
-      decipher.update(Buffer.from(field.ciphertext, "base64")),
+      decipher.update(Buffer.from(rawCiphertext, "base64")),
       decipher.final(),
     ]).toString("utf8");
     expect(plain).toBe("payload");
+  });
+
+  it("decrypts both enveloped and legacy non-enveloped ciphertext", () => {
+    const field = encryptField("envelope-check", KEY, "AES-256-GCM", { row: "r2" });
+    expect(field.ciphertext.startsWith(ENCRYPTION_ENVELOPE_PREFIX)).toBe(true);
+    expect(decryptField(field, KEY, { row: "r2" })).toBe("envelope-check");
+
+    const legacyField = { ...field, ciphertext: stripEncryptionEnvelope(field.ciphertext) };
+    expect(hasEncryptionEnvelope(legacyField.ciphertext)).toBe(false);
+    expect(decryptField(legacyField, KEY, { row: "r2" })).toBe("envelope-check");
   });
 });
 
