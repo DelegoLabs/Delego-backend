@@ -375,59 +375,8 @@ export class CarrierWebhookNormalizer {
   normalize(carrier: CanonicalCarrier, rawPayload: Record<string, unknown>): CarrierWebhookPayload {
     const parser = this.parsers.get(carrier);
     if (!parser) {
-      throw new Error(`Unsupported carrier: ${carrier}`);
+      throw new Error(`No parser registered for carrier: ${carrier}`);
     }
     return parser.parse(rawPayload);
-  }
-
-  /**
-   * Ingests a raw webhook, normalizes it into a DeliveryStateEvent,
-   * and publishes it to the Redis stream for oracle release trigger processing.
-   */
-  async ingestAndPublish(
-    carrier: CanonicalCarrier,
-    rawPayload: Record<string, unknown>,
-    metadata?: Record<string, unknown>
-  ): Promise<DeliveryStateEvent> {
-    const normalized = this.normalize(carrier, rawPayload);
-
-    const event: DeliveryStateEvent = {
-      ...normalized,
-      eventId: generateId("delv_"),
-      timestamp: new Date().toISOString(),
-      metadata,
-    };
-
-    if (this.streamManager) {
-      try {
-        await this.streamManager.publish(
-          `delivery.${event.carrier}.${event.normalizedStatus}`,
-          event,
-          {
-            carrier: event.carrier,
-            trackingNumber: event.trackingNumber,
-            status: event.normalizedStatus,
-          }
-        );
-        logger.info("Published carrier delivery event to Redis stream", {
-          eventId: event.eventId,
-          carrier: event.carrier,
-          trackingNumber: event.trackingNumber,
-          normalizedStatus: event.normalizedStatus,
-        });
-      } catch (err: any) {
-        logger.error("Failed to publish carrier delivery event to Redis stream", {
-          eventId: event.eventId,
-          error: err.message,
-        });
-        throw err;
-      }
-    } else {
-      logger.debug("No Redis stream manager configured, returning event without publishing", {
-        eventId: event.eventId,
-      });
-    }
-
-    return event;
   }
 }
