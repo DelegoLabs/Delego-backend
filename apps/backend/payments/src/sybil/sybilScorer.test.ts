@@ -9,11 +9,17 @@
  *  - Reciprocal wash-trade flagging
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   evaluateSybilRisk,
   computeWeightedAverageRating,
   resetReciprocalStore,
+  setReciprocalStore,
+  InMemoryReciprocalStore,
+  RedisReciprocalStore,
+  PostgresReciprocalStore,
+  type ReciprocalRedisClient,
+  type ReciprocalPgPool,
   type StellarAccountInfo,
 } from "./sybilScorer.js";
 
@@ -158,5 +164,189 @@ describe("computeWeightedAverageRating", () => {
   it("correctly weighs a single review", () => {
     const result = computeWeightedAverageRating([{ rating: 3, trustWeight: 0.5 }]);
     expect(result).toBeCloseTo(3.0, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reciprocal-transaction stores (TTL windowing & cross-replica detection)
+// ---------------------------------------------------------------------------
+
+function makeFakeRedis(nowFn: () => number): ReciprocalRedisClient {
+  const store = new Map<string, { value: number; expiresAt: number | null }>();
+
+  function getLive(key: string): { value: number; expiresAt: number | null } | null {
+    const entry = store.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt !== null && entry.expiresAt <= nowFn()) {
+      store.delete(key);
+      return null;
+    }
+    return entry;
+  }
+
+  return {
+    async incr(key: string): Promise<number> {
+      const live = getLive(key);
+      if (live) {
+        live.value += 1;
+        return live.value;
+      }
+      store.set(key, { value: 1, expiresAt: null });
+      return 1;
+    },
+    async pexpire(key: string, milliseconds: number): Promise<number> {
+      const live = getLive(key);
+      if (!live) return 0;
+      live.expiresAt = nowFn() + milliseconds;
+      return 1;
+    },
+    async get(key: string): Promise<string | null> {
+      const live = getLive(key);
+      return live ? String(live.value) : null;
+    },
+    async del(...keys: string[]): Promise<number> {
+      let deleted = 0;
+      for (const k of keys) {
+        if (store.delete(k)) deleted += 1;
+      }
+      return deleted;
+    },
+  };
+}
+
+function makeFakePgPool(): ReciprocalPgPool {
+  const rows: Array<{
+    buyer_address: string;
+    merchant_address: string;
+    recorded_at: string;
+    expires_at: string;
+  }> = [];
+
+  return {
+    async query<T = Record<string, unknown>>(
+      text: string,
+      params: unknown[] = []
+    ): Promise<{ rows: T[] }> {
+      if (text.startsWith("INSERT INTO")) {
+        rows.push({
+          buyer_address: String(params[0]),
+          merchant_address: String(params[1]),
+          recorded_at: String(params[2]),
+          expires_at: String(params[3]),
+        });
+        return { rows: [] };
+      }
+      if (text.startsWith("SELECT COUNT(*)")) {
+        const [buyer, merchant, nowIso] = params as [string, string, string];
+        const count = rows.filter(
+          (r) =>
+            r.buyer_address === buyer &&
+            r.merchant_address === merchant &&
+            r.expires_at > nowIso
+        ).length;
+        return { rows: [{ count } as unknown as T] };
+      }
+      if (text.startsWith("DELETE FROM")) {
+        rows.length = 0;
+        return { rows: [] };
+      }
+      throw new Error(`Unexpected SQL query: ${text}`);
+    },
+  };
+}
+
+describe("ReciprocalTransactionStore TTL windowing & cross-replica detection", () => {
+  beforeEach(() => {
+    resetReciprocalStore();
+  });
+
+  it("InMemoryReciprocalStore expires entries after the TTL window elapses", async () => {
+    let now = 1_000_000;
+    const store = new InMemoryReciprocalStore(60_000, () => now);
+
+    await store.record("GBUYER", "GMERCHANT");
+    expect(await store.getCount("GBUYER", "GMERCHANT")).toBe(1);
+
+    // Still inside 60s window
+    now += 30_000;
+    await store.record("GBUYER", "GMERCHANT");
+    expect(await store.getCount("GBUYER", "GMERCHANT")).toBe(2);
+
+    // First entry expired, second still active
+    now += 35_000;
+    expect(await store.getCount("GBUYER", "GMERCHANT")).toBe(1);
+
+    // Both expired
+    now += 30_000;
+    expect(await store.getCount("GBUYER", "GMERCHANT")).toBe(0);
+  });
+
+  it("RedisReciprocalStore shares cross-request velocity across replicas and respects TTL", async () => {
+    let now = 2_000_000;
+    const sharedRedis = makeFakeRedis(() => now);
+    const replicaA = new RedisReciprocalStore(sharedRedis, { windowMs: 60_000 });
+    const replicaB = new RedisReciprocalStore(sharedRedis, { windowMs: 60_000 });
+    const info = makeAccountInfo(30, ONE_USDC_IN_STROOPS);
+
+    // Request 1 handled by Replica A — clean
+    setReciprocalStore(replicaA);
+    const first = await evaluateSybilRisk("GBUYER", "GMERCHANT", ONE_USDC_IN_STROOPS, info);
+    expect(first.isSuspicious).toBe(false);
+    expect(first.trustWeight).toBe(1.0);
+
+    // Request 2 handled by Replica B within TTL window — flagged as reciprocal
+    now += 10_000;
+    setReciprocalStore(replicaB);
+    const second = await evaluateSybilRisk("GBUYER", "GMERCHANT", ONE_USDC_IN_STROOPS, info);
+    expect(second.isSuspicious).toBe(true);
+    expect(second.trustWeight).toBeLessThan(0.2);
+    expect(second.reasons.some((r) => r.includes("reciprocal"))).toBe(true);
+    expect(await replicaA.getCount("GBUYER", "GMERCHANT")).toBe(2);
+
+    // After TTL window expires — pair is clean again
+    now += 60_001;
+    const third = await evaluateSybilRisk("GBUYER", "GMERCHANT", ONE_USDC_IN_STROOPS, info);
+    expect(third.isSuspicious).toBe(false);
+    expect(third.trustWeight).toBe(1.0);
+  });
+
+  it("PostgresReciprocalStore shares cross-request velocity across replicas and respects TTL", async () => {
+    let now = 3_000_000;
+    const sharedPool = makeFakePgPool();
+    const replicaA = new PostgresReciprocalStore(sharedPool, {
+      windowMs: 60_000,
+      nowFn: () => now,
+    });
+    const replicaB = new PostgresReciprocalStore(sharedPool, {
+      windowMs: 60_000,
+      nowFn: () => now,
+    });
+    const info = makeAccountInfo(30, ONE_USDC_IN_STROOPS);
+
+    // Request 1 on Replica A — clean
+    setReciprocalStore(replicaA);
+    const first = await evaluateSybilRisk("GBUYER", "GMERCHANT", ONE_USDC_IN_STROOPS, info);
+    expect(first.isSuspicious).toBe(false);
+
+    // Request 2 on Replica B within TTL — flagged
+    now += 15_000;
+    setReciprocalStore(replicaB);
+    const second = await evaluateSybilRisk("GBUYER", "GMERCHANT", ONE_USDC_IN_STROOPS, info);
+    expect(second.isSuspicious).toBe(true);
+    expect(second.trustWeight).toBeLessThan(0.2);
+    expect(second.reasons.some((r) => r.includes("reciprocal"))).toBe(true);
+
+    // Advance past both entries' TTL — clean again
+    now += 60_001;
+    const third = await evaluateSybilRisk("GBUYER", "GMERCHANT", ONE_USDC_IN_STROOPS, info);
+    expect(third.isSuspicious).toBe(false);
+    expect(third.trustWeight).toBe(1.0);
+  });
+
+  it("PostgresReciprocalStore rejects unsafe table names", () => {
+    const pool = makeFakePgPool();
+    expect(
+      () => new PostgresReciprocalStore(pool, { tableName: "users; DROP TABLE users;--" })
+    ).toThrow("Invalid SQL table name");
   });
 });

@@ -9,6 +9,7 @@
  * same buyer/merchant pair.
  */
 
+import { createRequire } from "node:module";
 import { createLogger } from "@delegolabs/utils";
 
 const log = createLogger("payments:sybil", process.env.LOG_LEVEL ?? "info");
@@ -60,17 +61,24 @@ export interface StellarAccountInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Reciprocal-transaction tracking (in-memory; swap out for DB in production)
+// Reciprocal-transaction tracking (Redis / Postgres / in-memory with TTL)
 // ---------------------------------------------------------------------------
 
+/** Default sliding/TTL window for reciprocal transaction detection (24 hours). */
+export const DEFAULT_RECIPROCAL_WINDOW_MS = 24 * 60 * 60 * 1_000;
+
+const RECIPROCAL_KEY_PREFIX = "sybil:reciprocal";
+const SAFE_SQL_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
 /**
- * Tracks (buyer, merchant) pairs and their transaction counts so we can
- * flag wash-trading between the same two addresses.
+ * Tracks (buyer, merchant) pairs and their transaction counts within a TTL
+ * window so we can flag wash-trading between the same two addresses across
+ * requests and payment replicas.
  */
 export interface ReciprocalTransactionStore {
-  record(buyerAddress: string, merchantAddress: string): Promise<void>;
+  record(buyerAddress: string, merchantAddress: string, ttlMs?: number): Promise<void>;
   getCount(buyerAddress: string, merchantAddress: string): Promise<number>;
-  reset(): void;
+  reset(): void | Promise<void>;
 }
 
 function pairKey(buyer: string, merchant: string): string {
@@ -78,23 +86,187 @@ function pairKey(buyer: string, merchant: string): string {
 }
 
 export class InMemoryReciprocalStore implements ReciprocalTransactionStore {
-  private readonly counts = new Map<string, number>();
+  private readonly entries = new Map<string, number[]>();
 
-  async record(buyerAddress: string, merchantAddress: string): Promise<void> {
+  constructor(
+    private readonly windowMs: number = DEFAULT_RECIPROCAL_WINDOW_MS,
+    private readonly nowFn: () => number = Date.now
+  ) {}
+
+  private prune(key: string, now: number): number[] {
+    const existing = this.entries.get(key);
+    if (!existing) return [];
+    const active = existing.filter((expiresAt) => expiresAt > now);
+    if (active.length === 0) {
+      this.entries.delete(key);
+    } else if (active.length !== existing.length) {
+      this.entries.set(key, active);
+    }
+    return active;
+  }
+
+  async record(buyerAddress: string, merchantAddress: string, ttlMs?: number): Promise<void> {
     const key = pairKey(buyerAddress, merchantAddress);
-    this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
+    const now = this.nowFn();
+    const active = this.prune(key, now);
+    active.push(now + (ttlMs ?? this.windowMs));
+    this.entries.set(key, active);
   }
 
   async getCount(buyerAddress: string, merchantAddress: string): Promise<number> {
-    return this.counts.get(pairKey(buyerAddress, merchantAddress)) ?? 0;
+    return this.prune(pairKey(buyerAddress, merchantAddress), this.nowFn()).length;
   }
 
   reset(): void {
-    this.counts.clear();
+    this.entries.clear();
   }
 }
 
-let reciprocalStore: ReciprocalTransactionStore = new InMemoryReciprocalStore();
+/** Minimal subset of the ioredis client API required by RedisReciprocalStore. */
+export interface ReciprocalRedisClient {
+  incr(key: string): Promise<number>;
+  pexpire(key: string, milliseconds: number): Promise<number>;
+  get(key: string): Promise<string | null>;
+  del(...keys: string[]): Promise<number>;
+}
+
+export interface RedisReciprocalStoreOptions {
+  windowMs?: number;
+  keyPrefix?: string;
+}
+
+/**
+ * Redis-backed reciprocal-transaction store with key-level TTL windowing.
+ * Shares state across payment replicas and survives process restarts.
+ */
+export class RedisReciprocalStore implements ReciprocalTransactionStore {
+  private readonly windowMs: number;
+  private readonly keyPrefix: string;
+  private readonly trackedKeys = new Set<string>();
+
+  constructor(
+    private readonly redis: ReciprocalRedisClient,
+    options: RedisReciprocalStoreOptions = {}
+  ) {
+    this.windowMs = options.windowMs ?? DEFAULT_RECIPROCAL_WINDOW_MS;
+    this.keyPrefix = options.keyPrefix ?? RECIPROCAL_KEY_PREFIX;
+  }
+
+  private redisKey(buyerAddress: string, merchantAddress: string): string {
+    return `${this.keyPrefix}:${pairKey(buyerAddress, merchantAddress)}`;
+  }
+
+  async record(buyerAddress: string, merchantAddress: string, ttlMs?: number): Promise<void> {
+    const key = this.redisKey(buyerAddress, merchantAddress);
+    const count = await this.redis.incr(key);
+    if (count === 1 || ttlMs !== undefined) {
+      await this.redis.pexpire(key, ttlMs ?? this.windowMs);
+    }
+    this.trackedKeys.add(key);
+  }
+
+  async getCount(buyerAddress: string, merchantAddress: string): Promise<number> {
+    const raw = await this.redis.get(this.redisKey(buyerAddress, merchantAddress));
+    if (raw === null) return 0;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  async reset(): Promise<void> {
+    if (this.trackedKeys.size > 0) {
+      await this.redis.del(...this.trackedKeys);
+      this.trackedKeys.clear();
+    }
+  }
+}
+
+/** Minimal subset of pg.Pool required by PostgresReciprocalStore. */
+export interface ReciprocalPgPool {
+  query<T = Record<string, unknown>>(
+    text: string,
+    params?: unknown[]
+  ): Promise<{ rows: T[] }>;
+}
+
+export interface PostgresReciprocalStoreOptions {
+  windowMs?: number;
+  tableName?: string;
+  nowFn?: () => number;
+}
+
+/**
+ * Postgres-backed reciprocal-transaction store with row-level TTL windowing.
+ * Shares state across payment replicas and survives process restarts.
+ */
+export class PostgresReciprocalStore implements ReciprocalTransactionStore {
+  private readonly windowMs: number;
+  private readonly tableName: string;
+  private readonly nowFn: () => number;
+
+  constructor(
+    private readonly pool: ReciprocalPgPool,
+    options: PostgresReciprocalStoreOptions = {}
+  ) {
+    this.windowMs = options.windowMs ?? DEFAULT_RECIPROCAL_WINDOW_MS;
+    this.tableName = options.tableName ?? "sybil_reciprocal_transactions";
+    if (!SAFE_SQL_IDENTIFIER.test(this.tableName)) {
+      throw new Error(`Invalid SQL table name: ${this.tableName}`);
+    }
+    this.nowFn = options.nowFn ?? Date.now;
+  }
+
+  async record(buyerAddress: string, merchantAddress: string, ttlMs?: number): Promise<void> {
+    const nowMs = this.nowFn();
+    const recordedAt = new Date(nowMs).toISOString();
+    const expiresAt = new Date(nowMs + (ttlMs ?? this.windowMs)).toISOString();
+    await this.pool.query(
+      `INSERT INTO ${this.tableName} (buyer_address, merchant_address, recorded_at, expires_at) VALUES ($1, $2, $3, $4)`,
+      [buyerAddress, merchantAddress, recordedAt, expiresAt]
+    );
+  }
+
+  async getCount(buyerAddress: string, merchantAddress: string): Promise<number> {
+    const nowIso = new Date(this.nowFn()).toISOString();
+    const { rows } = await this.pool.query<{ count: string | number }>(
+      `SELECT COUNT(*)::int AS count FROM ${this.tableName} WHERE buyer_address = $1 AND merchant_address = $2 AND expires_at > $3`,
+      [buyerAddress, merchantAddress, nowIso]
+    );
+    const raw = rows[0]?.count ?? 0;
+    const parsed = typeof raw === "number" ? raw : Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  async reset(): Promise<void> {
+    await this.pool.query(`DELETE FROM ${this.tableName}`);
+  }
+}
+
+let reciprocalStore: ReciprocalTransactionStore | null = null;
+
+function createDefaultReciprocalStore(): ReciprocalTransactionStore {
+  const isTest = process.env.NODE_ENV === "test";
+  const useMemory = isTest || process.env.MOCK_REDIS === "true" || process.env.CI === "true";
+
+  if (!useMemory && process.env.REDIS_URL) {
+    try {
+      const _require = createRequire(import.meta.url);
+      const { Redis } = _require("ioredis") as {
+        Redis: new (url: string) => ReciprocalRedisClient;
+      };
+      return new RedisReciprocalStore(new Redis(process.env.REDIS_URL));
+    } catch {
+      log.warn("ioredis unavailable — falling back to in-memory reciprocal store");
+    }
+  }
+  return new InMemoryReciprocalStore();
+}
+
+export function getReciprocalStore(): ReciprocalTransactionStore {
+  if (!reciprocalStore) {
+    reciprocalStore = createDefaultReciprocalStore();
+  }
+  return reciprocalStore;
+}
 
 export function setReciprocalStore(store: ReciprocalTransactionStore): void {
   reciprocalStore = store;
@@ -203,7 +375,8 @@ export async function evaluateSybilRisk(
   }
 
   // Check for reciprocal wash-trading between this exact (buyer, merchant) pair.
-  const reciprocalCount = await reciprocalStore.getCount(buyerAddress, merchantAddress);
+  const store = getReciprocalStore();
+  const reciprocalCount = await store.getCount(buyerAddress, merchantAddress);
   if (reciprocalCount > 0) {
     isSuspicious = true;
     reasons.push(
@@ -212,7 +385,7 @@ export async function evaluateSybilRisk(
   }
 
   // Record this transaction for future checks.
-  await reciprocalStore.record(buyerAddress, merchantAddress);
+  await store.record(buyerAddress, merchantAddress);
 
   const trustWeight = isSuspicious ? SUSPICIOUS_TRUST_WEIGHT : FULL_TRUST_WEIGHT;
 
