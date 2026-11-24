@@ -107,6 +107,11 @@ export function computeProposalHash(
 function signProposalHash(hash: string): string {
   const pemKey = process.env.AGENT_SIGNING_KEY_PEM;
   if (!pemKey) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "AGENT_SIGNING_KEY_PEM must be configured in production; refusing to sign with placeholder"
+      );
+    }
     log.warn("AGENT_SIGNING_KEY_PEM not set — using placeholder signature");
     return createHash("sha256").update(`placeholder:${hash}`).digest("hex");
   }
