@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Route } from "@delegolabs/utils";
-import { route, createLogger, generateId } from "@delegolabs/utils";
+import { QueryTypes } from "sequelize";
+import { createLogger, generateId } from "@delegolabs/utils";
 import { extractAuth } from "../middleware/auth.js";
 import { getRequestContext } from "../middleware/requestId.js";
 import {
@@ -16,7 +16,16 @@ import {
   getErasureRequestStatus,
   getErasureCertificate,
 } from "../src/erasure/erasureService.js";
-import { sequelize } from "../db.js";
+import { sequelize } from "../src/db.js";
+
+interface ConfirmationRow {
+  id: string;
+  user_id: string;
+  wallet_address: string;
+  status: string;
+  confirmation_hash: string;
+  confirmation_method: string;
+}
 
 const log = createLogger("gateway:erasure", process.env.LOG_LEVEL ?? "info");
 
@@ -155,16 +164,15 @@ export async function confirmErasureHandler(
     }
 
     // Verify the request exists and belongs to user
-    const [erasureRequest] = await sequelize.query(
+    const [erasureRequest] = await sequelize.query<ConfirmationRow>(
       `
       SELECT id, user_id, wallet_address, status, confirmation_hash, confirmation_method
       FROM account_erasure_requests
       WHERE id = $1 AND user_id = $2
       `,
       {
-        replacements: [body.requestId, auth.userId],
-        type: "SELECT",
-        model: null,
+        bind: [body.requestId, auth.userId],
+        type: QueryTypes.SELECT,
       }
     );
 
@@ -193,9 +201,8 @@ export async function confirmErasureHandler(
       WHERE id = $1
       `,
       {
-        replacements: [body.requestId],
-        type: "UPDATE",
-        model: null,
+        bind: [body.requestId],
+        type: QueryTypes.UPDATE,
       }
     );
 
@@ -218,14 +225,13 @@ export async function confirmErasureHandler(
       WHERE id = $4
       `,
       {
-        replacements: [
+        bind: [
           report.anonymizedPaymentRecords,
           report.purgedChatMessages,
           report.purgedPreferences,
           body.requestId,
         ],
-        type: "UPDATE",
-        model: null,
+        type: QueryTypes.UPDATE,
       }
     );
 
@@ -482,14 +488,13 @@ export async function deleteAccountHandler(
       WHERE id = $4
       `,
       {
-        replacements: [
+        bind: [
           report.anonymizedPaymentRecords,
           report.purgedChatMessages,
           report.purgedPreferences,
           erasureRequest.id,
         ],
-        type: "UPDATE",
-        model: null,
+        type: QueryTypes.UPDATE,
       }
     );
 

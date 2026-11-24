@@ -1,6 +1,6 @@
-import { Op } from "sequelize";
+import { createHash } from "node:crypto";
+import { QueryTypes } from "sequelize";
 import { User } from "../models/User.js";
-import { PaymentRecord, initPaymentRecord } from "../models/PaymentRecord.js";
 import { RefreshToken } from "../models/RefreshToken.js";
 import { OAuthAccount } from "../models/OAuthAccount.js";
 import { PasskeyCredential } from "../models/PasskeyCredential.js";
@@ -14,17 +14,66 @@ import { DeliveryEvidence } from "../models/DeliveryEvidence.js";
 import { sequelize } from "../db.js";
 import { createLogger } from "@delegolabs/utils";
 
+interface CreatedErasureRequestRow {
+  id: string;
+  user_id: string;
+  wallet_address: string;
+  confirmation_hash: string;
+  confirmation_method: string;
+  status: string;
+  created_at: Date;
+}
+
+interface PaymentRow {
+  id: string;
+  buyer_address: string;
+  seller_address: string;
+}
+
+interface CreatedCertificateRow {
+  id: string;
+  user_id: string;
+  wallet_address: string;
+  certificate_hash: string;
+  issued_at: Date;
+}
+
+export interface ErasureStatusRow {
+  id: string;
+  user_id: string;
+  wallet_address: string;
+  status: string;
+  confirmation_method: string;
+  anonymized_payment_records: number;
+  purged_chat_messages: number;
+  purged_preferences: number;
+  completed_at: Date | null;
+  failed_at: Date | null;
+  error_message: string | null;
+  initiated_at: Date;
+  certificate_hash: string | null;
+}
+
+export interface CertificateRow extends CreatedCertificateRow {
+  anonymized_payment_records: number;
+  purged_chat_messages: number;
+  purged_preferences: number;
+  certificate_hash_algorithm: string;
+  chain_integrity_hash: string | null;
+  issuer: string;
+  metadata: Record<string, unknown>;
+}
+
 const log = createLogger("gateway:erasure", process.env.LOG_LEVEL ?? "info");
 
 /**
  * Generate cryptographic hash for anonymization
  */
 export function generateHash(input: string, algorithm: string = "sha256"): string {
-  const crypto = require("crypto");
   if (algorithm === "sha256") {
-    return crypto.createHash("sha256").update(input).digest("hex");
+    return createHash("sha256").update(input).digest("hex");
   } else if (algorithm === "sha512") {
-    return crypto.createHash("sha512").update(input).digest("hex");
+    return createHash("sha512").update(input).digest("hex");
   }
   throw new Error(`Unsupported hash algorithm: ${algorithm}`);
 }
@@ -54,7 +103,7 @@ export interface ErasureRequest {
 export async function createErasureRequest(
   input: CreateErasureRequestInput
 ): Promise<ErasureRequest> {
-  const [erasureRequest] = await sequelize.query(
+  const [erasureRequest] = await sequelize.query<CreatedErasureRequestRow>(
     `
     INSERT INTO account_erasure_requests (
       user_id,
@@ -69,7 +118,7 @@ export async function createErasureRequest(
     RETURNING id, user_id, wallet_address, confirmation_hash, confirmation_method, status, created_at
     `,
     {
-      replacements: [
+      bind: [
         input.userId,
         input.walletAddress,
         input.confirmationHash,
@@ -77,10 +126,15 @@ export async function createErasureRequest(
         input.ipAddress || null,
         input.userAgent || null,
       ],
-      type: "INSERT",
-      model: null,
+      // SELECT formats RETURNING as rows; useMaster keeps this write on the primary.
+      type: QueryTypes.SELECT,
+      useMaster: true,
     }
   );
+
+  if (!erasureRequest) {
+    throw new Error("Erasure request insert returned no row");
+  }
 
   return {
     id: erasureRequest.id,
@@ -149,16 +203,15 @@ async function anonymizePaymentRecords(
   userId: string,
   walletAddress: string
 ): Promise<number> {
-  const [paymentRecords] = await sequelize.query<PaymentRecord[]>(
+  const paymentRecords = await sequelize.query<PaymentRow>(
     `
     SELECT id, buyer_address, seller_address, amount_stroops, asset_code, status, escrow_contract_id
     FROM payment_records
     WHERE buyer_address = $1 OR seller_address = $1
     `,
     {
-      replacements: [walletAddress],
-      type: "SELECT",
-      model: PaymentRecord,
+      bind: [walletAddress],
+      type: QueryTypes.SELECT,
     }
   );
 
@@ -186,15 +239,14 @@ async function anonymizePaymentRecords(
       ON CONFLICT (payment_record_id) DO NOTHING
       `,
       {
-        replacements: [
+        bind: [
           record.id,
-          record.buyerAddress,
-          generateHash(record.buyerAddress),
-          record.sellerAddress,
-          generateHash(record.sellerAddress),
+          record.buyer_address,
+          generateHash(record.buyer_address),
+          record.seller_address,
+          generateHash(record.seller_address),
         ],
-        type: "INSERT",
-        model: null,
+        type: QueryTypes.INSERT,
       }
     );
     count++;
@@ -217,7 +269,7 @@ async function purgeChatMessages(userId: string): Promise<number> {
   // In a production system, you would purge actual message content here
   // and store only a tombstone indicating messages were deleted
 
-  const [result] = await sequelize.query(
+  await sequelize.query(
     `
     INSERT INTO erasure_chat_tombstones (
       user_id,
@@ -238,9 +290,8 @@ async function purgeChatMessages(userId: string): Promise<number> {
     RETURNING id
     `,
     {
-      replacements: [userId, generateHash(`chat-purge-${userId}-${Date.now()}`)],
-      type: "INSERT",
-      model: null,
+      bind: [userId, generateHash(`chat-purge-${userId}-${Date.now()}`)],
+      type: QueryTypes.INSERT,
     }
   );
 
@@ -258,7 +309,7 @@ async function purgePreferences(userId: string): Promise<number> {
   let count = 0;
 
   // Delete notification preferences
-  const [prefResult] = await sequelize.query(
+  await sequelize.query(
     `
     INSERT INTO erasure_preferences_tombstones (
       user_id,
@@ -277,9 +328,8 @@ async function purgePreferences(userId: string): Promise<number> {
     RETURNING id
     `,
     {
-      replacements: [userId],
-      type: "INSERT",
-      model: null,
+      bind: [userId],
+      type: QueryTypes.INSERT,
     }
   );
   count++;
@@ -290,9 +340,8 @@ async function purgePreferences(userId: string): Promise<number> {
     DELETE FROM in_app_notifications WHERE user_id = $1
     `,
     {
-      replacements: [userId],
-      type: "DELETE",
-      model: null,
+      bind: [userId],
+      type: QueryTypes.DELETE,
     }
   );
 
@@ -302,9 +351,8 @@ async function purgePreferences(userId: string): Promise<number> {
     DELETE FROM scheduled_notifications WHERE user_id = $1
     `,
     {
-      replacements: [userId],
-      type: "DELETE",
-      model: null,
+      bind: [userId],
+      type: QueryTypes.DELETE,
     }
   );
 
@@ -339,15 +387,14 @@ async function deleteUserAccount(userId: string): Promise<void> {
   await Merchant.destroy({ where: { ownerUserId: userId } });
 
   // Delete carts and cart items
-  const cartIds = await sequelize.query<{ id: string }[]>(
+  const cartIds = await sequelize.query<{ id: string }>(
     `SELECT id FROM carts WHERE user_id = $1`,
     {
-      replacements: [userId],
-      type: "SELECT",
-      model: null,
+      bind: [userId],
+      type: QueryTypes.SELECT,
     }
   );
-  await CartItem.destroy({ where: { cartId: cartIds.map((x: any) => x.id) } });
+  await CartItem.destroy({ where: { cartId: cartIds.map((cart) => cart.id) } });
   await Cart.destroy({ where: { userId } });
 
   // Delete reviews - by buyer address (review table stores buyerAddress, not userId)
@@ -402,7 +449,7 @@ export async function generateErasureCertificate(
 
   const certificateHash = generateHash(JSON.stringify(certificateData));
 
-  const [certificate] = await sequelize.query(
+  const [certificate] = await sequelize.query<CreatedCertificateRow>(
     `
     INSERT INTO erasure_certificates (
       user_id,
@@ -431,7 +478,7 @@ export async function generateErasureCertificate(
     RETURNING id, user_id, wallet_address, certificate_hash, issued_at
     `,
     {
-      replacements: [
+      bind: [
         userId,
         walletAddress,
         anonymizedPaymentRecords,
@@ -446,10 +493,15 @@ export async function generateErasureCertificate(
           preferencesTombstoneCreated: true,
         }),
       ],
-      type: "INSERT",
-      model: null,
+      // SELECT formats RETURNING as rows; useMaster keeps this write on the primary.
+      type: QueryTypes.SELECT,
+      useMaster: true,
     }
   );
+
+  if (!certificate) {
+    throw new Error("Erasure certificate insert returned no row");
+  }
 
   log.info("Generated erasure certificate", {
     userId,
@@ -468,8 +520,8 @@ export async function generateErasureCertificate(
 /**
  * Get erasure request status
  */
-export async function getErasureRequestStatus(requestId: string): Promise<any> {
-  const [erasureRequest] = await sequelize.query(
+export async function getErasureRequestStatus(requestId: string): Promise<ErasureStatusRow | undefined> {
+  const [erasureRequest] = await sequelize.query<ErasureStatusRow>(
     `
     SELECT
       aer.id,
@@ -490,9 +542,8 @@ export async function getErasureRequestStatus(requestId: string): Promise<any> {
     WHERE aer.id = $1
     `,
     {
-      replacements: [requestId],
-      type: "SELECT",
-      model: null,
+      bind: [requestId],
+      type: QueryTypes.SELECT,
     }
   );
 
@@ -504,8 +555,8 @@ export async function getErasureRequestStatus(requestId: string): Promise<any> {
  */
 export async function getErasureCertificate(
   certificateHash: string
-): Promise<any> {
-  const [certificate] = await sequelize.query(
+): Promise<CertificateRow | undefined> {
+  const [certificate] = await sequelize.query<CertificateRow>(
     `
     SELECT
       id,
@@ -524,9 +575,8 @@ export async function getErasureCertificate(
     WHERE certificate_hash = $1
     `,
     {
-      replacements: [certificateHash],
-      type: "SELECT",
-      model: null,
+      bind: [certificateHash],
+      type: QueryTypes.SELECT,
     }
   );
 
