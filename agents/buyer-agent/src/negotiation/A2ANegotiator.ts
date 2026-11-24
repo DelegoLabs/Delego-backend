@@ -106,6 +106,11 @@ export class A2ANegotiator {
     (this as any).merchantPublicKeyPem = publicKeyPem;
   }
 
+  isOfferExpired(offer: NegotiationOffer, timestamp: number, nowMs: number = Date.now()): boolean {
+    const ttlMs = (offer as any).ttlSeconds ?? DEFAULT_OFFER_TTL_SECONDS;
+    return nowMs - timestamp > ttlMs * 1000;
+  }
+
   private createSession(sessionId: string, merchantEndpoint: string): NegotiationSession {
     const session: NegotiationSession = {
       sessionId,

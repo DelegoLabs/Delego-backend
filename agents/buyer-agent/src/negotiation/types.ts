@@ -37,6 +37,8 @@ export type NegotiationStatus =
   | "signature_invalid"
   | "error";
 
+export const MAX_NEGOTIATION_ROUNDS = 5;
+
 export interface NegotiationResult {
   status: NegotiationStatus;
   finalPriceStroops?: string;
