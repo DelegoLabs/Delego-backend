@@ -5,7 +5,7 @@
 import { createLogger, createHealthRoutes, startHttpServer, HealthRegistry } from "@delegolabs/utils";
 import { Pool } from "pg";
 import { PostgresDatabaseService } from "./database.js";
-import { S3ChatArchivalService } from "./s3.js";
+import { getS3Credentials, S3ChatArchivalService } from "./s3.js";
 import { LLMSummarizationService } from "./llm.js";
 import { ChatArchivalServiceImpl } from "./service.js";
 import { ChatArchivalWorker } from "./worker.js";
@@ -116,8 +116,7 @@ healthRegistry.register(
       const { S3Client, ListBucketsCommand } = await import("@aws-sdk/client-s3");
       const region = process.env.STORAGE_REGION || "auto";
       const endpoint = process.env.STORAGE_ENDPOINT;
-      const accessKeyId = process.env.STORAGE_ACCESS_KEY_ID || "dummy-access-key";
-      const secretAccessKey = process.env.STORAGE_SECRET_ACCESS_KEY || "dummy-secret-key";
+      const { accessKeyId, secretAccessKey } = getS3Credentials();
 
       const config: any = {
         region,

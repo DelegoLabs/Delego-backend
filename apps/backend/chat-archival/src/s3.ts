@@ -11,6 +11,24 @@ export interface S3ArchivalService {
   archiveMessages(sessionId: string, messages: ChatMessage[]): Promise<string>;
 }
 
+export function getS3Credentials(): { accessKeyId: string; secretAccessKey: string } {
+  const accessKeyId = process.env.STORAGE_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.STORAGE_SECRET_ACCESS_KEY;
+
+  if (process.env.NODE_ENV === "production" && (!accessKeyId || !secretAccessKey)) {
+    const missing = [
+      !accessKeyId && "STORAGE_ACCESS_KEY_ID",
+      !secretAccessKey && "STORAGE_SECRET_ACCESS_KEY",
+    ].filter(Boolean);
+    throw new Error(`Missing required S3 credentials in production: ${missing.join(", ")}`);
+  }
+
+  return {
+    accessKeyId: accessKeyId || "dummy-access-key",
+    secretAccessKey: secretAccessKey || "dummy-secret-key",
+  };
+}
+
 export class S3ChatArchivalService implements S3ArchivalService {
   private readonly client: S3Client;
   private readonly bucketName: string;
@@ -18,8 +36,7 @@ export class S3ChatArchivalService implements S3ArchivalService {
   constructor() {
     const region = process.env.STORAGE_REGION || "auto";
     const endpoint = process.env.STORAGE_ENDPOINT;
-    const accessKeyId = process.env.STORAGE_ACCESS_KEY_ID || "dummy-access-key";
-    const secretAccessKey = process.env.STORAGE_SECRET_ACCESS_KEY || "dummy-secret-key";
+    const { accessKeyId, secretAccessKey } = getS3Credentials();
     this.bucketName = process.env.CHAT_ARCHIVE_BUCKET || process.env.STORAGE_BUCKET_NAME || "delego-uploads";
 
     const config: any = {
