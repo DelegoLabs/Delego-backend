@@ -74,3 +74,5 @@ export * from "./inventory-alerts.js";
 export * from "./inventory.js";
 export * from "./discount.js";
 export * from "./cart.js";
+export type { EscrowSagaContext } from "./escrow.js";
+export type { TrustlineCheckResult } from "./wallet.js";
