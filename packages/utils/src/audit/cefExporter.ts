@@ -62,6 +62,7 @@ function escapeHeader(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r/g, "\\r").replace(/\n/g, "\\n");
 }
 
+
 function escapeExtension(value: string): string {
   return value
     .replace(/\\/g, "\\\\")
@@ -69,6 +70,7 @@ function escapeExtension(value: string): string {
     .replace(/\r/g, "\\r")
     .replace(/\n/g, "\\n");
 }
+
 
 function extension(key: string, value: string | number | null): string | null {
   return value === null || value === "" ? null : `${key}=${escapeExtension(String(value))}`;
@@ -177,7 +179,7 @@ export function formatCefEvent(event: CefEvent): string {
 
   const fields = [
     extension("src", event.extension.srcIp ?? null),
-    extension("suser", event.extension.suser ?? null),
+    event.extension.suser ? `suser=${escapeHeader(event.extension.suser)}` : null,
     extension("act", event.extension.act ?? null),
     extension("msg", event.extension.msg ?? null),
     ...Object.entries(event.extension.customFields ?? {}).map(([key, value]) => extension(key, value)),
