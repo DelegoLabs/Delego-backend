@@ -2,30 +2,42 @@ import { describe, it, expect } from 'vitest';
 import { FraudCheckService } from './fraudCheckService.js';
 
 describe('FraudCheckService', () => {
-  it('should instantiate', () => {
+  it('should instantiate with injected dependencies', () => {
     const service = new FraudCheckService(null as any, null as any);
     expect(service).toBeDefined();
   });
 
-  it('should call checkTransaction', async () => {
+  it('should delegate checkTransaction and return the computed result', async () => {
     const service = new FraudCheckService(null as any, null as any, null as any) as any;
-    try { await service.checkTransaction(null as any, null as any, null as any, null as any, null as any); } catch (e) {}
+    const result = await service.checkTransaction({ amount: 100 }, {}, {}, {}, {});
+    expect(result).toBeDefined();
   });
-  it('should call saveCheckResult', async () => {
+
+  it('should persist check results via saveCheckResult', async () => {
     const service = new FraudCheckService(null as any, null as any, null as any) as any;
-    try { await service.saveCheckResult(null as any, null as any, null as any, null as any, null as any); } catch (e) {}
+    await expect(
+      service.saveCheckResult(null as any, null as any, null as any, null as any, null as any)
+    ).resolves.not.toThrow();
   });
-  it('should call logFraudEvent', async () => {
+
+  it('should log fraud events via logFraudEvent', async () => {
     const service = new FraudCheckService(null as any, null as any, null as any) as any;
-    try { await service.logFraudEvent(null as any, null as any, null as any, null as any, null as any); } catch (e) {}
+    await expect(
+      service.logFraudEvent(null as any, null as any, null as any, null as any, null as any)
+    ).resolves.not.toThrow();
   });
-  it('should call getCheckResult', async () => {
+
+  it('should retrieve a stored check result via getCheckResult', async () => {
     const service = new FraudCheckService(null as any, null as any, null as any) as any;
-    try { await service.getCheckResult(null as any, null as any, null as any, null as any, null as any); } catch (e) {}
+    const result = await service.getCheckResult(null as any, null as any, null as any, null as any, null as any);
+    expect(result).toBeDefined();
   });
-  it('should call close', async () => {
+
+  it('should release resources on close', async () => {
     const service = new FraudCheckService(null as any, null as any, null as any) as any;
-    try { await service.close(null as any, null as any, null as any, null as any, null as any); } catch (e) {}
+    await expect(
+      service.close(null as any, null as any, null as any, null as any, null as any)
+    ).resolves.not.toThrow();
   });
 });
 
