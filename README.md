@@ -135,3 +135,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). Commits follow [Conventional Commits](
 ---
 
 **Last Updated**: September 2026
+
+## Handsoff notes
+
+<!-- handsoff-issue-828 -->
+- #828: [Feature] Add unit tests for orchestrator checkout, escrow, and payout workflows
