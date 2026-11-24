@@ -1,5 +1,5 @@
 /**
- * Sales Tax & VAT Computation Engine — Issue #505
+ * Sales Tax & VAT Computation Engine — Issue #505 / #803
  *
  * Determines the correct tax jurisdiction and rate for a transaction, then
  * computes the tax amount using BigInt arithmetic to guarantee zero
@@ -24,7 +24,16 @@
  *     → resolve buyer state from ZIP code, apply state rate
  *     - "digital" and "service" are exempt from US sales tax (simplified)
  *
- *  5. No tax
+ *  5. Canadian GST / HST / PST / QST
+ *     - Buyer country is CA
+ *     → resolve province from postal code first letter, apply combined rate
+ *     - HST provinces (ON, NB, NS, NL, PE): combined rate in one figure
+ *     - QST provinces (QC): GST 5% + QST 9.975%
+ *     - PST provinces (BC, MB, SK): GST 5% + PST
+ *       BC PST is waived for digital services sold by non-resident vendors
+ *     - GST-only (AB, NT, NU, YT): 5%
+ *
+ *  6. No tax
  *     - Any other country / unrecognised jurisdiction
  *     → taxRateBasisPoints = 0
  */
@@ -36,6 +45,7 @@ import {
   isEuCountry,
   isUkCountry,
   usRateBps,
+  caRateBps,
   UK_VAT_RATE_BPS,
 } from "./rates.js";
 import { isValidVatId } from "./vatId.js";
@@ -157,7 +167,18 @@ export function calculateTax(params: TaxCalculationParams): TaxCalculationResult
     };
   }
 
-  // ── 5. No applicable tax ──────────────────────────────────────────────────
+  // ── 5. Canadian GST / HST / PST / QST ───────────────────────────────────
+  if (country === "CA") {
+    const { province, bps } = caRateBps(buyerPostalCode, itemCategory);
+    return {
+      taxJurisdiction: jurisdictionLabel("CA", province === "UNKNOWN" ? undefined : province),
+      taxRateBasisPoints: bps,
+      taxAmountStroops: computeTaxAmount(amountStroops, bps),
+      isReverseCharge: false,
+    };
+  }
+
+  // ── 6. No applicable tax ──────────────────────────────────────────────────
   return {
     taxJurisdiction: jurisdictionLabel(country),
     taxRateBasisPoints: 0,

@@ -1,9 +1,10 @@
 /**
- * Tax rate lookup tables — Issue #505
+ * Tax rate lookup tables — Issue #505 / #803
  *
  * US destination-based sales-tax rates by state (2-letter abbreviation).
  * EU VAT rates per member state (ISO 3166-1 alpha-2).
  * UK VAT rate.
+ * Canadian GST/HST/PST/QST rates by province (2-letter abbreviation).
  *
  * All rates are in basis points (1 bp = 0.01%). Standard rates only;
  * reduced / super-reduced rates are not modelled here.
@@ -12,6 +13,7 @@
  *   US: state tax authority publications (rates as of 2024)
  *   EU: European Commission VAT rates table (2024)
  *   UK: HMRC (standard rate 20%)
+ *   CA: CRA — GST/HST rates (2024); provincial revenue agencies for PST/QST
  */
 
 import type { TaxItemCategory } from "@delegolabs/types";
@@ -319,4 +321,146 @@ export function euRateBps(country: string): number | null {
   const code = country.toUpperCase();
   if (!EU_MEMBER_STATES.has(code)) return null;
   return EU_VAT_RATES[code] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Canadian GST / HST / PST / QST rates
+//
+// Canada levies a federal Goods and Services Tax (GST) at 5%.  Some provinces
+// harmonise their provincial sales tax with the GST into a single Harmonised
+// Sales Tax (HST).  Others keep a separate Provincial Sales Tax (PST) that
+// stacks on top of the federal GST.  Quebec uses the "QST" (taxe de vente du
+// Québec) instead of a standard PST.  Alberta and the three territories have
+// no provincial component, so only the 5% GST applies.
+//
+// Combined effective rates (physical goods, standard category — 2024):
+//   ON  → 13%   (HST)
+//   QC  → ~14.975%  (5% GST + 9.975% QST) → 1497 bps (floored)
+//   BC  → 12%   (5% GST + 7% PST)
+//   AB  →  5%   (GST only)
+//   MB  → 12%   (5% GST + 7% PST)
+//   SK  → 11%   (5% GST + 6% PST)
+//   NS  → 15%   (HST)
+//   NB  → 15%   (HST)
+//   NL  → 15%   (HST)
+//   PE  → 15%   (HST)
+//   NT  →  5%   (GST only)
+//   NU  →  5%   (GST only)
+//   YT  →  5%   (GST only)
+//
+// Digital services:
+//   BC PST exempts most digital services sold by non-resident vendors (PST
+//   registration required only above CAD 10 000/year revenue threshold).
+//   For simplicity we model BC digital as GST-only (500 bps) while physical
+//   goods retain the full 12%.  All other provinces treat digital services
+//   the same as physical goods at the combined rate.
+//
+// Sources:
+//   https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/gst-hst-businesses/charge-collect-which-rate.html
+//   https://www.revenuquebec.ca/en/businesses/consumption-taxes/gsthst-and-qst/
+//   BC PST: https://www2.gov.bc.ca/gov/content/taxes/sales-taxes/pst
+// ---------------------------------------------------------------------------
+
+export interface CaProvinceRate {
+  /** Federal component (GST or the full HST which includes federal) in bps. */
+  federalBps: number;
+  /** Provincial component (PST / QST only) in bps.  0 for HST provinces and territories. */
+  provincialBps: number;
+  /**
+   * Provincial component applied to digital services specifically.
+   * Equals provincialBps unless a province carves out an exemption for digital
+   * (e.g. BC PST exempts most digital services sold by foreign vendors).
+   */
+  provincialDigitalBps: number;
+}
+
+/**
+ * Canadian province / territory tax rates in basis points.
+ * Key is the two-letter Canada Post province/territory abbreviation.
+ */
+export const CA_PROVINCE_RATES: Record<string, CaProvinceRate> = {
+  // HST provinces — no separate provincial component
+  ON: { federalBps: 1300, provincialBps: 0, provincialDigitalBps: 0 },
+  NB: { federalBps: 1500, provincialBps: 0, provincialDigitalBps: 0 },
+  NS: { federalBps: 1500, provincialBps: 0, provincialDigitalBps: 0 },
+  NL: { federalBps: 1500, provincialBps: 0, provincialDigitalBps: 0 },
+  PE: { federalBps: 1500, provincialBps: 0, provincialDigitalBps: 0 },
+  // GST + separate provincial taxes
+  QC: { federalBps: 500, provincialBps: 997, provincialDigitalBps: 997 }, // 9.975% QST → floor 997 bps
+  BC: { federalBps: 500, provincialBps: 700, provincialDigitalBps: 0 },   // PST exempt for digital
+  MB: { federalBps: 500, provincialBps: 700, provincialDigitalBps: 700 },
+  SK: { federalBps: 500, provincialBps: 600, provincialDigitalBps: 600 },
+  // GST-only jurisdictions
+  AB: { federalBps: 500, provincialBps: 0, provincialDigitalBps: 0 },
+  NT: { federalBps: 500, provincialBps: 0, provincialDigitalBps: 0 },
+  NU: { federalBps: 500, provincialBps: 0, provincialDigitalBps: 0 },
+  YT: { federalBps: 500, provincialBps: 0, provincialDigitalBps: 0 },
+};
+
+/**
+ * Map of Canadian postal-code first-letter → province/territory abbreviation.
+ *
+ * Canada Post assigns a unique first letter to each province or territory.
+ * This provides a reliable province lookup from any valid postal code.
+ *
+ * Source: Canada Post — postal code format documentation.
+ */
+const CA_POSTAL_PREFIX_TO_PROVINCE: Record<string, string> = {
+  A: "NL", // Newfoundland and Labrador
+  B: "NS", // Nova Scotia
+  C: "PE", // Prince Edward Island
+  E: "NB", // New Brunswick
+  G: "QC", // Quebec (Québec City region)
+  H: "QC", // Quebec (Montréal region)
+  J: "QC", // Quebec (western QC)
+  K: "ON", // Ontario (eastern)
+  L: "ON", // Ontario (central)
+  M: "ON", // Ontario (Toronto)
+  N: "ON", // Ontario (southwestern)
+  P: "ON", // Ontario (northern)
+  R: "MB", // Manitoba
+  S: "SK", // Saskatchewan
+  T: "AB", // Alberta
+  V: "BC", // British Columbia
+  X: "NT", // Northwest Territories or Nunavut (both GST-only)
+  Y: "YT", // Yukon
+};
+
+/**
+ * Parse a Canadian postal code and extract the province/territory abbreviation.
+ *
+ * Valid Canadian postal codes follow the pattern `A1A 1A1` (with or without
+ * the middle space).  The first letter uniquely identifies the province.
+ * Returns null for codes that do not match the Canadian format.
+ */
+export function caProvinceFromPostalCode(postalCode: string): string | null {
+  // Strip spaces and upper-case; a valid CA postal code is 6 alphanumeric chars.
+  const code = postalCode.trim().replace(/\s+/g, "").toUpperCase();
+  // Pattern: letter, digit, letter, digit, letter, digit
+  if (!/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(code)) return null;
+  return CA_POSTAL_PREFIX_TO_PROVINCE[code[0]!] ?? null;
+}
+
+/**
+ * Returns the combined Canadian tax rate in basis points for a given buyer
+ * postal code and item category.
+ *
+ * The combined rate is federalBps + (provincialBps or provincialDigitalBps
+ * depending on category).  Returns 500 bps (federal GST only) when the
+ * province cannot be determined from the postal code.
+ */
+export function caRateBps(
+  buyerPostalCode: string,
+  itemCategory: "digital" | "physical_goods" | "service",
+): { province: string; bps: number } {
+  const province = caProvinceFromPostalCode(buyerPostalCode);
+  if (!province) return { province: "UNKNOWN", bps: 500 }; // fall back to federal GST only
+
+  const entry = CA_PROVINCE_RATES[province];
+  if (!entry) return { province, bps: 500 };
+
+  const provincialComponent =
+    itemCategory === "digital" ? entry.provincialDigitalBps : entry.provincialBps;
+
+  return { province, bps: entry.federalBps + provincialComponent };
 }
