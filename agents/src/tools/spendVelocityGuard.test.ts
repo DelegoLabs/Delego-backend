@@ -5,6 +5,7 @@ import {
   SpendVelocityGuard,
   SpendVelocityExceededError,
   guardSpend,
+  checkDelegationSpendLimit,
   type SpendVelocityPolicy,
 } from "./spendVelocityGuard.js";
 
@@ -52,6 +53,17 @@ describe("#533 SpendVelocityGuard", () => {
       expect(result.requiresBiometric).toBe(true);
       expect(result.allowed).toBe(false); // 2500 > hourly volume cap of 1500
     });
+
+    it("allows a spend under velocity caps while marking it for approval", async () => {
+      const result = await guard.check("user-1", "2500", {
+        ...policy,
+        maxHourlyVolumeStroops: "3000",
+        maxDailyVolumeStroops: "3000",
+      });
+
+      expect(result.allowed).toBe(true);
+      expect(result.requiresBiometric).toBe(true);
+    });
   });
 
   describe("velocity breaches", () => {
@@ -87,6 +99,31 @@ describe("#533 SpendVelocityGuard", () => {
       await expect(
         guard.assertWithinVelocity("user-1", "200", policy),
       ).rejects.toBeInstanceOf(SpendVelocityExceededError);
+    });
+
+    it("fails closed when the spend policy contains an invalid limit", async () => {
+      const result = await guard.check("user-1", "100", {
+        ...policy,
+        maxDailyVolumeStroops: "not-a-number",
+      });
+
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/policy.*invalid/i);
+    });
+  });
+
+  describe("delegation spend limits", () => {
+    it("allows a spend exactly at both delegation limits", () => {
+      expect(checkDelegationSpendLimit("100", "100", "100")).toEqual({
+        allowed: true,
+      });
+    });
+
+    it("rejects malformed delegation limits", () => {
+      expect(checkDelegationSpendLimit("100", "invalid", "200")).toMatchObject({
+        allowed: false,
+        reason: "Delegation spending limits are invalid",
+      });
     });
   });
 

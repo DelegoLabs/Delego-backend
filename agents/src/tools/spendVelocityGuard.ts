@@ -51,6 +51,56 @@ export interface RecordedSpend {
   at?: number;
 }
 
+export interface DelegationSpendLimitCheckResult {
+  allowed: boolean;
+  reason?: string;
+}
+
+function parseStroops(value: string | undefined): bigint | null {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check both the per-transaction delegation ceiling and the remaining
+ * delegation allowance before a payment is sent to the wallet service.
+ */
+export function checkDelegationSpendLimit(
+  amountStroops: string,
+  remainingStroops: string,
+  maxPerTransactionStroops?: string | null,
+): DelegationSpendLimitCheckResult {
+  const amount = parseStroops(amountStroops);
+  const remaining = parseStroops(remainingStroops);
+  const perTransactionLimit =
+    maxPerTransactionStroops == null ? null : parseStroops(maxPerTransactionStroops);
+
+  if (amount === null || amount === 0n) {
+    return { allowed: false, reason: "Payment amount must be a positive whole number of stroops" };
+  }
+  if (remaining === null || (maxPerTransactionStroops != null && perTransactionLimit === null)) {
+    return { allowed: false, reason: "Delegation spending limits are invalid" };
+  }
+  if (perTransactionLimit !== null && amount > perTransactionLimit) {
+    return {
+      allowed: false,
+      reason: `Per-transaction delegation limit exceeded (${amount}/${perTransactionLimit} stroops)`,
+    };
+  }
+  if (amount > remaining) {
+    return {
+      allowed: false,
+      reason: `Remaining delegation allowance exceeded (${amount}/${remaining} stroops)`,
+    };
+  }
+
+  return { allowed: true };
+}
+
 /** Aborts tool execution when a velocity threshold would be exceeded. */
 export class SpendVelocityExceededError extends Error {
   readonly result: SpendVelocityCheckResult;
@@ -148,13 +198,31 @@ export class SpendVelocityGuard {
       nowMs,
     );
 
-    const requested = toBigIntSafe(requestedAmountStroops);
+    const requested = parseStroops(requestedAmountStroops);
+    const maxHourlyVolume = parseStroops(policy.maxHourlyVolumeStroops);
+    const maxDailyVolume = parseStroops(policy.maxDailyVolumeStroops);
+    const biometricThreshold = parseStroops(policy.requireBiometricAboveStroops);
+
+    if (
+      requested === null ||
+      maxHourlyVolume === null ||
+      maxDailyVolume === null ||
+      biometricThreshold === null ||
+      !Number.isSafeInteger(policy.maxHourlyTransactions) ||
+      policy.maxHourlyTransactions < 0
+    ) {
+      return {
+        allowed: false,
+        reason: "Spend velocity policy or requested amount is invalid",
+        requiresBiometric: false,
+        hourlyTransactions,
+        hourlyVolume,
+        dailyVolume,
+      };
+    }
+
     const nextHourlyVolume = hourlyVolume + requested;
     const nextDailyVolume = dailyVolume + requested;
-
-    const maxHourlyVolume = toBigIntSafe(policy.maxHourlyVolumeStroops);
-    const maxDailyVolume = toBigIntSafe(policy.maxDailyVolumeStroops);
-    const biometricThreshold = toBigIntSafe(policy.requireBiometricAboveStroops);
 
     const base = {
       hourlyTransactions,
