@@ -36,7 +36,7 @@ export interface RedisCartClient {
   del(key: string): Promise<number>;
 }
 
-export const cartKey = (walletAddress: string): string => `cart:${walletAddress}`;
+export const cartKey = (walletAddress: string): string => `cart:${walletAddress.toLowerCase()}`;
 
 // ---------------------------------------------------------------------------
 // Repository

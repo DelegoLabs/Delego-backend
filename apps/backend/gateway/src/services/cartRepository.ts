@@ -65,7 +65,7 @@ function createCartTransaction(transaction: Transaction): CartTransaction {
     async saveLines(cartId: string, lines: StoredCartLine[]): Promise<void> {
       if (lines.length === 0) return;
 
-      const existing = await CartItem.findAll({ where: { cartId }, transaction });
+      const existing = await CartItem.findAll({ where: { cartId }, transaction, lock: transaction.LOCK.UPDATE });
       const existingByKey = new Map(
         existing.map((row) => [cartLineKey(row.merchantId, row.productId, row.skuId || null), row]),
       );

@@ -1,6 +1,9 @@
 /**
  * In-memory cart storage (Issue #574).
  *
+ * Used for tests and local runs. Production should use `RedisCartRepository`
+ * (Redis hashes with TTL eviction) instead of this in-process store.
+ *
  * Implements the `CartRepository` contract without a database. It is used by
  * the cart sync test suites — which exercise the real merge strategy through
  * the real service layer — and by local runs that have no database at hand.

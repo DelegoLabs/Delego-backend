@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CartSyncRequest } from "@delegolabs/types";
 import { CartSyncRequestSchema, registerCartRoutes, syncCartHandler } from "./cart.js";
 import { InMemoryCartRepository } from "../services/inMemoryCartRepository.js";
+import { RedisCartRepository } from "../services/redisCartRepository.js";
 
 const { extractAuthMock } = vi.hoisted(() => ({
   extractAuthMock: vi.fn(),
