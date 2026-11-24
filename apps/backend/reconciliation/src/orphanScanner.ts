@@ -266,7 +266,7 @@ export async function scanForOrphanedTransactions(options: OrphanScanOptions = {
     }
   }
 
-  log.info("Orphan scan completed", result);
+  log.info("Orphan scan completed", { ...result });
   return result;
 }
 
