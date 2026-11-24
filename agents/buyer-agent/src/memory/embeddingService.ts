@@ -13,40 +13,74 @@ import type { Pool } from "pg";
 
 const log = createLogger("buyer-agent:embedding", process.env.LOG_LEVEL ?? "info");
 
+// ── Retry configuration ──────────────────────────────────────────────────────
+
+export const EMBEDDING_MAX_RETRIES = 3;
+export const EMBEDDING_BASE_DELAY_MS = 250;
+export const EMBEDDING_MAX_DELAY_MS = 4000;
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ── OpenAI embedding client ──────────────────────────────────────────────────
 
 /**
  * Calls the OpenAI embeddings endpoint and returns a 1536-dim vector.
- * Throws when OPENAI_API_KEY is absent or the request fails.
+ * Retries 429/5xx responses with bounded exponential backoff.
+ * Throws when OPENAI_API_KEY is absent or the request fails permanently.
  */
 export async function openAIEmbed(text: string): Promise<number[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
 
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model: "text-embedding-3-small", input: text }),
-  });
+  let lastError: Error | undefined;
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`OpenAI embeddings error ${response.status}: ${body}`);
+  for (let attempt = 0; attempt <= EMBEDDING_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.min(
+        EMBEDDING_BASE_DELAY_MS * 2 ** (attempt - 1),
+        EMBEDDING_MAX_DELAY_MS
+      );
+      log.warn("Retrying OpenAI embedding request", { attempt, delayMs: delay });
+      await sleep(delay);
+    }
+
+    const response = await fetch("https://api.openai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: "text-embedding-3-small", input: text }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      lastError = new Error(`OpenAI embeddings error ${response.status}: ${body}`);
+      if (isRetryableStatus(response.status) && attempt < EMBEDDING_MAX_RETRIES) {
+        continue;
+      }
+      throw lastError;
+    }
+
+    const json = (await response.json()) as {
+      data: Array<{ embedding: number[] }>;
+    };
+
+    const embedding = json.data[0]?.embedding;
+    if (!Array.isArray(embedding) || embedding.length !== 1536) {
+      throw new Error("Unexpected embedding shape from OpenAI");
+    }
+
+    return embedding;
   }
 
-  const json = (await response.json()) as {
-    data: Array<{ embedding: number[] }>;
-  };
-
-  const embedding = json.data[0]?.embedding;
-  if (!Array.isArray(embedding) || embedding.length !== 1536) {
-    throw new Error("Unexpected embedding shape from OpenAI");
-  }
-
-  return embedding;
+  throw lastError ?? new Error("OpenAI embedding request failed");
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

@@ -16,7 +16,6 @@ build/
 
 # IDE
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -32,8 +31,6 @@ Thumbs.db
 .gitattributes
 
 # Environment
-.env
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -101,7 +98,6 @@ out/
 
 # Editor directories and files
 .editorconfig
-.vscode/*
 !.vscode/settings.json
 !.vscode/launch.json
 !.vscode/extensions.json
@@ -175,3 +171,4 @@ IMPLEMENTATION_NOTES.md
 
 # Session change summaries
 CHANGES.md
+config.bat
