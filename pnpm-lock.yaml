@@ -178,6 +178,46 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)
 
+  apps/backend/chat-archival:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.600.0
+        version: 3.1141.0
+      '@delegolabs/agents':
+        specifier: workspace:*
+        version: link:../../../agents
+      '@delegolabs/types':
+        specifier: workspace:*
+        version: link:../../../packages/types
+      '@delegolabs/utils':
+        specifier: workspace:*
+        version: link:../../../packages/utils
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.81.4(redis@4.7.1)
+      ioredis:
+        specifier: ^5.3.0
+        version: 5.11.1
+      pg:
+        specifier: ^8.21.0
+        version: 8.23.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.23.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)
+
   apps/backend/db-vacuum:
     dependencies:
       '@delegolabs/types':

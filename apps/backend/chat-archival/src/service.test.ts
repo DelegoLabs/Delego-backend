@@ -287,6 +287,18 @@ describe("ChatArchivalServiceImpl", () => {
         }
         return Promise.resolve(null); // session-2 not found
       });
+      vi.mocked(mockDatabase.getSessionMessages).mockResolvedValue([
+        {
+          id: "1",
+          session_id: "session-1",
+          role: "user",
+          content: "Test",
+          created_at: mockSessions[0].created_at,
+        },
+      ]);
+      vi.mocked(mockLLM.summarizeSession).mockResolvedValue("Summary");
+      vi.mocked(mockS3.archiveMessages).mockResolvedValue("s3://bucket/session-1.json");
+      vi.mocked(mockDatabase.deleteSessionMessages).mockResolvedValue(1);
 
       const results = await service.findAndArchiveIdleSessions(30, 100);
 
