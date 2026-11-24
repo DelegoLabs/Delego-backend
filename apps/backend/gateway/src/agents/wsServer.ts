@@ -20,7 +20,7 @@
  */
 
 import { WebSocketServer } from "ws";
-import type { Server } from "node:http";
+import type { IncomingMessage, Server } from "node:http";
 import { createLogger } from "@delegolabs/utils";
 import { handleAgentConnection } from "./wsHandler.js";
 
