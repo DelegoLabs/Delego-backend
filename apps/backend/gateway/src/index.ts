@@ -14,6 +14,7 @@ import { requestIdMiddleware } from "../middleware/requestId.js";
 import { compressionMiddleware } from "../middleware/compression.js";
 import { openApiValidationMiddleware } from "../middleware/openApiValidation.js";
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
+import { startLogPruning } from "./logging/logStore.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
 import { metricsMiddleware } from "./metrics.js";
@@ -68,6 +69,7 @@ const metricsRegistry = new ServiceMetricsRegistry();
 initializeDbMetrics(metricsRegistry);
 
 startMetricsSampling();
+startLogPruning();
 
 // Bulk CSV catalog imports run in-process; disable on API-only replicas with
 // ENABLE_CATALOG_IMPORT_WORKER=false and run a dedicated worker deployment.

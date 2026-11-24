@@ -19,6 +19,7 @@ import { disconnectRedis } from "./rateLimit/redisClient.js";
 import { closeGlobalRateLimiter } from "./rateLimit/globalRedis.js";
 import { stopSessionRevocationListener } from "./auth/sessionRevocation.js";
 import { sseClientPool } from "./sse/clientPool.js";
+import { stopLogPruning } from "./logging/logStore.js";
 
 const log = createLogger("gateway:shutdown", process.env.LOG_LEVEL ?? "info");
 
@@ -93,6 +94,7 @@ export function registerGracefulShutdown(
     logger.info("Received shutdown signal — starting graceful teardown", { signal });
 
     sseClientPool.stop();
+    stopLogPruning();
 
     try {
       // Race server.close() against the drain deadline.  Whichever settles
