@@ -4,7 +4,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { json } from "@delegolabs/utils";
+import { json, SLOManager, SLIRegistry } from "@delegolabs/utils";
 import { extractAuth, getAuthenticatedUserContext } from "../../gateway/middleware/auth.js";
 import { unauthorized, forbidden, badRequest, notFound } from "../../gateway/src/errors.js";
 import {
@@ -348,39 +348,144 @@ export async function monitoringDashboardHandler(req: IncomingMessage, res: Serv
   });
 }
 // ─────────────────────────────────────────────────────────────────────────────
+// SLO Manager Instance
+// ─────────────────────────────────────────────────────────────────────────────
+
+function createDefaultSLOManager(): SLOManager {
+  const registry = new SLIRegistry();
+  const manager = new SLOManager(registry.defaultServices);
+  for (const service of registry.defaultServices) {
+    manager.registerServiceSLOs(service);
+  }
+  return manager;
+}
+
+let sloManager: SLOManager = createDefaultSLOManager();
+
+export function getSLOManager(): SLOManager {
+  return sloManager;
+}
+
+export function setSLOManager(manager: SLOManager): void {
+  sloManager = manager;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SLO Dashboard Handlers
 // ─────────────────────────────────────────────────────────────────────────────
+
+type ServiceHealthStatus = "healthy" | "warning" | "critical" | "exhausted";
+
+const STATUS_SEVERITY: Record<ServiceHealthStatus, number> = {
+  healthy: 0,
+  warning: 1,
+  critical: 2,
+  exhausted: 3,
+};
 
 /**
  * SLO Dashboard Handler
  * GET /monitoring/slo/dashboard
- * Returns overall SLO status across all services
+ * Returns overall SLO status across all registered services
  */
 export async function sloDashboardHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const auth = extractAuth(req);
   if (!auth.userId) { unauthorized(res, "Authentication required", req); return; }
 
-  // In production, this would use the SLOManager
-  // For now, return a placeholder structure
+  const allSLOs = sloManager.listSLOs();
+  const slosByService = new Map<string, typeof allSLOs>();
+
+  for (const slo of allSLOs) {
+    const list = slosByService.get(slo.service) ?? [];
+    list.push(slo);
+    slosByService.set(slo.service, list);
+  }
+
+  const summary = {
+    totalSLOs: 0,
+    healthy: 0,
+    warning: 0,
+    critical: 0,
+    exhausted: 0,
+    activeIncidents: 0,
+    errorBudgetRemaining: 1,
+  };
+
+  let totalBudgetRatio = 0;
+  let burnRateAlerts = 0;
+  let errorBudgetAlerts = 0;
+
+  const services: Array<{
+    name: string;
+    health: ServiceHealthStatus;
+    slos: number;
+    errorBudgetRemaining: number;
+    incidents: number;
+  }> = [];
+
+  for (const [serviceName, serviceSLOs] of slosByService.entries()) {
+    let serviceHealth: ServiceHealthStatus = "healthy";
+    let serviceIncidents = 0;
+    let serviceBudgetRatioSum = 0;
+
+    for (const slo of serviceSLOs) {
+      let budgetState = sloManager.getBudgetState(slo.id);
+      if (!budgetState) {
+        sloManager.evaluateSLO(slo.id, slo.target);
+        budgetState = sloManager.getBudgetState(slo.id);
+      }
+
+      const status: ServiceHealthStatus = budgetState?.status.current ?? "healthy";
+      const budgetRatio =
+        budgetState && budgetState.budget > 0
+          ? budgetState.remaining / budgetState.budget
+          : 1;
+
+      summary.totalSLOs += 1;
+      summary[status] += 1;
+      totalBudgetRatio += budgetRatio;
+      serviceBudgetRatioSum += budgetRatio;
+
+      if (STATUS_SEVERITY[status] > STATUS_SEVERITY[serviceHealth]) {
+        serviceHealth = status;
+      }
+
+      const activeAlerts = sloManager.getAlerts(slo.id);
+      serviceIncidents += activeAlerts.length;
+      summary.activeIncidents += activeAlerts.length;
+
+      for (const alert of activeAlerts) {
+        if (
+          alert.type.startsWith("burn_rate_") ||
+          alert.type.startsWith("fast_burn_") ||
+          alert.type.startsWith("slow_burn_")
+        ) {
+          burnRateAlerts += 1;
+        } else if (alert.type.startsWith("error_budget_")) {
+          errorBudgetAlerts += 1;
+        }
+      }
+    }
+
+    services.push({
+      name: serviceName,
+      health: serviceHealth,
+      slos: serviceSLOs.length,
+      errorBudgetRemaining:
+        serviceSLOs.length > 0 ? serviceBudgetRatioSum / serviceSLOs.length : 1,
+      incidents: serviceIncidents,
+    });
+  }
+
+  summary.errorBudgetRemaining =
+    summary.totalSLOs > 0 ? totalBudgetRatio / summary.totalSLOs : 1;
+
   json(res, 200, {
     data: {
-      services: [
-        { name: "gateway", health: "healthy", slos: 3, incidents: 0 },
-        { name: "payments", health: "healthy", slos: 4, incidents: 0 },
-        { name: "wallet", health: "healthy", slos: 3, incidents: 0 },
-        { name: "notifications", health: "healthy", slos: 2, incidents: 0 },
-        { name: "analytics", health: "healthy", slos: 2, incidents: 0 },
-        { name: "fraud-detection", health: "healthy", slos: 3, incidents: 0 },
-      ],
-      summary: {
-        totalSLOs: 17,
-        healthy: 17,
-        warning: 0,
-        critical: 0,
-        exhausted: 0,
-      },
-      burnRateAlerts: 0,
-      errorBudgetAlerts: 0,
+      services,
+      summary,
+      burnRateAlerts,
+      errorBudgetAlerts,
       lastUpdated: new Date().toISOString(),
     },
     error: null,
