@@ -25,7 +25,11 @@ export {
   type StallReason,
   type StallMonitorOptions,
 } from "./websocketMonitor.js";
-export { CORRELATION_ID_HEADER, correlationMiddleware, fetchWithCorrelation } from "./correlation.js";
+export {
+  CORRELATION_ID_HEADER,
+  correlationMiddleware,
+  fetchWithCorrelation,
+} from "./correlation.js";
 export { stroopsToDisplay, displayToStroops } from "./currency.js";
 export { addDecimalStrings, sumDecimalStrings } from "./decimalMath.js";
 export {
@@ -250,7 +254,11 @@ export {
   type ValidationErrorList,
 } from "./securityEventDetection.js";
 export { requireAuth } from "./auth.js";
-export { requireServiceAuth, SERVICE_AUTH_HEADER, type ServiceAuthOptions } from "./serviceAuth.js";
+export {
+  requireServiceAuth,
+  SERVICE_AUTH_HEADER,
+  type ServiceAuthOptions,
+} from "./serviceAuth.js";
 export {
   generateApiKey,
   verifyApiKey,
@@ -278,6 +286,8 @@ export {
   buildDbSpanAttributes,
   buildErrorSpanAttributes,
   computeTraceMetrics,
+  tracedFetch,
+  initTelemetry,
   type SamplerType,
   type TraceExporterType,
   type Propagator,

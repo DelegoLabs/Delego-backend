@@ -118,6 +118,7 @@ export class WebSocketStallMonitor {
   }
 
   start(): void {
+    if (this.heartbeatTimer || this.stopped) return;
     this.socket.on("pong", () => this.noteActivity());
     this.socket.on("message", () => this.noteActivity());
     this.socket.on("close", () => this.stop());
