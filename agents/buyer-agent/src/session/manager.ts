@@ -62,7 +62,7 @@ export class SessionManager {
    * Returns the initial `AgentSessionState`.
    */
   async createSession(input: CreateSessionInput): Promise<AgentSessionState> {
-    const sessionId = generateId();
+    const sessionId = input.sessionId ?? generateId();
     const now = Date.now();
 
     const initialMessages: LLMMessage[] = input.systemPrompt

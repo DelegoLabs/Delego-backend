@@ -12,6 +12,6 @@
   },
   "include": [
     "src/**/*",
-    "buyer-agent/src/**/*"
+    "buyer-agent/**/*"
   ]
 }

@@ -47,7 +47,7 @@ export const SearchProductsParamsSchema = z.object({
   query: z.string().min(1).max(512),
   category: z.string().max(64).optional(),
   maxPriceStroops: z.string().regex(/^\d+$/).optional(),
-  limit: z.number().int().min(1).max(100).default(10),
+  limit: z.number().int().min(1).max(50).default(10),
 });
 
 export const AddToCartParamsSchema = z.object({
