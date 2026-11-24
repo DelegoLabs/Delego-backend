@@ -3,6 +3,7 @@ import type { RouteHandler } from "@delegolabs/utils";
 import { json } from "@delegolabs/utils";
 import { MerchantProfileUpdateSchema } from "@delegolabs/types";
 import { QueryTypes } from "sequelize";
+import type { ZodIssue } from "zod";
 import { extractAuth } from "../middleware/auth.js";
 import { sequelize } from "../src/db.js";
 import { User } from "../src/models/User.js";
@@ -54,7 +55,7 @@ export const updateMerchantProfileHandler: RouteHandler = async (
       error: {
         code: "VALIDATION_ERROR",
         message: "Invalid merchant profile update",
-        details: parsed.error.issues.map((issue) => ({
+        details: parsed.error.issues.map((issue: ZodIssue) => ({
           field: issue.path.join(".") || "body",
           message: issue.message,
           code: issue.code,

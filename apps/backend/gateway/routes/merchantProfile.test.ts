@@ -70,6 +70,22 @@ describe("PATCH /api/v1/merchants/:merchantId", () => {
     },
   );
 
+  it("reports each validation issue with its field, message, and code", async () => {
+    readJsonBody.mockResolvedValue({ displayName: "", supportEmail: "invalid" });
+    const response = createResponse();
+
+    await updateMerchantProfileHandler(createRequest(), response, {
+      merchantId: "merchant-123",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body).error.details).toEqual([
+      { field: "displayName", message: expect.any(String), code: "too_small" },
+      { field: "supportEmail", message: expect.any(String), code: "invalid_string" },
+    ]);
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("updates only whitelisted profile fields for the linked merchant", async () => {
     readJsonBody.mockResolvedValue({
       displayName: "Acme",
