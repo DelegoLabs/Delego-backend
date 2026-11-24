@@ -159,4 +159,32 @@ describe("runCompensation", () => {
     expect(result.compensatedSteps).toHaveLength(0);
     expect(result.status).toBe("success");
   });
+
+  it("uses a compensation step's bounded retry policy", async () => {
+    let attempts = 0;
+    const retryingStep: CompensationStep[] = [
+      {
+        name: "fundEscrow",
+        retryPolicy: { maxAttempts: 2, backoffMs: 1 },
+        async compensate(ctx) {
+          attempts += 1;
+          if (attempts === 1) throw new Error("temporary failure");
+          return ctx;
+        },
+      },
+    ];
+
+    const result = await runCompensation(
+      "wf-test",
+      ["fundEscrow"],
+      makeContext(),
+      new Error("forward failure"),
+      retryingStep,
+      { leaseDeadlineMs: Date.now() + 1000, sleep: async () => undefined },
+    );
+
+    expect(result.status).toBe("success");
+    expect(result.compensatedSteps).toEqual(["fundEscrow"]);
+    expect(attempts).toBe(2);
+  });
 });
