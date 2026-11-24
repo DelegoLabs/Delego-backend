@@ -70,11 +70,15 @@ export class PooledHorizonClient implements HorizonPathsClient {
   constructor(horizonUrl: string, options: PooledHorizonClientOptions = {}) {
     this.baseUrl = new URL(horizonUrl);
     const secure = this.baseUrl.protocol === "https:";
+    const maxSockets = options.maxSockets ?? 32;
+    if (!Number.isInteger(maxSockets) || maxSockets < 1) {
+      throw new RangeError("maxSockets must be a positive integer");
+    }
     const agentOptions = {
       keepAlive: true,
       keepAliveMsecs: 10_000,
-      maxSockets: options.maxSockets ?? 32,
-      maxFreeSockets: 8,
+      maxSockets,
+      maxFreeSockets: Math.min(8, maxSockets),
       scheduling: "lifo" as const,
     };
     this.agent = secure ? new https.Agent(agentOptions) : new http.Agent(agentOptions);
