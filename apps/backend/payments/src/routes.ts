@@ -1897,5 +1897,26 @@ export function registerRoutes(): Route[] {
         sendOperationError(res, "MEMORY_SEARCH_FAILED", err);
       }
     }),
+
+    // ─── Issue #505 — Sales Tax & VAT Calculation ────────────────────────────
+
+    route("POST", "/api/v1/payments/tax/calculate", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+        const validation = validateTaxCalculationParams(body);
+        if (!validation.ok) {
+          sendValidationError(res, validation.error);
+          return;
+        }
+        const result = calculateTax(validation.value);
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        sendOperationError(res, "TAX_CALCULATION_FAILED", err);
+      }
+    }),
   ];
 }
