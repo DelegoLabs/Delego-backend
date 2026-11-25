@@ -59,4 +59,19 @@ export class InMemoryProcessedContractEventStore
       processedAt: new Date().toISOString(),
     });
   }
+
+  /** Returns the stored record for an event id, if any. Test helper. */
+  async get(eventId: string): Promise<ProcessedContractEventRecord | undefined> {
+    return this.processed.get(eventId);
+  }
+
+  /** Number of processed events currently tracked. Test helper. */
+  async size(): Promise<number> {
+    return this.processed.size;
+  }
+
+  /** Clears all tracked events. Test helper. */
+  async clear(): Promise<void> {
+    this.processed.clear();
+  }
 }

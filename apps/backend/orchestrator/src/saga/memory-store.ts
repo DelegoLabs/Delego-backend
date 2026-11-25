@@ -2,8 +2,8 @@ import {
   SagaConcurrencyError,
   type SagaEvent,
   type SagaRecord,
-  type SagaStore,
 } from "./types.js";
+import type { WorkflowStateStore } from "../../state/types.js";
 
 function clone(record: SagaRecord): SagaRecord {
   return {
@@ -31,8 +31,8 @@ function cloneEvent(event: SagaEvent): SagaEvent {
   };
 }
 
-/** Non-durable SagaStore — used in unit tests and local development without Postgres. */
-export class InMemorySagaStore implements SagaStore {
+/** Non-durable WorkflowStateStore — used in unit tests and local development. */
+export class InMemoryWorkflowStateStore implements WorkflowStateStore {
   private readonly records = new Map<string, SagaRecord>();
   private readonly events: SagaEvent[] = [];
 
@@ -96,3 +96,5 @@ export class InMemorySagaStore implements SagaStore {
     return null;
   }
 }
+
+export { InMemoryWorkflowStateStore as InMemorySagaStore };

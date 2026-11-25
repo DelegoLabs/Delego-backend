@@ -7,9 +7,9 @@ import {
   type SagaRecoveryDetail,
   type SagaRecoveryResult,
   type SagaStep,
-  type SagaStore,
   type SagaWorkflowType,
 } from "./types.js";
+import type { WorkflowStateStore } from "../../state/types.js";
 import type { DistributedLockManager } from "../locks/manager.js";
 import { lockKeyForStep, lockKeyForWorkflow } from "../locks/keys.js";
 
@@ -20,7 +20,7 @@ const DEFAULT_SAGA_TIMEOUT_MS = 5 * 60_000;
 export interface SagaCoordinatorOptions<TContext> {
   /** Saga steps in the order they should execute. Compensations run in reverse order. */
   steps: Array<SagaStep<TContext>>;
-  store: SagaStore;
+  store: WorkflowStateStore;
   log?: Logger;
   /** How long a step claim is honored before another runner may safely reclaim it. */
   claimLeaseMs?: number;
@@ -42,10 +42,10 @@ export interface RunOptions {
  * the same sagaId — already-completed steps are skipped, which makes retries idempotent
  * and lets execution resume cleanly after an orchestrator crash.
  */
-export class SagaCoordinator<TContext extends Record<string, unknown>> {
+export class SagaCoordinator<TContext extends object> {
   private readonly steps: Map<string, SagaStep<TContext>>;
   private readonly stepOrder: string[];
-  private readonly store: SagaStore;
+  private readonly store: WorkflowStateStore;
   private readonly log: Logger;
   private readonly claimLeaseMs: number;
   private readonly sagaTimeoutMs: number;
@@ -91,7 +91,7 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
       status: "running",
       currentStep: this.stepOrder[0] ?? null,
       completedSteps: [],
-      context: initialContext,
+      context: initialContext as Record<string, unknown>,
       version: 0,
       correlationId,
       error: null,
@@ -531,6 +531,6 @@ export class SagaCoordinator<TContext extends Record<string, unknown>> {
 
   /** Saves a record of this coordinator's TContext — store.save() is typed generically. */
   private save(record: SagaRecord<TContext>): Promise<SagaRecord<TContext>> {
-    return this.store.save(record) as Promise<SagaRecord<TContext>>;
+    return this.store.save(record as SagaRecord) as Promise<SagaRecord<TContext>>;
   }
 }

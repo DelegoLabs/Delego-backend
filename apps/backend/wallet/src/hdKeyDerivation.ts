@@ -110,7 +110,7 @@ function deriveChild(
 
 function fingerprint(key: Buffer): number {
   const sha = crypto.createHash("sha256").update(key).digest();
-  const ripemd = crypto.createHash("ripemd164").update(sha).digest();
+  const ripemd = crypto.createHash("ripemd160").update(sha).digest();
   return ripemd.readUInt32BE(0);
 }
 
@@ -202,7 +202,7 @@ function mnemonicToEntropy(mnemonic: string): Buffer {
   // For production use, this should be replaced with the full BIP-39
   // wordlist lookup.  This minimal implementation validates structure only.
   const entropyBytes = entropyBits / 8;
-  const checksumBytes = checksumBits / 8;
+  const checksumBytes = Math.ceil(checksumBits / 8);
 
   // Use PBKDF2 to derive entropy from the mnemonic (BIP-39 salt = "mnemonic" + passphrase)
   const salt = Buffer.from("mnemonic", "utf-8");

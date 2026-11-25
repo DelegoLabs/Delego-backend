@@ -63,13 +63,12 @@ function makeMockReqRes(body: unknown, authHeader?: string, disputeIdParam = DIS
 // ── validateDisputeResponseRequest ────────────────────────────────────────
 
 describe("validateDisputeResponseRequest", () => {
-  it("accepts a fully valid request", () => {
-    const req: SubmitDisputeResponseDTO = {
-      disputeId: DISPUTE_ID,
-      escrowId: ESCROW_ID,
-      responseStatement: "Goods shipped and delivered",
-      evidenceAttachmentUrls: ["https://example.com/proof.pdf"],
-      partialRefundAmountStroops: "5000000",
+  it("validates a correct request", () => {
+    const request = {
+      disputeId: "dispute-123",
+      responseStatement: "I received the goods in good condition",
+      evidenceAttachmentUrls: ["https://storage.delego.io/evidence/receipt.pdf"],
+      partialRefundAmountStroops: "1000",
     };
     expect(validateDisputeResponseRequest(req).valid).toBe(true);
   });
@@ -310,5 +309,32 @@ describe("submitDisputeResponseHandler — merchant authorization", () => {
     expect(json).toHaveBeenCalledWith(res, 400, expect.objectContaining({
       error: expect.objectContaining({ code: "VALIDATION_ERROR" }),
     }));
+  });
+
+  it("rejects evidence attachment URLs with disallowed or executable extensions", () => {
+    const request = {
+      disputeId: "dispute-123",
+      responseStatement: "Response",
+      evidenceAttachmentUrls: ["https://storage.delego.io/evidence/malicious.exe"],
+    };
+
+    const result = validateDisputeResponseRequest(request);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("does not have an allowed extension");
+  });
+
+  it("accepts valid image and PDF evidence attachments", () => {
+    const request = {
+      disputeId: "dispute-123",
+      responseStatement: "Response",
+      evidenceAttachmentUrls: [
+        "https://storage.delego.io/evidence/invoice.pdf",
+        "https://storage.delego.io/evidence/damaged_item.png",
+        "https://storage.delego.io/evidence/delivery_photo.jpg",
+      ],
+    };
+
+    const result = validateDisputeResponseRequest(request);
+    expect(result.valid).toBe(true);
   });
 });

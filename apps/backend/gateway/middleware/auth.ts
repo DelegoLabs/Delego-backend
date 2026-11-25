@@ -1,6 +1,11 @@
 import type { IncomingMessage } from "node:http";
 import { verifyToken } from "../src/auth/authService.js";
 import { isTokenRevokedSync } from "../src/auth/tokenBlacklist.js";
+import { isUserSessionRevokedSync } from "../src/auth/sessionRevocation.js";
+import {
+  resolveMerchantTeamPermissions,
+  type MerchantTeamPermission,
+} from "../src/auth/permissions.js";
 
 export interface AuthContext {
   userId: string | null;
@@ -11,6 +16,8 @@ export interface AuthenticatedUserContext {
   userId: string;
   email: string;
   roles: string[];
+  /** Merchant-team permissions resolved from the token's role/permission claims. */
+  permissions: MerchantTeamPermission[];
 }
 
 const authenticatedUserContexts = new WeakMap<IncomingMessage, AuthenticatedUserContext>();
@@ -41,10 +48,17 @@ export function extractAuth(req: IncomingMessage): AuthContext {
     if (decoded.jti && isTokenRevokedSync(decoded.jti)) {
       return { userId: null, token: null };
     }
+    if (isUserSessionRevokedSync(decoded.userId, decoded.iat)) {
+      return { userId: null, token: null };
+    }
     authenticatedUserContexts.set(req, {
       userId: decoded.userId,
       email: decoded.email ?? "",
       roles: decoded.roles ?? [],
+      permissions: resolveMerchantTeamPermissions({
+        roles: decoded.roles,
+        permissions: decoded.permissions,
+      }),
     });
     return { userId: decoded.userId, token };
   } catch (err) {

@@ -10,9 +10,8 @@
 
 import { Redis } from "ioredis";
 import { createLogger, type Logger } from "@delegolabs/utils";
-import { Horizon, Keypair, TransactionBuilder, Networks } from "@stellar/stellar-sdk";
-
-const log = createLogger("wallet:txHealer", process.env.LOG_LEVEL ?? "info");
+import { Horizon, Networks } from "@stellar/stellar-sdk";
+import { createHorizonServer, isMockModeEnabled } from "../stellar/mockHorizon.js";
 
 // ---------------------------------------------------------------------------
 // Types (matching issue spec)
@@ -207,7 +206,7 @@ export class TransactionHealer {
     }
 
     // Query Horizon for the current account sequence
-    const server = new Horizon.Server(this.config.horizonUrl);
+    const server = isMockModeEnabled() ? createHorizonServer(this.config.horizonUrl) : new Horizon.Server(this.config.horizonUrl);
     let currentSequence: string;
     try {
       const account = await server.loadAccount(sourceAddress);

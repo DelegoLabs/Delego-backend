@@ -12,13 +12,15 @@ import {
   RegisterSchema,
   LoginSchema,
   OAuthCallbackSchema,
+  RevokeAllSessionsSchema,
 } from "../src/validation.js";
 import {
   readJsonBody,
   InvalidJsonError,
   BodyTooLargeError,
 } from "../src/request.js";
-import { badRequest, sendApiError, unauthorized } from "../src/errors.js";
+import { badRequest, forbidden, sendApiError, unauthorized } from "../src/errors.js";
+import type { RevokeAllSessionsRequest } from "../src/auth/sessionRevocation.js";
 import { getRequestContext } from "../middleware/requestId.js";
 import {
   extractAuth,
@@ -32,6 +34,8 @@ export const authDependencies = {
   logoutUser: authService.logoutUser,
   introspectToken: authService.introspectToken,
   revokeTokens: authService.revokeTokens,
+  revokeAllUserSessions: authService.revokeAllUserSessions,
+  revokeAllSessions: authService.revokeAllSessions,
   getJwks: authService.getJwks,
   handleOAuthCallback: oauthService.handleOAuthCallback,
   buildAuthorizationUrl: oauthService.buildAuthorizationUrl,
@@ -489,6 +493,97 @@ export async function revokeHandler(
       badRequest(res, err.message, req);
     } else {
       sendApiError(res, 400, "REVOCATION_ERROR", err.message, req);
+    }
+  }
+}
+
+/**
+ * POST /api/v1/auth/revoke-all-sessions — revoke every Redis session and
+ * refresh token for a user after password reset or suspected compromise.
+ * Body: { userId, reason } — non-admin callers may only revoke their own
+ * sessions; admins may revoke any user.
+ */
+export async function revokeAllSessionsHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const requestId = resolveRequestId(req);
+  let targetUserId: string | undefined;
+
+  try {
+    const body = await readJsonBody(req);
+    targetUserId = typeof body.userId === "string" ? body.userId : undefined;
+    const validation = validateSchema(RevokeAllSessionsSchema, body);
+    if (!validation.valid) {
+      publishAuthAuditEvent({
+        action: AUTH_AUDIT_ACTIONS.REVOKE_ALL_SESSIONS,
+        success: false,
+        requestId,
+        userId: targetUserId,
+      });
+      badRequest(res, "Invalid request body", req, validation.errors);
+      return;
+    }
+    if (!targetUserId) {
+      badRequest(res, "userId is required", req);
+      return;
+    }
+
+    const auth = extractAuth(req);
+    if (!auth.userId) {
+      publishAuthAuditEvent({
+        action: AUTH_AUDIT_ACTIONS.REVOKE_ALL_SESSIONS,
+        success: false,
+        requestId,
+        userId: targetUserId,
+      });
+      unauthorized(res, "Authentication required", req);
+      return;
+    }
+
+    const authUser = getAuthenticatedUserContext(req);
+    const isAdmin = authUser?.roles?.some((role) => role.toLowerCase() === "admin") ?? false;
+    if (auth.userId !== targetUserId && !isAdmin) {
+      publishAuthAuditEvent({
+        action: AUTH_AUDIT_ACTIONS.REVOKE_ALL_SESSIONS,
+        success: false,
+        requestId,
+        userId: targetUserId,
+      });
+      forbidden(res, "Cannot revoke sessions for another user", req);
+      return;
+    }
+
+    const request = {
+      userId: targetUserId,
+      reason: body.reason,
+    } as RevokeAllSessionsRequest;
+    const result = await authDependencies.revokeAllUserSessions(request);
+    clearRefreshTokenCookie(res);
+
+    publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.REVOKE_ALL_SESSIONS,
+      success: true,
+      requestId,
+      userId: targetUserId,
+      email: authUser?.email,
+    });
+
+    json(res, 200, {
+      data: result,
+      error: null,
+    });
+  } catch (err: any) {
+    publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.REVOKE_ALL_SESSIONS,
+      success: false,
+      requestId,
+      userId: targetUserId,
+    });
+    if (err instanceof InvalidJsonError || err instanceof BodyTooLargeError) {
+      badRequest(res, err.message, req);
+    } else {
+      sendApiError(res, 500, "SESSION_REVOCATION_ERROR", err.message, req);
     }
   }
 }

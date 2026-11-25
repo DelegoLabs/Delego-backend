@@ -1,6 +1,64 @@
-<!-- TODO: Approval request email template -->
-<h1>Purchase Approval Required</h1>
-<p>Your agent has initiated a purchase that requires your approval.</p>
-<p>Order: {{orderId}}</p>
-<p>Amount: {{amount}}</p>
-<a href="{{approvalUrl}}">Review and Approve</a>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>Purchase Approval Required</title>
+  <style>
+    @media screen and (max-width: 620px) {
+      .wrapper { width: 100% !important; }
+      .content { padding: 24px 18px !important; }
+      .button, .button a { display: block !important; width: 100% !important; box-sizing: border-box; text-align: center !important; }
+      .details th, .details td { display: block !important; width: 100% !important; text-align: left !important; padding: 4px 0 !important; border: 0 !important; }
+    }
+    a:focus { outline: 3px solid #0b5fff; outline-offset: 2px; }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;color:#1f2937;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">
+    A purchase of {{amount}} {{currency}} at {{merchant}} needs your approval. This request expires {{expiry}}.
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table class="wrapper" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;border-radius:8px;overflow:hidden;">
+          <tr>
+            <td class="content" style="padding:32px;">
+              <h1 style="margin:0 0 16px;font-size:24px;line-height:1.3;color:#111827;">Purchase Approval Required</h1>
+              <p style="margin:0 0 20px;font-size:16px;line-height:1.5;">
+                A purchase at <strong>{{merchant}}</strong> is waiting for your approval. Please review the details below.
+              </p>
+              <table class="details" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 24px;">
+                <tr>
+                  <th scope="row" align="left" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:600;color:#4b5563;">Order</th>
+                  <td align="right" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;">{{orderId}}</td>
+                </tr>
+                <tr>
+                  <th scope="row" align="left" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:600;color:#4b5563;">Merchant</th>
+                  <td align="right" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;">{{merchant}}</td>
+                </tr>
+                <tr>
+                  <th scope="row" align="left" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:600;color:#4b5563;">Amount</th>
+                  <td align="right" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;">{{amount}} {{currency}}</td>
+                </tr>
+                <tr>
+                  <th scope="row" align="left" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:600;color:#4b5563;">Expires</th>
+                  <td align="right" style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:14px;">{{expiry}}</td>
+                </tr>
+              </table>
+              <p class="button" style="margin:0 0 24px;">
+                <a href="{{approvalUrl}}" aria-label="Review and approve the purchase at {{merchant}}" style="display:inline-block;background-color:#0b5fff;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:12px 24px;border-radius:6px;">Review and approve</a>
+              </p>
+              <p style="margin:0;font-size:14px;line-height:1.5;color:#4b5563;">
+                If you did not initiate this purchase, no action is needed. The request will expire automatically at {{expiry}}.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -5,5 +5,15 @@
 
 export { requestResponseLoggingMiddleware } from "./middleware.js";
 export { maskPiiData, maskHeaders, isSensitiveEndpoint, shouldSample } from "./piiMasking.js";
-export { storeLogEntry, searchLogs, getLogEntryCount, setRetentionDays, clearLogStore } from "./logStore.js";
+export {
+  storeLogEntry,
+  searchLogs,
+  getLogEntryCount,
+  setRetentionDays,
+  clearLogStore,
+  configureLogStore,
+  getLogStoreConfig,
+  startLogPruning,
+  stopLogPruning,
+} from "./logStore.js";
 export { logSearchHandler, logStatsHandler, logClearHandler } from "./routes.js";

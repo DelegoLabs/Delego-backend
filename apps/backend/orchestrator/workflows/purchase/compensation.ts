@@ -36,8 +36,12 @@
 
 import { createLogger } from "@delegolabs/utils";
 import {
-  insertWorkflowTransitionAudit,
-} from "../../state/workflow-transition-audit.js";
+  NonRetryableStepError,
+  runWithBoundedRetry,
+  type StepRetryPolicy,
+  type StepRunnerOptions,
+} from "../../execution/step-runner.js";
+import { insertWorkflowTransitionAudit } from "../../state/workflow-transition-audit.js";
 import { upsertCompensationOutcome } from "../../state/compensation-outcome.js";
 import type { PurchaseContext } from "../../state/types.js";
 import {
@@ -64,6 +68,8 @@ export interface CompensationStep {
    * Returns an updated context that reflects the compensation outcome.
    */
   compensate(context: PurchaseContext, cause: Error): Promise<PurchaseContext>;
+  /** Optional bounded retry policy for this compensation action. */
+  retryPolicy?: StepRetryPolicy;
 }
 
 export type CompensationStatus = "success" | "partial_failure";
@@ -101,7 +107,7 @@ export interface CompensationDependencies {
  * rather than a transient failure. retryWithLeaseBudget rethrows it immediately
  * instead of consuming its lease budget on retries that cannot possibly help.
  */
-export class NonRetryableError extends Error {
+export class NonRetryableError extends NonRetryableStepError {
   constructor(message: string) {
     super(message);
     this.name = "NonRetryableError";
@@ -131,36 +137,33 @@ export async function retryWithLeaseBudget<T>(
     now?: () => number;
   }
 ): Promise<T> {
-  const baseDelayMs = options.baseDelayMs ?? 200;
-  const maxDelayMs = options.maxDelayMs ?? 5000;
-  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? Date.now;
   const start = now();
-
-  let attempt = 0;
-  let lastError: Error = new Error("retryWithLeaseBudget: fn never ran");
-
-  while (true) {
-    attempt += 1;
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-
-      if (lastError instanceof NonRetryableError) {
-        throw lastError;
-      }
-
-      const elapsed = now() - start;
-      const delay = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
-
-      if (elapsed + delay >= options.deadlineMs) {
-        throw lastError;
-      }
-
-      await sleep(delay);
-    }
+  const baseDelayMs = options.baseDelayMs ?? 200;
+  const maxDelayMs = options.maxDelayMs ?? 5000;
+  if (!Number.isFinite(options.deadlineMs) || options.deadlineMs < 0) {
+    throw new RangeError("deadlineMs must be a non-negative finite number");
   }
+  if (!Number.isFinite(baseDelayMs) || baseDelayMs <= 0) {
+    throw new RangeError("baseDelayMs must be a positive finite number");
+  }
+  if (!Number.isFinite(maxDelayMs) || maxDelayMs <= 0) {
+    throw new RangeError("maxDelayMs must be a positive finite number");
+  }
+
+  return runWithBoundedRetry(
+    fn,
+    {
+      maxAttempts: Number.MAX_SAFE_INTEGER,
+      backoffMs: baseDelayMs,
+      maxBackoffMs: maxDelayMs,
+    },
+    {
+      leaseDeadlineMs: start + options.deadlineMs,
+      sleep: options.sleep,
+      now,
+    },
+  );
 }
 
 // ─── Default compensation steps for the purchase saga ────────────────────────
@@ -274,6 +277,7 @@ export async function runCompensation(
   context: PurchaseContext,
   cause: Error,
   allSteps: CompensationStep[] = DEFAULT_PURCHASE_COMPENSATION_STEPS,
+  retryOptions: StepRunnerOptions = {},
 ): Promise<CompensationResult> {
   // Build a lookup so we can find compensators by name
   const stepMap = new Map(allSteps.map((s) => [s.name, s]));
@@ -301,7 +305,11 @@ export async function runCompensation(
     }
 
     try {
-      currentContext = await step.compensate(currentContext, cause);
+      currentContext = await runWithBoundedRetry(
+        () => step.compensate(currentContext, cause),
+        step.retryPolicy,
+        retryOptions,
+      );
 
       // Record each successful compensation in the audit trail
       await insertWorkflowTransitionAudit({

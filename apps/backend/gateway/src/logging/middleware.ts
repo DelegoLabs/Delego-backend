@@ -9,7 +9,7 @@ import { createLogger } from "@delegolabs/utils";
 import { getRequestContext } from "../../middleware/requestId.js";
 import { getAuthenticatedUserContext } from "../../middleware/auth.js";
 import { maskPiiData, maskHeaders, isSensitiveEndpoint, shouldSample } from "./piiMasking.js";
-import { storeLogEntry } from "./logStore.js";
+import { configureLogStore, storeLogEntry } from "./logStore.js";
 
 const log = createLogger("gateway:http-logger", process.env.LOG_LEVEL ?? "info");
 
@@ -36,6 +36,9 @@ function captureHeaders(req: IncomingMessage): Record<string, string> {
 
 export function requestResponseLoggingMiddleware() {
   const config = getLoggingConfig();
+  configureLogStore({
+    retentionMs: config.retentionDays * 24 * 60 * 60 * 1000,
+  });
 
   return (req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void): void => {
     if (!config.enabled) {

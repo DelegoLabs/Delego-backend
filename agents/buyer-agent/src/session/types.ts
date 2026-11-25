@@ -1,7 +1,7 @@
 /**
  * Session state types — Issue #268
  */
-import type { ChatMessage } from "../../src/llm/types.js";
+import type { ChatMessage } from "../../../src/llm/index.js";
 
 export type LLMMessage = ChatMessage;
 
@@ -16,6 +16,8 @@ export interface AgentSessionState {
 }
 
 export interface CreateSessionInput {
+  /** Use the caller's session identifier when joining an existing conversation. */
+  sessionId?: string;
   userId: string;
   agentId: string;
   /** Optional system prompt to pin at the front of every session. */

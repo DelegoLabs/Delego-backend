@@ -9,6 +9,7 @@ export type {
   PurchaseContext,
   StateTransitionRecord,
   WorkflowSnapshot,
+  WorkflowStateStore,
   SnapshotValidationResult,
 } from "./types.js";
 
