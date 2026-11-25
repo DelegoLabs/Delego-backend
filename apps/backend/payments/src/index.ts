@@ -42,6 +42,7 @@ export {
   openDispute,
   submitEvidence,
   submitMediationDecision,
+  submitMerchantResponse,
 } from "./disputes/mediation.js";
 export { executePartialRefund } from "./disputes/partialRefund.js";
 export { startSlaEscalationScheduler, findAndEscalateBreachedDisputes } from "./disputes/slaEscalation.js";
@@ -87,6 +88,16 @@ export {
   SubscriptionPlanNotFoundError,
   UnsupportedPaymentMethodError,
 } from "./subscriptions/types.js";
+
+// ─── #45 Escrow Auto-Release on Delivery Confirmation ──────────────────────
+
+// ─── #505 Tax Calculation Engine ─────────────────────────────────────────────
+
+export { calculateTax } from "./tax/taxCalculator.js";
+export { validateTaxCalculationRequest } from "./tax/validation.js";
+export { validateVatIdFormat } from "./tax/vatIdValidator.js";
+export type { TaxCalculationParams, TaxCalculationResult } from "./tax/types.js";
+export { InvalidTaxParamsError, UnknownJurisdictionError } from "./tax/types.js";
 
 // ─── #45 Escrow Auto-Release on Delivery Confirmation ──────────────────────
 

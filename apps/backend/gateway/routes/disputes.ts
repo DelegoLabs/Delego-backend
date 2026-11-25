@@ -3,12 +3,15 @@
  *
  * Endpoints for merchants to submit responses, carrier delivery receipts,
  * and optional partial refund counter-offers.
+ *
+ * Fix #782: export submitMerchantResponse from @delegolabs/payments and
+ * enforce that callerAddress matches the seller/merchant on the disputed
+ * escrow before delegating to the payments layer.
  */
 
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Route, RouteHandler } from "@delegolabs/utils";
 import { json, createLogger, route } from "@delegolabs/utils";
-import { submitMerchantResponse } from "@delegolabs/payments";
+import { submitMerchantResponse, escrowCoordinator } from "@delegolabs/payments";
 import { readJsonBody } from "../src/request.js";
 
 const log = createLogger("gateway:disputes", process.env.LOG_LEVEL ?? "info");
@@ -18,6 +21,7 @@ const log = createLogger("gateway:disputes", process.env.LOG_LEVEL ?? "info");
  */
 export interface SubmitDisputeResponseDTO {
   disputeId: string;
+  escrowId: string;
   responseStatement: string;
   evidenceAttachmentUrls?: string[];
   partialRefundAmountStroops?: string;
@@ -31,6 +35,10 @@ export function validateDisputeResponseRequest(
 ): { valid: true } | { valid: false; error: string } {
   if (!request.disputeId || typeof request.disputeId !== "string") {
     return { valid: false, error: "disputeId is required" };
+  }
+
+  if (!request.escrowId || typeof request.escrowId !== "string") {
+    return { valid: false, error: "escrowId is required" };
   }
 
   if (!request.responseStatement || typeof request.responseStatement !== "string") {
@@ -76,7 +84,7 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
   let body: unknown;
   try {
     body = await readJsonBody(req);
-  } catch (err) {
+  } catch {
     json(res, 400, {
       data: null,
       error: { code: "INVALID_JSON", message: "Invalid JSON body" },
@@ -94,7 +102,7 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
 
   const request = body as SubmitDisputeResponseDTO;
 
-  // Validate request
+  // Validate request fields
   const validation = validateDisputeResponseRequest(request);
   if (!validation.valid) {
     json(res, 400, {
@@ -104,7 +112,7 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
     return;
   }
 
-  // Validate dispute ID matches path
+  // Validate dispute ID matches path parameter
   if (request.disputeId !== disputeId) {
     json(res, 400, {
       data: null,
@@ -113,7 +121,7 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
     return;
   }
 
-  // Verify caller is the merchant linked to the disputed escrow
+  // Require authenticated caller
   const authHeader = req.headers["authorization"];
   const callerAddress = extractAddressFromAuth(authHeader);
   if (!callerAddress) {
@@ -124,9 +132,39 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
     return;
   }
 
-  // TODO: Verify callerAddress is the merchant for this escrow
-  // This would require looking up the escrow to get the seller address
+  // ── Fix #782 ─────────────────────────────────────────────────────────────
+  // Verify callerAddress is the seller/merchant on the disputed escrow.
+  // We resolve the escrow balance to get the authoritative sellerAddress,
+  // then reject non-merchants with 403 before touching the payments layer.
+  // ─────────────────────────────────────────────────────────────────────────
+  let sellerAddress: string;
+  try {
+    const balance = await escrowCoordinator.getRemainingBalance(request.escrowId);
+    sellerAddress = balance.sellerAddress;
+  } catch (err) {
+    log.error("Failed to resolve escrow for merchant check", {
+      escrowId: request.escrowId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    json(res, 404, {
+      data: null,
+      error: { code: "ESCROW_NOT_FOUND", message: "Could not resolve escrow for the given escrowId" },
+    });
+    return;
+  }
 
+  if (callerAddress !== sellerAddress) {
+    json(res, 403, {
+      data: null,
+      error: {
+        code: "FORBIDDEN",
+        message: "Only the merchant for this escrow may submit a dispute response",
+      },
+    });
+    return;
+  }
+
+  // Delegate to the payments layer (also performs its own internal check)
   try {
     const dispute = await submitMerchantResponse(
       request.disputeId,
@@ -152,7 +190,7 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
     });
 
     if (err instanceof Error) {
-      if (err.message.includes("DisputeNotFoundError")) {
+      if (err.constructor.name === "DisputeNotFoundError" || err.message.includes("not found")) {
         json(res, 404, {
           data: null,
           error: { code: "DISPUTE_NOT_FOUND", message: err.message },
@@ -160,8 +198,11 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
         return;
       }
 
-      if (err.message.includes("InvalidStateTransitionError") || err.message.includes("transition")) {
-        json(res, 400, {
+      if (
+        err.constructor.name === "InvalidStateTransitionError" ||
+        err.message.toLowerCase().includes("transition")
+      ) {
+        json(res, 409, {
           data: null,
           error: { code: "INVALID_STATE_TRANSITION", message: err.message },
         });
@@ -171,7 +212,7 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
       if (err.message.includes("Only the merchant can submit")) {
         json(res, 403, {
           data: null,
-          error: { code: "FORBIDDEN", message: "Only the merchant can submit a response for this dispute" },
+          error: { code: "FORBIDDEN", message: err.message },
         });
         return;
       }
@@ -179,7 +220,10 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
 
     json(res, 500, {
       data: null,
-      error: { code: "SUBMIT_RESPONSE_FAILED", message: err instanceof Error ? err.message : "Failed to submit dispute response" },
+      error: {
+        code: "SUBMIT_RESPONSE_FAILED",
+        message: err instanceof Error ? err.message : "Failed to submit dispute response",
+      },
     });
   }
 };
@@ -188,7 +232,7 @@ export const submitDisputeResponseHandler: RouteHandler = async (req, res, param
  * Extract Stellar address from authorization header.
  * Expected format: "Bearer <stellar_address>"
  */
-function extractAddressFromAuth(authHeader: string | undefined): string | null {
+export function extractAddressFromAuth(authHeader: string | undefined): string | null {
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return null;
   }
