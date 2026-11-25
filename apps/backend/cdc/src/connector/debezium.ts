@@ -187,12 +187,12 @@ export class DebeziumConnector implements CDCConnector {
       // Debezium owns the slot; we just track where we should resume from.
       this.startingLsn = resumeLsn ?? "0/0";
       this.latestLsn = this.startingLsn;
-      this.log.info({
+      this.log.info("Debezium connector initialized", {
         publication: this.config.publication,
         resumeLsn: this.startingLsn,
         walLsn: this.latestLsn,
         slotName: this.slotName,
-      }, "Debezium connector initialized");
+      });
       return this.startingLsn;
     } catch (error) {
       const errorDetails = serializeError(error, {
@@ -200,11 +200,11 @@ export class DebeziumConnector implements CDCConnector {
         slotName: this.slotName,
       });
       
-      this.log.error({
+      this.log.error("CDC initialize failed with structured error details", {
         ...errorDetails,
         operation: 'initialize',
         resumeLsn,
-      }, 'CDC initialize failed with structured error details');
+      });
       
       throw error;
     }
@@ -236,10 +236,10 @@ export class DebeziumConnector implements CDCConnector {
         slotName: this.slotName,
       });
       
-      this.log.error({ 
+      this.log.error("CDC readBatch failed with structured error details", {
         ...errorDetails,
         operation: 'readBatch',
-      }, 'CDC readBatch failed with structured error details');
+      });
       
       throw error;
     }
