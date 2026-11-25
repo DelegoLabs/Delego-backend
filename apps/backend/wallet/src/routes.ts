@@ -418,7 +418,7 @@ export function registerRoutes(): Route[] {
           }
 
           const server = new Horizon.Server(horizonUrl);
-          let account;
+          let account: Horizon.AccountResponse;
           try {
             account = await server.loadAccount(address);
           } catch (err: any) {
@@ -454,7 +454,7 @@ export function registerRoutes(): Route[] {
           }
 
           const nativeBalanceLine = account.balances.find(
-            (b: any) => b.asset_type === "native",
+            (b) => b.asset_type === "native",
           );
           const nativeBalance = nativeBalanceLine
             ? xlmToStroops(nativeBalanceLine.balance)
@@ -592,7 +592,7 @@ export function registerRoutes(): Route[] {
 
           const server = new Horizon.Server(horizonUrl);
 
-          let txResponse;
+          let txResponse: Horizon.ServerApi.CollectionPage<Horizon.ServerApi.TransactionRecord>;
           try {
             // Verify account exists before retrieving history
             await server.loadAccount(address);
@@ -639,7 +639,7 @@ export function registerRoutes(): Route[] {
           }
 
           const transactions: TransactionEntry[] = txResponse.records.map(
-            (tx: any) => {
+            (tx) => {
               let operations: any[] = [];
               try {
                 const parsedTx = TransactionBuilder.fromXDR(
