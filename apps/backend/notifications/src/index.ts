@@ -1,6 +1,3 @@
-/**
- * @delegolabs/notifications — Entry point
- */
 import { createLogger, startHttpServer, route, json, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
 import { readBody } from "./readBody.js";
 import { broadcastNotificationToUser, getWebSocketMetrics, initWebSocketServer } from "./websocket.js";
@@ -19,6 +16,7 @@ import {
 import { getVapidPublicKey } from "../push/index.js";
 import { startPermissionEventListener } from "./permissionEventListener.js";
 import { startEscrowEventListener } from "./escrowEventListener.js";
+import { startEscrowReminderWorker, type EscrowReminderWorkerHandle } from "./escrowReminder.js";
 import {
   cancelScheduledNotification,
   catchUpMissedNotifications,
@@ -49,7 +47,15 @@ import {
   upsertStoredPreference,
 } from "./preferenceCenterStore.js";
 import { runPreferenceMigration } from "./preferenceMigration.js";
+import { disconnectAll as disconnectRedis, getConnectionState, getBufferMetrics } from "./redis/client.js";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
+import {
+  initSupportChatServer,
+  getChatRedisClient,
+} from "./supportChat.js";
+import { startRestockWorker } from "./restock/worker.js";
+import { startLowStockWorker } from "./lowStock/worker.js";
+import { startArbiterNotificationWorker } from "./arbiterNotifications.js";
 
 const SERVICE_NAME = "notifications";
 const DEFAULT_PORT = 3015;
@@ -102,6 +108,24 @@ if (rpcUrl && permissionsContractId) {
   );
 }
 
+// Issue #587 — opt-in escrow release reminder worker (BullMQ, needs Redis and
+// orders.escrow_deadline from migration 049). Enable with ESCROW_REMINDERS_ENABLED=true.
+let escrowReminderWorker: EscrowReminderWorkerHandle | null = null;
+if (process.env.ESCROW_REMINDERS_ENABLED === "true") {
+  startEscrowReminderWorker({ db: notificationDb })
+    .then((handle) => {
+      escrowReminderWorker = handle;
+      log.info("Escrow reminder worker started");
+    })
+    .catch((err: unknown) => {
+      log.error("Failed to start escrow reminder worker", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+} else {
+  log.info("Escrow reminder worker disabled (set ESCROW_REMINDERS_ENABLED=true to enable)");
+}
+
 // Issue #56 — opt-in escrow event listener.
 // Requires both STELLAR_RPC_URL and ESCROW_CONTRACT_ID to be set.
 const escrowContractId = process.env.ESCROW_CONTRACT_ID ?? "";
@@ -125,11 +149,74 @@ if (rpcUrl && escrowContractId) {
   );
 }
 
+// BullMQ workers: restock waitlist, low-stock merchant alerts, and arbiter dispute alerts.
+const backgroundWorkers: Array<{ name: string; close(): Promise<void> }> = [];
+if (process.env.NODE_ENV !== "test") {
+  if (process.env.ENABLE_RESTOCK_WORKER !== "false") {
+    backgroundWorkers.push({ name: "restock-waitlist", ...startRestockWorker() });
+  }
+  if (process.env.ENABLE_LOW_STOCK_WORKER !== "false") {
+    backgroundWorkers.push({ name: "low-stock-alerts", ...startLowStockWorker() });
+  }
+  if (process.env.ENABLE_ARBITER_NOTIFICATION_WORKER !== "false") {
+    backgroundWorkers.push({ name: "arbiter-notifications", ...startArbiterNotificationWorker() });
+  }
+}
+
 const server: Server = startHttpServer({
   port,
   serviceName: SERVICE_NAME,
-  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth({ publicPaths: ["/health", "/vapid-public-key"] })],
+  middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth({ publicPaths: ["/health", "/vapid-public-key", "/health/redis"] })],
   routes: [
+    route("GET", "/health", (_req: IncomingMessage, res: ServerResponse) => {
+      const redisState = getConnectionState();
+      const bufferMetrics = getBufferMetrics();
+      
+      json(res, 200, {
+        data: {
+          status: "healthy",
+          service: SERVICE_NAME,
+          redis: {
+            connected: redisState.isReady,
+            reconnectAttempts: redisState.reconnectAttempts,
+            lastError: redisState.lastError
+          },
+          buffer: {
+            size: bufferMetrics.bufferSize,
+            maxSize: bufferMetrics.maxSize
+          }
+        },
+        error: null
+      });
+    }),
+
+    route("GET", "/health/redis", (_req: IncomingMessage, res: ServerResponse) => {
+      const state = getConnectionState();
+      const metrics = getBufferMetrics();
+      
+      json(res, state.isReady ? 200 : 503, {
+        data: {
+          connectionState: {
+            isReady: state.isReady,
+            isConnecting: state.isConnecting,
+            reconnectAttempts: state.reconnectAttempts,
+            lastError: state.lastError
+          },
+          bufferMetrics: {
+            bufferSize: metrics.bufferSize,
+            maxSize: metrics.maxSize,
+            utilizationPercent: (metrics.bufferSize / metrics.maxSize) * 100,
+            oldestTimestamp: metrics.oldestTimestamp,
+            oldestAgeMs: metrics.oldestTimestamp ? Date.now() - metrics.oldestTimestamp : null
+          }
+        },
+        error: state.isReady ? null : {
+          code: "REDIS_UNAVAILABLE",
+          message: state.lastError ?? "Redis connection not ready"
+        }
+      });
+    }),
+
     route("GET", "/vapid-public-key", (_req: IncomingMessage, res: ServerResponse) => {
       const key = getVapidPublicKey();
       if (!key) {
@@ -259,6 +346,11 @@ const server: Server = startHttpServer({
 
     route("GET", "/ws/metrics", (_req: IncomingMessage, res: ServerResponse) => {
       json(res, 200, { data: getWebSocketMetrics(), error: null });
+    }),
+
+    // Issue #378 — support chat active-session metrics
+    route("GET", "/support-chat/metrics", (_req: IncomingMessage, res: ServerResponse) => {
+      json(res, 200, { data: supportChatRelay?.getActiveSessions() ?? [], error: null });
     }),
 
     // Issue #365 / #59 — notification scheduling with cron + timezone support and a
@@ -512,6 +604,21 @@ function sanitizePreferenceUpdate(body: Record<string, unknown>): PreferenceUpda
 
 initWebSocketServer(server);
 
+// Issue #378 — End-to-End Encrypted Customer Support Channel.
+// Mounts a separate WebSocket server on path /support-chat.
+// Clients connect with: wss://<host>/support-chat?token=<jwt>&orderId=<id>
+// Enabled by default; set SUPPORT_CHAT_ENABLED=false to skip (e.g. in replicas
+// where only one instance should handle chat).
+let supportChatRelay: ReturnType<typeof initSupportChatServer>["relay"] | null = null;
+if (process.env.SUPPORT_CHAT_ENABLED !== "false") {
+  const chatResult = initSupportChatServer(server, {
+    redis: getChatRedisClient(),
+    jwtSecret: process.env.JWT_SECRET,
+  });
+  supportChatRelay = chatResult.relay;
+  log.info("Support chat WebSocket server started (Issue #378)");
+}
+
 // Issue #59 — scheduled/recurring notifications: persistent store + polling loop.
 //
 // Uses the Postgres-backed store (see scheduler/store.ts) so scheduled notifications
@@ -602,6 +709,15 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
       });
     }
   }
+  if (escrowReminderWorker) {
+    try {
+      await escrowReminderWorker.stop();
+    } catch (err) {
+      log.error("Failed to stop escrow reminder worker cleanly", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   if (escrowListener) {
     try {
       await escrowListener.stop();
@@ -611,6 +727,27 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
       });
     }
   }
+  for (const worker of backgroundWorkers) {
+    try {
+      await worker.close();
+    } catch (err) {
+      log.error("Failed to stop background worker cleanly", {
+        worker: worker.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Gracefully disconnect Redis clients
+  try {
+    await disconnectRedis();
+    log.info("Redis clients disconnected");
+  } catch (err) {
+    log.error("Failed to disconnect Redis clients cleanly", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  
   server.close(() => {
     log.info("HTTP server closed");
     process.exit(0);

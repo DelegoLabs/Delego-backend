@@ -12,8 +12,7 @@
 import { Redis } from "ioredis";
 import { createLogger, type Logger } from "@delegolabs/utils";
 import { Horizon, Asset, TransactionBuilder, Operation, Keypair, Networks } from "@stellar/stellar-sdk";
-
-const log = createLogger("wallet:faucetRelayer", process.env.LOG_LEVEL ?? "info");
+import { createHorizonServer, isMockModeEnabled } from "../../stellar/mockHorizon.js";
 
 // ---------------------------------------------------------------------------
 // Types (matching issue spec)
@@ -115,7 +114,6 @@ export class FaucetRateLimiter {
 // ---------------------------------------------------------------------------
 
 export class FaucetRelayer {
-  private redis: Redis;
   private rateLimiter: FaucetRateLimiter;
   private log: Logger;
   private horizonUrl: string;
@@ -128,7 +126,6 @@ export class FaucetRelayer {
       logger?: Logger;
     },
   ) {
-    this.redis = redis;
     this.rateLimiter = options?.rateLimiter ?? new FaucetRateLimiter(redis);
     this.horizonUrl = options?.horizonUrl ?? HORIZON_TESTNET_URL;
     this.log = options?.logger ?? createLogger("wallet:faucetRelayer", process.env.LOG_LEVEL ?? "info");
@@ -247,7 +244,7 @@ export class FaucetRelayer {
     }
 
     const issuerKeypair = Keypair.fromSecret(MOCK_USDC_ISSUER);
-    const server = new Horizon.Server(this.horizonUrl);
+    const server = isMockModeEnabled() ? createHorizonServer(this.horizonUrl) : new Horizon.Server(this.horizonUrl);
     const issuerAccount = await server.loadAccount(issuerKeypair.publicKey());
 
     const usdcAsset = new Asset(MOCK_USDC_CODE, issuerKeypair.publicKey());

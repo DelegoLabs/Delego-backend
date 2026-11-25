@@ -2,11 +2,15 @@ import { Op } from "sequelize";
 import { FXRate } from "../models/FXRate.js";
 import { SupportedCurrency } from "../models/SupportedCurrency.js";
 import type { FXRate as FXRateType, FXRateResponse, FXRateRequest } from "@delegolabs/types";
+import { fetchWithCorrelation } from "../../middleware/correlation.js";
+import { createChildLogger } from "../logger.js";
 
 /**
  * FX Rate Service
  * Manages FX rates from multiple providers and calculates conversion paths
  */
+
+const log = createChildLogger({ module: "fx-service" });
 
 const FX_PROVIDERS = {
   stellar_lumen: "https://stellar-lumen-oracle.example.com",
@@ -21,7 +25,7 @@ async function fetchFromProvider(provider: string, base: string, quote: string):
   const url = `${FX_PROVIDERS[provider as keyof typeof FX_PROVIDERS]}/rates/${base}/${quote}`;
   
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithCorrelation(url, {
       method: "GET",
       headers: {
         "Accept": "application/json",
@@ -57,7 +61,12 @@ async function fetchFromProvider(provider: string, base: string, quote: string):
       ask,
     };
   } catch (error) {
-    console.error(`Failed to fetch FX rate from ${provider}:`, error);
+    log.error({
+      provider,
+      base,
+      quote,
+      error: error instanceof Error ? error.message : String(error),
+    }, "Failed to fetch FX rate from provider");
     throw new Error(`FX rate fetch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
 }
@@ -251,7 +260,11 @@ export async function batchGetFXRates(pairs: Array<{ base: string; quote: string
       });
       rates.push(rate);
     } catch (error) {
-      console.error(`Failed to get rate for ${pair.base}/${pair.quote}:`, error);
+      log.error({
+        base: pair.base,
+        quote: pair.quote,
+        error: error instanceof Error ? error.message : String(error),
+      }, "Failed to get FX rate for currency pair");
     }
   }
 
@@ -273,7 +286,11 @@ export async function refreshAllFXRates(): Promise<void> {
             quoteCurrency: otherCurrency.code,
           });
         } catch (error) {
-          console.error(`Failed to refresh rate for ${currency.code}/${otherCurrency.code}:`, error);
+          log.error({
+            baseCurrency: currency.code,
+            quoteCurrency: otherCurrency.code,
+            error: error instanceof Error ? error.message : String(error),
+          }, "Failed to refresh FX rate");
         }
       }
     }

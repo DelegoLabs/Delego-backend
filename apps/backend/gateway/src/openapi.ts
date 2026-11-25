@@ -277,6 +277,72 @@ const HealthSchema = {
 };
 
 // ---------------------------------------------------------------------------
+// Order schemas
+// ---------------------------------------------------------------------------
+
+const RejectOrderRequestBody = {
+  type: "object",
+  properties: {
+    reason: { type: "string", description: "Human-readable rejection reason" },
+    reasonCode: {
+      type: "string",
+      enum: ["out_of_stock", "pricing_error", "buyer_unresponsive", "fraud_suspected", "other"],
+      description: "Machine-readable rejection reason code",
+    },
+    internalNote: { type: "string", description: "Optional internal note for audit purposes" },
+  },
+  required: ["reason", "reasonCode"],
+  additionalProperties: false,
+};
+
+const RejectOrderResponse = ApiResponse({
+  type: "object",
+  properties: {
+    orderId: { type: "string", format: "uuid" },
+    status: { type: "string", enum: ["rejected"] },
+    rejectedAt: { type: "string", format: "date-time" },
+    notifiedBuyer: { type: "boolean", description: "Whether the buyer was notified of the rejection" },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Cart schemas (Issue #574)
+// ---------------------------------------------------------------------------
+
+const CartLineItemSchema = {
+  type: "object",
+  properties: {
+    merchantId: { type: "string", maxLength: 64 },
+    productId: { type: "string", maxLength: 64 },
+    skuId: { type: "string", maxLength: 64 },
+    quantity: { type: "integer", minimum: 0 },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+  required: ["merchantId", "productId", "quantity", "updatedAt"],
+};
+
+const CartSyncRequest = {
+  type: "object",
+  properties: {
+    cartId: { type: "string", maxLength: 64 },
+    clientVersion: { type: "integer", minimum: 0 },
+    items: { type: "array", items: CartLineItemSchema, maxItems: 200 },
+  },
+  required: ["cartId", "clientVersion", "items"],
+};
+
+const CartSyncResponse = {
+  type: "object",
+  properties: {
+    cartId: { type: "string" },
+    serverVersion: { type: "integer" },
+    items: { type: "array", items: CartLineItemSchema },
+    conflictsResolved: { type: "boolean" },
+  },
+  required: ["cartId", "serverVersion", "items", "conflictsResolved"],
+};
+
+// ---------------------------------------------------------------------------
 // Full OpenAPI 3.0 Document
 // ---------------------------------------------------------------------------
 
@@ -537,6 +603,63 @@ Rate limit headers are included in all responses:
           },
           "400": {
             description: "Missing token or refreshToken",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+        },
+      },
+    },
+    "/api/v1/auth/revoke-all-sessions": {
+      post: {
+        tags: ["Auth"],
+        summary: "Revoke all sessions for a user",
+        description:
+          "Deletes every Redis session for the user, revokes all refresh tokens, rejects previously issued JWTs via a per-user cutoff, and publishes auth:sessions:revoked so WebSocket servers close affected connections. Non-admin callers may only revoke their own sessions.",
+        operationId: "revokeAllSessions",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["userId", "reason"],
+                properties: {
+                  userId: { type: "string", minLength: 1, maxLength: 128 },
+                  reason: {
+                    type: "string",
+                    enum: ["password_reset", "security_compromise", "user_requested"],
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Sessions revoked",
+            content: {
+              "application/json": {
+                schema: ApiResponse({
+                  type: "object",
+                  properties: {
+                    sessionsRevokedCount: { type: "integer" },
+                    revokedAt: { type: "string", format: "date-time" },
+                  },
+                }),
+              },
+            },
+          },
+          "400": {
+            description: "Invalid request body",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "401": {
+            description: "Not authenticated",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "403": {
+            description: "Cannot revoke another user's sessions",
             content: { "application/json": { schema: ApiResponse(null) } },
           },
         },
@@ -962,6 +1085,75 @@ Rate limit headers are included in all responses:
         },
       },
     },
+    "/api/v1/orders/{id}/reject": {
+      post: {
+        tags: ["Orders"],
+        summary: "Reject order",
+        description: "Rejects a pending order with a structured reason code and optional internal note. This action is permanent and triggers buyer notification.",
+        operationId: "rejectOrder",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" }, description: "Order ID to reject" },
+        ],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: RejectOrderRequestBody } },
+        },
+        responses: {
+          "200": {
+            description: "Order rejected successfully",
+            content: { "application/json": { schema: RejectOrderResponse } },
+          },
+          "400": {
+            description: "Validation error or order not in rejectable state",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "401": {
+            description: "Not authenticated",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "403": {
+            description: "Forbidden - insufficient permissions to reject this order",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "404": {
+            description: "Order not found",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+        },
+      },
+    },
+    "/api/v1/cart/sync": {
+      post: {
+        tags: ["Cart"],
+        summary: "Synchronise a cart across devices",
+        description:
+          "Merges the cart a device holds with the cart the gateway stores. The device sends the cart version it last saw as `clientVersion`; when that version is behind, the gateway merges both states line by line (last write wins per line) instead of overwriting the stored cart.",
+        operationId: "syncCart",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: CartSyncRequest } },
+        },
+        responses: {
+          "200": {
+            description: "Cart synchronised — the merged cart and the new cart version",
+            content: { "application/json": { schema: ApiResponse(CartSyncResponse) } },
+          },
+          "400": {
+            description: "Validation error",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "401": {
+            description: "Authentication required",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+          "403": {
+            description: "The cart belongs to another user",
+            content: { "application/json": { schema: ApiResponse(null) } },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -979,6 +1171,8 @@ Rate limit headers are included in all responses:
     { name: "Delegations", description: "Delegation CRUD and policy management" },
     { name: "Wallets", description: "Wallet operations, payments, HD key derivation, and HSM health" },
     { name: "Fees", description: "Dynamic transaction fee estimation" },
+    { name: "Orders", description: "Order management and lifecycle operations" },
+    { name: "Cart", description: "Shopping cart synchronisation across devices" },
     { name: "Admin", description: "Administrative endpoints (admin role required)" },
   ],
 };

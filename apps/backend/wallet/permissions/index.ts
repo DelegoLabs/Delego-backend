@@ -27,6 +27,7 @@ import {
 } from "../src/vault.js";
 import { checkSpendLimit } from "../src/spendLimits.js";
 import { getTransactionFee } from "../src/dynamicFee.js";
+import { createHorizonServer, isMockModeEnabled } from "../stellar/mockHorizon.js";
 
 const log = createLogger("wallet:permissions", process.env.LOG_LEVEL ?? "info");
 
@@ -171,6 +172,15 @@ function resolveStellarConfig(overrides?: Partial<PermissionsServiceDeps>): {
   rpcUrl: string;
   networkPassphrase: string;
 } {
+  // Return mock config early if mock mode is enabled and not explicitly overridden
+  if (isMockModeEnabled() && !overrides?.horizonUrl && !overrides?.rpcUrl) {
+    return {
+      horizonUrl: "mock://horizon",
+      rpcUrl: "mock://soroban-rpc",
+      networkPassphrase: Networks.TESTNET,
+    };
+  }
+
   const network = (process.env.STELLAR_NETWORK ?? "testnet").toLowerCase();
   let horizonUrl = "https://horizon-testnet.stellar.org";
   let rpcUrl = "https://soroban-testnet.stellar.org";
@@ -241,6 +251,8 @@ export interface PermissionsService {
   grant(grant: PermissionGrant & { owner?: string }, owner?: string): Promise<string>;
   /** Owner revokes a spender's permission */
   revoke(contractId: string, spender: string, owner?: string): Promise<void>;
+  /** Owner revokes multiple spenders through sequence-safe contract submissions */
+  revokeBatch(contractId: string, spenders: string[], owner?: string): Promise<void>;
   /** All active grants for an owner, read from contract storage */
   list(owner: string, contractId?: string): Promise<PermissionGrant[]>;
   /** Single grant lookup; null when none exists */
@@ -270,7 +282,7 @@ export function createPermissionsService(
   const rpcServer =
     deps.rpcServer ?? new rpc.Server(config.rpcUrl, { timeout: 30_000 });
   const horizonServer =
-    deps.horizonServer ?? new Horizon.Server(config.horizonUrl);
+    deps.horizonServer ?? createHorizonServer(config.horizonUrl);
 
   const simulatorConfig: SorobanRpcConfig = {
     ...readSorobanRpcConfig(),
@@ -594,6 +606,20 @@ export function createPermissionsService(
       });
     },
 
+    async revokeBatch(
+      contractIdInput: string,
+      spenderInputs: string[],
+      explicitOwner?: string,
+    ): Promise<void> {
+      if (spenderInputs.length === 0) return;
+      const owner = resolveOwner(explicitOwner);
+      const contractId = resolveContractId(contractIdInput);
+      const spenders = [...new Set(spenderInputs.map(validateSpender))];
+      for (const spender of spenders) {
+        await this.revoke(contractId, spender, owner);
+      }
+    },
+
     async get(
       contractIdInput: string,
       ownerInput: string,
@@ -829,6 +855,9 @@ export const permissionsService: PermissionsService = {
   },
   revoke(...args) {
     return getDefaultPermissionsService().revoke(...args);
+  },
+  revokeBatch(...args) {
+    return getDefaultPermissionsService().revokeBatch(...args);
   },
   list(...args) {
     return getDefaultPermissionsService().list(...args);
