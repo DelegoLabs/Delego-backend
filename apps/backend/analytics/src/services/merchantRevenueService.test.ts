@@ -110,6 +110,14 @@ describe("period arithmetic (must match Postgres date_trunc in UTC)", () => {
     expect(addPeriods(new Date("2026-03-01T00:00:00Z"), "month", -1).toISOString()).toBe("2026-02-01T00:00:00.000Z");
   });
 
+  it("rejects unsupported runtime groupings", () => {
+    const invalidGroupBy = "year" as RevenueGroupBy;
+    const date = new Date("2026-10-14T18:30:00Z");
+
+    expect(() => truncateToPeriod(date, invalidGroupBy)).toThrow("Unsupported revenue groupBy: year");
+    expect(() => addPeriods(date, invalidGroupBy, 1)).toThrow("Unsupported revenue groupBy: year");
+  });
+
   it("expands a mid-period range to whole periods", () => {
     const periods = enumeratePeriods(new Date("2026-09-15T10:00:00Z"), new Date("2026-11-02T00:00:00Z"), "month");
     expect(periods.map((p) => p.toISOString())).toEqual([

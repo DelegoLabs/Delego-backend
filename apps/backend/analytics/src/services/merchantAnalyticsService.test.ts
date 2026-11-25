@@ -98,7 +98,22 @@ describe("MerchantAnalyticsService (Issue #377)", () => {
 
     expect(result.merchantId).toBe("m_1");
     expect(result.interval).toBe("1h");
-    expect(result.aggregates.length).toBe(2);
+    expect(result.aggregates).toEqual([
+      {
+        bucket: "2026-09-28T10:00:00.000Z",
+        merchantId: "m_1",
+        volume: "1500.50",
+        orderCount: 5,
+        avgOrderValue: "300.10",
+      },
+      {
+        bucket: "2026-09-28T11:00:00.000Z",
+        merchantId: "m_1",
+        volume: "2400.00",
+        orderCount: 8,
+        avgOrderValue: "300.00",
+      },
+    ]);
     expect(result.totalVolume).toBe("3900.50");
     expect(result.totalOrders).toBe(13);
 

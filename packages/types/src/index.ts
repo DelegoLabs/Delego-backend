@@ -73,7 +73,17 @@ export * from "./schemas.js";
 export * from "./merchant-profile.js";
 export * from "./storefront.js";
 export * from "./shipping.js";
-export * from "./merchantAnalytics.js";
+export type {
+  AnalyticsTimeBucket,
+  MerchantSalesAggregate,
+  MerchantAnalyticsQuery,
+  MerchantAnalyticsResponse,
+  RevenueGroupBy,
+  RevenueAggregateQuery,
+  RevenueAggregateBucket,
+  RevenueAggregateTotals,
+  RevenueAggregateResponse,
+} from "./merchantAnalytics.js";
 export * from "./storageRotation.js";
 export * from "./dlq.js";
 export * from "./storage.js";

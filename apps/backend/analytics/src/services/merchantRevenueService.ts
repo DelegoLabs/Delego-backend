@@ -37,6 +37,10 @@ const CACHE_KEY_VERSION = "v1";
 /** Hard cap on buckets per request, per granularity. */
 export const MAX_BUCKETS: Record<RevenueGroupBy, number> = { day: 366, week: 260, month: 120 };
 
+function assertNever(value: never): never {
+  throw new Error(`Unsupported revenue groupBy: ${String(value)}`);
+}
+
 // ---------------------------------------------------------------------------
 // UTC period arithmetic — must agree with Postgres date_trunc in UTC
 // ---------------------------------------------------------------------------
@@ -56,6 +60,7 @@ export function truncateToPeriod(date: Date, groupBy: RevenueGroupBy): Date {
     case "month":
       return new Date(Date.UTC(y, m, 1));
   }
+  return assertNever(groupBy);
 }
 
 export function addPeriods(periodStart: Date, groupBy: RevenueGroupBy, count: number): Date {
@@ -70,6 +75,7 @@ export function addPeriods(periodStart: Date, groupBy: RevenueGroupBy, count: nu
     case "month":
       return new Date(Date.UTC(y, m + count, 1));
   }
+  return assertNever(groupBy);
 }
 
 /** Period starts covering [startDate, endDate], both ends expanded to whole periods. */

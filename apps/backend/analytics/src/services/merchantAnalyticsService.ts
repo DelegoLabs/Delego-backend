@@ -68,7 +68,13 @@ export class MerchantAnalyticsService {
     });
 
     try {
-      const rows = (await sequelize.query(
+      const rows = await sequelize.query<{
+        bucket: Date | string;
+        merchantId: string;
+        volume: string;
+        orderCount: number;
+        avgOrderValue: string;
+      }>(
         `
         SELECT
           bucket,
@@ -87,13 +93,7 @@ export class MerchantAnalyticsService {
           replacements: { merchantId, startTime, endTime, limit },
           type: QueryTypes.SELECT,
         }
-      )) as Array<{
-        bucket: Date | string;
-        merchantId: string;
-        volume: string;
-        orderCount: number;
-        avgOrderValue: string;
-      }>;
+      );
 
       const aggregates: MerchantSalesAggregate[] = rows.map((r) => ({
         bucket: r.bucket instanceof Date ? r.bucket.toISOString() : String(r.bucket),
