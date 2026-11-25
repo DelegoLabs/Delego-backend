@@ -99,4 +99,102 @@ describe("BatchLoader", () => {
 
     expect(batchFn).toHaveBeenCalledTimes(2);
   });
+
+  it("returns an empty array from loadMany([]) without calling the batch function", async () => {
+    const batchFn = vi.fn(async (keys: string[]) => keys.map((k) => `value-${k}`));
+    const loader = new BatchLoader(batchFn);
+
+    await expect(loader.loadMany([])).resolves.toEqual([]);
+    expect(batchFn).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates repeated keys passed to a single loadMany() call", async () => {
+    const batchFn = vi.fn(async (keys: string[]) => keys.map((k) => `value-${k}`));
+    const loader = new BatchLoader(batchFn);
+
+    const results = await loader.loadMany(["1", "1", "2"]);
+
+    expect(results).toEqual(["value-1", "value-1", "value-2"]);
+    expect(batchFn).toHaveBeenCalledOnce();
+    expect(batchFn).toHaveBeenCalledWith(["1", "2"]);
+  });
+
+  it("batches interleaved load() and loadMany() calls in the same tick", async () => {
+    const batchFn = vi.fn(async (keys: string[]) => keys.map((k) => `value-${k}`));
+    const loader = new BatchLoader(batchFn);
+
+    const first = loader.load("1");
+    const many = loader.loadMany(["2", "3"]);
+    const last = loader.load("4");
+    const results = await Promise.all([first, many, last]);
+
+    expect(results).toEqual(["value-1", ["value-2", "value-3"], "value-4"]);
+    expect(batchFn).toHaveBeenCalledOnce();
+    expect(batchFn).toHaveBeenCalledWith(["1", "2", "3", "4"]);
+  });
+
+  it("preserves each result's position when only one key returns an Error", async () => {
+    const failure = new Error("missing key");
+    const batchFn = vi.fn(async () => [failure, "value-2", "value-3"]);
+    const loader = new BatchLoader(batchFn);
+
+    const results = await Promise.allSettled([loader.load("1"), loader.load("2"), loader.load("3")]);
+
+    expect(results[0]).toEqual({ status: "rejected", reason: failure });
+    expect(results[1]).toEqual({ status: "fulfilled", value: "value-2" });
+    expect(results[2]).toEqual({ status: "fulfilled", value: "value-3" });
+  });
+
+  it("normalizes a non-Error rejection from the batch function", async () => {
+    const batchFn = vi.fn(async () => {
+      throw "upstream unavailable";
+    });
+    const loader = new BatchLoader(batchFn);
+
+    const results = await Promise.allSettled([loader.load("1"), loader.load("2")]);
+
+    expect(results[0]).toEqual({ status: "rejected", reason: new Error("upstream unavailable") });
+    expect(results[1]).toEqual({ status: "rejected", reason: new Error("upstream unavailable") });
+  });
+
+  it("rejects with a clear error when the batch function returns too many results", async () => {
+    const batchFn = vi.fn(async () => ["one", "two", "three"]);
+    const loader = new BatchLoader(batchFn);
+
+    const results = await Promise.allSettled([loader.load("1"), loader.load("2")]);
+
+    expect(results[0]).toEqual({
+      status: "rejected",
+      reason: new Error("BatchLoader batch function must return exactly one result per key: expected 2, got 3"),
+    });
+    expect(results[1]).toEqual(results[0]);
+  });
+
+  it("caches a rejected promise until the key is cleared", async () => {
+    const failure = new Error("missing key");
+    const batchFn = vi.fn(async () => [failure]);
+    const loader = new BatchLoader(batchFn);
+
+    await expect(loader.load("1")).rejects.toBe(failure);
+    await expect(loader.load("1")).rejects.toBe(failure);
+    expect(batchFn).toHaveBeenCalledOnce();
+
+    loader.clear("1");
+    await expect(loader.load("1")).rejects.toBe(failure);
+    expect(batchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-batches a key cleared before its pending batch dispatches", async () => {
+    const batchFn = vi.fn(async (keys: string[]) => keys.map((k) => `value-${k}`));
+    const loader = new BatchLoader(batchFn);
+
+    const first = loader.load("1");
+    loader.clear("1");
+    const second = loader.load("1");
+
+    await expect(first).resolves.toBe("value-1");
+    await expect(second).resolves.toBe("value-1");
+    expect(batchFn).toHaveBeenCalledOnce();
+    expect(batchFn).toHaveBeenCalledWith(["1", "1"]);
+  });
 });

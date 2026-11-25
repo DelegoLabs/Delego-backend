@@ -43,12 +43,48 @@ describe("formatLogEntry", () => {
     const entry = formatLogEntry({ level: "info", service: "gateway", message: "x", fields: { userId: "u1" } });
     expect(entry.fields).toEqual({ userId: "u1" });
   });
+
+  it("uses the current time when no clock is injected", () => {
+    const before = Date.now();
+    const entry = formatLogEntry({ level: "info", service: "gateway", message: "x" });
+    const after = Date.now();
+
+    expect(new Date(entry.timestamp).getTime()).toBeGreaterThanOrEqual(before);
+    expect(new Date(entry.timestamp).getTime()).toBeLessThanOrEqual(after);
+  });
+
+  it("omits empty traceId and spanId values", () => {
+    const entry = formatLogEntry({ level: "info", service: "gateway", message: "x", traceId: "", spanId: "" });
+    expect(entry.traceId).toBeUndefined();
+    expect(entry.spanId).toBeUndefined();
+  });
+
+  it("uses an empty string when an Error has no stack", () => {
+    const err = new Error("no stack");
+    err.stack = undefined;
+    const entry = formatLogEntry({ level: "error", service: "gateway", message: "failed", error: err });
+    expect(entry.error).toEqual({ name: "Error", message: "no stack", stack: "" });
+  });
+
+  it("preserves a custom error name", () => {
+    const err = new TypeError("bad input");
+    const entry = formatLogEntry({ level: "error", service: "gateway", message: "failed", error: err });
+    expect(entry.error?.name).toBe("TypeError");
+  });
 });
 
 describe("serializeLogEntry", () => {
   it("serializes to valid JSON matching the entry's shape", () => {
     const entry = formatLogEntry({ level: "info", service: "gateway", message: "hi" });
     const line = serializeLogEntry(entry);
+    expect(JSON.parse(line)).toEqual(entry);
+  });
+
+  it("escapes newlines and quotes into a single log line", () => {
+    const entry = buildEntry({ message: 'say "hello"\nnext line' });
+    const line = serializeLogEntry(entry);
+
+    expect(line).not.toContain("\n");
     expect(JSON.parse(line)).toEqual(entry);
   });
 });
@@ -100,6 +136,56 @@ describe("matchesLogQuery", () => {
     expect(matchesLogQuery(entry, { ...baseQuery, filter: "refused" })).toBe(true);
     expect(matchesLogQuery(entry, { ...baseQuery, filter: "timeout" })).toBe(false);
   });
+
+  it("includes entries exactly on the start and end boundaries", () => {
+    const timestamp = "2026-01-15T12:00:00.000Z";
+    const boundaryQuery = { ...baseQuery, startTime: timestamp, endTime: timestamp };
+    expect(matchesLogQuery(buildEntry({ timestamp }), boundaryQuery)).toBe(true);
+  });
+
+  it("excludes an entry after the end boundary", () => {
+    const entry = buildEntry({ timestamp: "2026-03-01T00:00:00.000Z" });
+    expect(matchesLogQuery(entry, baseQuery)).toBe(false);
+  });
+
+  it("matches nothing when the time range is inverted", () => {
+    const entry = buildEntry();
+    expect(
+      matchesLogQuery(entry, { ...baseQuery, startTime: "2026-02-01T00:00:00.000Z", endTime: "2026-01-01T00:00:00.000Z" }),
+    ).toBe(false);
+  });
+
+  it("treats empty optional filters as absent", () => {
+    const entry = buildEntry();
+    expect(
+      matchesLogQuery(entry, { ...baseQuery, service: "", traceId: "", level: "", filter: "" }),
+    ).toBe(true);
+  });
+
+  it("does not match an entry without a traceId when one is requested", () => {
+    expect(matchesLogQuery(buildEntry(), { ...baseQuery, traceId: "abc" })).toBe(false);
+  });
+
+  it("compares service and filter values case-sensitively", () => {
+    const entry = buildEntry({ service: "Gateway", message: "Request handled" });
+    expect(matchesLogQuery(entry, { ...baseQuery, service: "gateway" })).toBe(false);
+    expect(matchesLogQuery(entry, { ...baseQuery, filter: "request" })).toBe(false);
+  });
+
+  it("applies the level floor across the full severity ladder", () => {
+    const expectations: Record<string, boolean> = {
+      debug: false,
+      info: false,
+      warn: false,
+      error: true,
+      fatal: true,
+    };
+    for (const [level, expected] of Object.entries(expectations)) {
+      expect(matchesLogQuery(buildEntry({ level: level as LogEntry["level"] }), { ...baseQuery, level: "error" })).toBe(
+        expected,
+      );
+    }
+  });
 });
 
 describe("validateRetentionPolicies", () => {
@@ -140,6 +226,76 @@ describe("validateRetentionPolicies", () => {
     expect(result.valid).toBe(false);
     expect(result.errors[0]).toMatch(/hotter/);
   });
+
+  it("warns for every level when no policies are configured", () => {
+    const result = validateRetentionPolicies([]);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([
+      "No retention policy defined for level 'debug'",
+      "No retention policy defined for level 'info'",
+      "No retention policy defined for level 'warn'",
+      "No retention policy defined for level 'error'",
+      "No retention policy defined for level 'fatal'",
+    ]);
+  });
+
+  it("fails a policy with negative retentionDays", () => {
+    const result = validateRetentionPolicies([buildPolicy({ retentionDays: -1 })]);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("Retention policy for 'info' has non-positive retentionDays");
+  });
+
+  it("validates the last policy when a level is defined more than once", () => {
+    const policies = [
+      buildPolicy({ level: "info", storageClass: "hot", retentionDays: 30 }),
+      buildPolicy({ level: "info", storageClass: "hot", retentionDays: -1 }),
+    ];
+    const result = validateRetentionPolicies(policies);
+    expect(result.errors).toEqual(["Retention policy for 'info' has non-positive retentionDays"]);
+  });
+
+  it("allows different retention periods within the same storage tier", () => {
+    const policies = [
+      buildPolicy({ level: "info", storageClass: "hot", retentionDays: 30 }),
+      buildPolicy({ level: "warn", storageClass: "hot", retentionDays: 7 }),
+    ];
+    const result = validateRetentionPolicies(policies);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("fails when a warm-tier policy retains longer than a cold-tier policy", () => {
+    const policies = [
+      buildPolicy({ level: "warn", storageClass: "warm", retentionDays: 400 }),
+      buildPolicy({ level: "fatal", storageClass: "cold", retentionDays: 30 }),
+    ];
+    const result = validateRetentionPolicies(policies);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/warm.*cold.*hotter/);
+  });
+
+  it("allows a cold-tier policy to retain longer than a hot-tier policy", () => {
+    const policies = [
+      buildPolicy({ level: "info", storageClass: "hot", retentionDays: 30 }),
+      buildPolicy({ level: "error", storageClass: "cold", retentionDays: 365 }),
+    ];
+    expect(validateRetentionPolicies(policies).valid).toBe(true);
+  });
+
+  it("aggregates missing-level warnings and tier-ordering errors", () => {
+    const policies = [
+      buildPolicy({ level: "debug", storageClass: "hot", retentionDays: 400 }),
+      buildPolicy({ level: "error", storageClass: "cold", retentionDays: 30 }),
+    ];
+    const result = validateRetentionPolicies(policies);
+    expect(result.valid).toBe(false);
+    expect(result.warnings).toContain("No retention policy defined for level 'info'");
+    expect(result.warnings).toContain("No retention policy defined for level 'warn'");
+    expect(result.warnings).toContain("No retention policy defined for level 'fatal'");
+    expect(result.errors).toHaveLength(1);
+  });
 });
 
 describe("isLogPipelineHealthy", () => {
@@ -174,5 +330,41 @@ describe("isLogPipelineHealthy", () => {
       retentionCompliance: true,
     });
     expect(healthy).toBe(false);
+  });
+
+  it("treats an error rate of exactly 1% as unhealthy", () => {
+    expect(
+      isLogPipelineHealthy({
+        ingestionRate: 1000,
+        errorRate: 0.01,
+        avgLatencyMs: 50,
+        storageUsed: 1000,
+        retentionCompliance: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts a zero error rate with no ingestion or latency constraints", () => {
+    expect(
+      isLogPipelineHealthy({
+        ingestionRate: 0,
+        errorRate: 0,
+        avgLatencyMs: Number.MAX_SAFE_INTEGER,
+        storageUsed: 0,
+        retentionCompliance: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("is unhealthy when both retention compliance and error rate fail", () => {
+    expect(
+      isLogPipelineHealthy({
+        ingestionRate: 1000,
+        errorRate: 0.5,
+        avgLatencyMs: 50,
+        storageUsed: 1000,
+        retentionCompliance: false,
+      }),
+    ).toBe(false);
   });
 });

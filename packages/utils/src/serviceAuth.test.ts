@@ -13,7 +13,7 @@ vi.mock("node:crypto", async (importOriginal) => {
 import { timingSafeEqual } from "node:crypto";
 import { requireServiceAuth, SERVICE_AUTH_HEADER } from "./serviceAuth.js";
 
-function makeReq(token?: string): IncomingMessage & EventEmitter {
+function makeReq(token?: string | string[]): IncomingMessage & EventEmitter {
   const req = new EventEmitter() as IncomingMessage & EventEmitter;
   req.headers = token === undefined ? {} : { [SERVICE_AUTH_HEADER]: token };
   return req;
@@ -162,5 +162,111 @@ describe("requireServiceAuth", () => {
 
     expect(next).toHaveBeenCalledOnce();
     delete process.env.ORCHESTRATOR_PAYMENTS_SERVICE_TOKEN;
+  });
+
+  it("exposes the lowercase service token header name", () => {
+    expect(SERVICE_AUTH_HEADER).toBe("x-delego-service-token");
+  });
+
+  it("fails closed with 503 when no configuration is provided", () => {
+    const req = makeReq("payments-wallet-secret");
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth()(req, res, next);
+
+    expect(res.statusCode).toBe(503);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 503 when the explicit expected token is an empty string", () => {
+    const req = makeReq("");
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth({ expectedToken: "" })(req, res, next);
+
+    expect(res.statusCode).toBe(503);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 503 when the environment value is whitespace-only", () => {
+    process.env.MISSING_SERVICE_AUTH_TEST_TOKEN = "   ";
+    const req = makeReq("   ");
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth({ envVar: "MISSING_SERVICE_AUTH_TEST_TOKEN" })(req, res, next);
+
+    expect(res.statusCode).toBe(503);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("prefers an explicit expected token over the configured environment variable", () => {
+    process.env.MISSING_SERVICE_AUTH_TEST_TOKEN = "env-secret";
+    const req = makeReq("explicit-secret");
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth({ expectedToken: "explicit-secret", envVar: "MISSING_SERVICE_AUTH_TEST_TOKEN" })(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.statusCode).toBe(0);
+  });
+
+  it("rejects an empty request header with 401 and an authentication challenge", () => {
+    const req = makeReq("");
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth({ expectedToken: "payments-wallet-secret" })(req, res, next);
+
+    expect(res.statusCode).toBe(401);
+    expect(res.headers["WWW-Authenticate"]).toBe("Delego-Service");
+    expect(JSON.parse(res.body)).toEqual({
+      data: null,
+      error: { code: "UNAUTHORIZED", message: "Valid service credentials required" },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects an array-valued request header with 401", () => {
+    const req = makeReq(["payments-wallet-secret"]);
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth({ expectedToken: "payments-wallet-secret" })(req, res, next);
+
+    expect(res.statusCode).toBe(401);
+    expect(timingSafeEqual).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token that differs only by case", () => {
+    const req = makeReq("Payments-Wallet-Secret");
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth({ expectedToken: "payments-wallet-secret" })(req, res, next);
+
+    expect(res.statusCode).toBe(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns a structured 503 body without an authentication challenge when configuration is missing", () => {
+    const req = makeReq("payments-wallet-secret");
+    const res = makeRes();
+    const next = vi.fn();
+
+    requireServiceAuth({ envVar: "MISSING_SERVICE_AUTH_TEST_TOKEN" })(req, res, next);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.headers["Content-Type"]).toBe("application/json");
+    expect(res.headers["WWW-Authenticate"]).toBeUndefined();
+    expect(JSON.parse(res.body)).toEqual({
+      data: null,
+      error: { code: "SERVICE_AUTH_UNAVAILABLE", message: "Service authentication is not configured" },
+    });
+    expect(next).not.toHaveBeenCalled();
   });
 });
