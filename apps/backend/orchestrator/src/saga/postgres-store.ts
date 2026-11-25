@@ -5,10 +5,10 @@ import {
   type SagaEvent,
   type SagaRecord,
   type SagaStatus,
-  type SagaStore,
   type SagaWorkflowType,
 } from "./types.js";
 import { validateSagaContext } from "./validation.js";
+import type { WorkflowStateStore } from "../../state/types.js";
 
 const log = createLogger("orchestrator:saga:store", process.env.LOG_LEVEL ?? "info");
 
@@ -201,8 +201,8 @@ export async function connectSagaDb(): Promise<void> {
   }
 }
 
-/** Durable SagaStore backed by PostgreSQL — required so compensation can resume after a crash. */
-export class PostgresSagaStore implements SagaStore {
+/** Durable WorkflowStateStore backed by PostgreSQL. */
+export class PostgresWorkflowStateStore implements WorkflowStateStore {
   async create(record: SagaRecord): Promise<SagaRecord> {
     validateSagaContext(record.context);
     const [row] = await SagaExecutionModel.findOrCreate({
@@ -306,3 +306,5 @@ export class PostgresSagaStore implements SagaStore {
     return row ? toRecord(row) : null;
   }
 }
+
+export { PostgresWorkflowStateStore as PostgresSagaStore };

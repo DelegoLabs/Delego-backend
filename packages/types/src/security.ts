@@ -24,7 +24,7 @@ export interface PenTestFinding {
   id: string;
   title: string;
   severity: PenTestSeverity;
-  cvssScore: number;
+  cvwsScore: number;
   cwe: string;
   description: string;
   impact: string;
@@ -64,4 +64,20 @@ export interface BugBountyProgram {
   policyUrl: string;
   inScopeTargets: string[];
   outOfScopeTargets: string[];
+}
+
+/** Emergency Kill-Switch Broadcast Signal (Issue #375) */
+export interface EmergencyBroadcastSignal {
+  action: "kill_session" | "pause_all_traffic" | "resume";
+  targetId?: string;
+  signedByAdmin: string;
+  timestamp: number;
+}
+
+/** Container Digest Verification */
+export interface ContainerDigestVerification {
+  imageUri: string;
+  digest: string;
+  signedBy: string;
+  verified: boolean;
 }

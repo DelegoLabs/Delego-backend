@@ -1,4 +1,6 @@
-/** Core state types for the purchase workflow machine (issue #7). */
+/** Core orchestrator workflow and saga checkpoint types. */
+
+import type { SagaEvent, SagaRecord } from "../src/saga/types.js";
 
 export type PurchaseState =
   | "Discovery"
@@ -62,6 +64,30 @@ export interface WorkflowSnapshot {
    * already implemented in `findStuckWorkflows`.
    */
   timeoutAt?: Date;
+}
+
+/**
+ * Persistence boundary for durable workflow checkpoints and their audit events.
+ * Implementations must preserve optimistic version checks when saving a record.
+ */
+export interface WorkflowStateStore {
+  /** Inserts a checkpoint, returning the existing record for an idempotent retry. */
+  create(record: SagaRecord): Promise<SagaRecord>;
+  /** @deprecated use create; retained for existing timeout-recovery callers. */
+  createIfNotExists(record: SagaRecord): Promise<SagaRecord>;
+  get(workflowId: string): Promise<SagaRecord | null>;
+  /** Persists a checkpoint and increments its version, rejecting stale writes. */
+  save(record: SagaRecord): Promise<SagaRecord>;
+  /** Returns workflows that can be resumed after a process restart. */
+  listIncomplete(): Promise<SagaRecord[]>;
+  /** Returns workflows whose deadline has passed. */
+  listTimedOut(): Promise<SagaRecord[]>;
+  /** Appends an immutable audit event. */
+  appendEvent(event: SagaEvent): Promise<void>;
+  /** Returns a workflow's audit events in append order. */
+  getEvents(workflowId: string): Promise<SagaEvent[]>;
+  /** Looks up a workflow by its distributed tracing correlation id. */
+  findByCorrelationId(correlationId: string): Promise<SagaRecord | null>;
 }
 
 export interface SnapshotValidationResult {

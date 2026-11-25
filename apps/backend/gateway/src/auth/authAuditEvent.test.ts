@@ -1,20 +1,23 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   publishAuthAuditEvent,
-  clearPublishedAuthAuditEvents,
+  resetAuthAuditStateForTests,
+  configureAuthAuditRedisPublisher,
+  clearAuthAuditRedisPublisher,
   publishedAuthAuditEvents,
   AUTH_AUDIT_ACTIONS,
+  AUTH_AUDIT_CHANNEL,
   AUTH_AUDIT_STREAM_KEY,
   type AuthAuditEvent,
 } from "./authAuditEvent.js";
 
 describe("publishAuthAuditEvent", () => {
   beforeEach(() => {
-    clearPublishedAuthAuditEvents();
+    resetAuthAuditStateForTests();
   });
 
-  it("records a successful login audit payload", () => {
-    publishAuthAuditEvent({
+  it("records a successful login audit payload", async () => {
+    await publishAuthAuditEvent({
       action: AUTH_AUDIT_ACTIONS.LOGIN,
       success: true,
       requestId: "req-login-success",
@@ -33,8 +36,8 @@ describe("publishAuthAuditEvent", () => {
     } satisfies AuthAuditEvent);
   });
 
-  it("records a failed login audit payload without userId", () => {
-    publishAuthAuditEvent({
+  it("records a failed login audit payload without userId", async () => {
+    await publishAuthAuditEvent({
       action: AUTH_AUDIT_ACTIONS.LOGIN,
       success: false,
       requestId: "req-login-failure",
@@ -51,8 +54,8 @@ describe("publishAuthAuditEvent", () => {
     expect(publishedAuthAuditEvents[0]?.userId).toBeUndefined();
   });
 
-  it("does not include password or token fields in published events", () => {
-    publishAuthAuditEvent({
+  it("does not include password or token fields in published events", async () => {
+    await publishAuthAuditEvent({
       action: AUTH_AUDIT_ACTIONS.REGISTER,
       success: true,
       requestId: "req-register-success",
@@ -75,7 +78,86 @@ describe("publishAuthAuditEvent", () => {
     expect(event).not.toHaveProperty("token");
   });
 
-  it("exports the auth audit stream key", () => {
-    expect(AUTH_AUDIT_STREAM_KEY).toBe("gateway:auth:audit");
+  it("uses the Redis channel as the audit stream key", () => {
+    expect(AUTH_AUDIT_CHANNEL).toBe("gateway:auth:audit");
+    expect(AUTH_AUDIT_STREAM_KEY).toBe(AUTH_AUDIT_CHANNEL);
+  });
+
+  it("publishes the serialized event to Redis and skips the in-memory sink", async () => {
+    const publish = vi.fn().mockResolvedValue(1);
+    configureAuthAuditRedisPublisher({ publish });
+
+    await publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.LOGIN,
+      success: true,
+      requestId: "req-redis-login",
+      userId: "user-789",
+      occurredAt: "2026-11-24T10:20:30.000Z",
+    });
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    const [channel, message] = publish.mock.calls[0] as [string, string];
+    expect(channel).toBe(AUTH_AUDIT_CHANNEL);
+    expect(JSON.parse(message)).toEqual({
+      action: "login",
+      success: true,
+      requestId: "req-redis-login",
+      userId: "user-789",
+      occurredAt: "2026-11-24T10:20:30.000Z",
+    } satisfies AuthAuditEvent);
+    expect(publishedAuthAuditEvents).toHaveLength(0);
+  });
+
+  it("falls back to the in-memory sink when no Redis publisher is configured", async () => {
+    clearAuthAuditRedisPublisher();
+
+    await publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.LOGOUT,
+      success: true,
+      requestId: "req-memory-logout",
+    });
+
+    expect(publishedAuthAuditEvents).toHaveLength(1);
+    expect(publishedAuthAuditEvents[0]).toMatchObject({
+      action: "logout",
+      success: true,
+      requestId: "req-memory-logout",
+    });
+  });
+
+  it("falls back to the in-memory sink when Redis publishing fails", async () => {
+    const publish = vi.fn().mockRejectedValue(new Error("redis unavailable"));
+    configureAuthAuditRedisPublisher({ publish });
+
+    await expect(
+      publishAuthAuditEvent({
+        action: AUTH_AUDIT_ACTIONS.REFRESH,
+        success: false,
+        requestId: "req-redis-failure",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publishedAuthAuditEvents).toHaveLength(1);
+    expect(publishedAuthAuditEvents[0]).toMatchObject({
+      action: "refresh",
+      success: false,
+      requestId: "req-redis-failure",
+    });
+  });
+
+  it("forces the in-memory sink when a null publisher is configured", async () => {
+    const publish = vi.fn();
+    configureAuthAuditRedisPublisher({ publish });
+    configureAuthAuditRedisPublisher(null);
+
+    await publishAuthAuditEvent({
+      action: AUTH_AUDIT_ACTIONS.OAUTH_LOGIN,
+      success: true,
+      requestId: "req-null-publisher",
+    });
+
+    expect(publish).not.toHaveBeenCalled();
+    expect(publishedAuthAuditEvents).toHaveLength(1);
   });
 });

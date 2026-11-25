@@ -1,34 +1,72 @@
 /**
- * In-memory log store with search and retention
- * Issue #151
+ * In-memory log store with search, bounded capacity and retention pruning
+ * Issue #151, #814
  */
 
 import type { LogEntry, LogSearchQuery } from "@delegolabs/types";
 
-const MAX_LOG_ENTRIES = 10000;
-const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface LogStoreConfig {
+  maxEntries: number;
+  retentionMs: number;
+  pruneIntervalMs: number;
+}
+
+const DEFAULT_CONFIG: LogStoreConfig = {
+  maxEntries: 10000,
+  retentionMs: 30 * DAY_MS,
+  pruneIntervalMs: 60 * 60 * 1000,
+};
 
 const logStore: LogEntry[] = [];
-let retentionMs = DEFAULT_RETENTION_MS;
+let config: LogStoreConfig = { ...DEFAULT_CONFIG };
+let pruneTimer: ReturnType<typeof setInterval> | null = null;
+
+function positiveNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function pruneOldEntries(): void {
-  const cutoff = Date.now() - retentionMs;
-  while (logStore.length > 0) {
-    const entry = logStore[0];
-    if (Date.parse(entry.timestamp) < cutoff) {
-      logStore.shift();
-    } else {
-      break;
+  const cutoff = Date.now() - config.retentionMs;
+
+  // Full sweep rather than prefix shift: a backdated entry can be inserted
+  // after a fresh one and still needs to expire on time.
+  for (let i = logStore.length - 1; i >= 0; i--) {
+    if (Date.parse(logStore[i].timestamp) < cutoff) {
+      logStore.splice(i, 1);
     }
   }
-  if (logStore.length > MAX_LOG_ENTRIES) {
-    logStore.splice(0, logStore.length - MAX_LOG_ENTRIES);
+
+  // Keep the newest entries by insertion order (ring-buffer semantics).
+  if (logStore.length > config.maxEntries) {
+    logStore.splice(0, logStore.length - config.maxEntries);
   }
 }
 
-export function storeLogEntry(entry: LogEntry): void {
+export function configureLogStore(options: Partial<LogStoreConfig> = {}): void {
+  config = {
+    maxEntries: Math.floor(positiveNumber(options.maxEntries, config.maxEntries)),
+    retentionMs: positiveNumber(options.retentionMs, config.retentionMs),
+    pruneIntervalMs: positiveNumber(options.pruneIntervalMs, config.pruneIntervalMs),
+  };
   pruneOldEntries();
+
+  if (pruneTimer && options.pruneIntervalMs !== undefined) {
+    stopLogPruning();
+    startLogPruning(config.pruneIntervalMs);
+  }
+}
+
+export function getLogStoreConfig(): LogStoreConfig {
+  return { ...config };
+}
+
+export function storeLogEntry(entry: LogEntry): void {
   logStore.push(entry);
+  // Prune after insertion so the store is immediately bounded and an expired
+  // timestamp cannot linger until the next read.
+  pruneOldEntries();
 }
 
 export function searchLogs(query: LogSearchQuery): LogEntry[] {
@@ -66,11 +104,27 @@ export function searchLogs(query: LogSearchQuery): LogEntry[] {
 }
 
 export function getLogEntryCount(): number {
+  pruneOldEntries();
   return logStore.length;
 }
 
 export function setRetentionDays(days: number): void {
-  retentionMs = days * 24 * 60 * 60 * 1000;
+  configureLogStore({ retentionMs: positiveNumber(days, 30) * DAY_MS });
+}
+
+export function startLogPruning(intervalMs: number = config.pruneIntervalMs): void {
+  if (pruneTimer) return;
+  config.pruneIntervalMs = positiveNumber(intervalMs, DEFAULT_CONFIG.pruneIntervalMs);
+  pruneTimer = setInterval(pruneOldEntries, config.pruneIntervalMs);
+  // Do not keep a worker process alive solely for the cleanup timer.
+  pruneTimer.unref?.();
+}
+
+export function stopLogPruning(): void {
+  if (pruneTimer) {
+    clearInterval(pruneTimer);
+    pruneTimer = null;
+  }
 }
 
 export function clearLogStore(): void {

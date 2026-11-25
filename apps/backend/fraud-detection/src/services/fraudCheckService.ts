@@ -11,6 +11,11 @@ import { createLogger } from "@delegolabs/utils";
 const log = createLogger("fraud-detection:check", process.env.LOG_LEVEL ?? "info");
 
 /**
+ * Exposed for testability: constructs the FeatureStore instance.
+ * Tests may pass a mock featureStore via the constructor override.
+ */
+
+/**
  * Fraud Check Service - Main service for transaction fraud detection
  */
 export class FraudCheckService {

@@ -17,7 +17,7 @@ import { describe, it, expect } from "vitest";
 import { calculateTax, computeTaxAmount } from "./engine.js";
 import { isValidVatId } from "./vatId.js";
 import { validateTaxCalculationParams } from "./validation.js";
-import { usStateFromPostalCode, US_STATE_RATES, EU_VAT_RATES } from "./rates.js";
+import { usStateFromPostalCode, US_STATE_RATES, EU_VAT_RATES, caProvinceFromPostalCode, CA_PROVINCE_RATES } from "./rates.js";
 import type { TaxCalculationParams } from "@delegolabs/types";
 
 // ---------------------------------------------------------------------------
@@ -438,8 +438,260 @@ describe("usStateFromPostalCode", () => {
 });
 
 // ---------------------------------------------------------------------------
-// validateTaxCalculationParams
+// Canadian GST / HST / PST / QST
 // ---------------------------------------------------------------------------
+
+describe("caProvinceFromPostalCode", () => {
+  it("maps M5V 3A8 → ON (Toronto)", () => expect(caProvinceFromPostalCode("M5V 3A8")).toBe("ON"));
+  it("maps H3B 2Y3 → QC (Montréal)", () => expect(caProvinceFromPostalCode("H3B 2Y3")).toBe("QC"));
+  it("maps V6B 1A1 → BC (Vancouver)", () => expect(caProvinceFromPostalCode("V6B 1A1")).toBe("BC"));
+  it("maps T2P 1J9 → AB (Calgary)", () => expect(caProvinceFromPostalCode("T2P 1J9")).toBe("AB"));
+  it("maps R3C 4A5 → MB (Winnipeg)", () => expect(caProvinceFromPostalCode("R3C 4A5")).toBe("MB"));
+  it("maps S4P 3Y2 → SK (Regina)", () => expect(caProvinceFromPostalCode("S4P 3Y2")).toBe("SK"));
+  it("maps B3H 4R2 → NS (Halifax)", () => expect(caProvinceFromPostalCode("B3H 4R2")).toBe("NS"));
+  it("maps E1C 1B9 → NB (Moncton)", () => expect(caProvinceFromPostalCode("E1C 1B9")).toBe("NB"));
+  it("maps A1C 1A1 → NL (St. John's)", () => expect(caProvinceFromPostalCode("A1C 1A1")).toBe("NL"));
+  it("maps C1A 4P3 → PE (Charlottetown)", () => expect(caProvinceFromPostalCode("C1A 4P3")).toBe("PE"));
+  it("maps X1A 2N5 → NT (Yellowknife)", () => expect(caProvinceFromPostalCode("X1A 2N5")).toBe("NT"));
+  it("maps Y1A 1C2 → YT (Whitehorse)", () => expect(caProvinceFromPostalCode("Y1A 1C2")).toBe("YT"));
+  it("returns null for a US ZIP code", () => expect(caProvinceFromPostalCode("90210")).toBeNull());
+  it("returns null for empty string", () => expect(caProvinceFromPostalCode("")).toBeNull());
+  it("accepts postal code without space (M5V3A8)", () => expect(caProvinceFromPostalCode("M5V3A8")).toBe("ON"));
+});
+
+describe("calculateTax — Canada physical_goods", () => {
+  it("applies ON HST 13% for Ontario postal code M5V 3A8", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "M5V 3A8",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-ON");
+    expect(result.taxRateBasisPoints).toBe(1300);
+    // 1 000 000 * 1300 / 10 000 = 130 000
+    expect(result.taxAmountStroops).toBe("130000");
+    expect(result.isReverseCharge).toBe(false);
+  });
+
+  it("applies QC GST+QST (~14.975%) for Quebec postal code H3B 2Y3", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "H3B 2Y3",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-QC");
+    // 500 (GST) + 997 (QST floored) = 1497 bps
+    expect(result.taxRateBasisPoints).toBe(1497);
+    // 1 000 000 * 1497 / 10 000 = 149 700
+    expect(result.taxAmountStroops).toBe("149700");
+    expect(result.isReverseCharge).toBe(false);
+  });
+
+  it("applies BC GST+PST 12% for British Columbia postal code V6B 1A1", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "V6B 1A1",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-BC");
+    expect(result.taxRateBasisPoints).toBe(1200); // 500 + 700
+    // 1 000 000 * 1200 / 10 000 = 120 000
+    expect(result.taxAmountStroops).toBe("120000");
+  });
+
+  it("applies AB GST-only 5% for Alberta postal code T2P 1J9", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "T2P 1J9",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-AB");
+    expect(result.taxRateBasisPoints).toBe(500);
+    expect(result.taxAmountStroops).toBe("50000");
+  });
+
+  it("applies MB GST+PST 12% for Manitoba postal code R3C 4A5", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "R3C 4A5",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-MB");
+    expect(result.taxRateBasisPoints).toBe(1200); // 500 + 700
+  });
+
+  it("applies SK GST+PST 11% for Saskatchewan postal code S4P 3Y2", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "S4P 3Y2",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-SK");
+    expect(result.taxRateBasisPoints).toBe(1100); // 500 + 600
+  });
+
+  it("applies NS HST 15% for Nova Scotia postal code B3H 4R2", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "B3H 4R2",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-NS");
+    expect(result.taxRateBasisPoints).toBe(1500);
+    expect(result.taxAmountStroops).toBe("150000");
+  });
+
+  it("applies NB HST 15% for New Brunswick postal code E1C 1B9", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "E1C 1B9",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-NB");
+    expect(result.taxRateBasisPoints).toBe(1500);
+  });
+
+  it("applies NL HST 15% for Newfoundland postal code A1C 1A1", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "A1C 1A1",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-NL");
+    expect(result.taxRateBasisPoints).toBe(1500);
+  });
+
+  it("applies PE HST 15% for PEI postal code C1A 4P3", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "C1A 4P3",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-PE");
+    expect(result.taxRateBasisPoints).toBe(1500);
+  });
+
+  it("applies NT GST-only 5% for Northwest Territories postal code X1A 2N5", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "X1A 2N5",
+      itemCategory: "physical_goods",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-NT");
+    expect(result.taxRateBasisPoints).toBe(500);
+  });
+
+  it("tax amount is floor(amount * rate / 10000) for QC fractional rate", () => {
+    // 999 999 * 1497 / 10 000 = 149699.8503 → floor → 149699
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "H3B 2Y3",
+      itemCategory: "physical_goods",
+      amountStroops: "999999",
+    }));
+    expect(result.taxAmountStroops).toBe("149699");
+  });
+});
+
+describe("calculateTax — Canada digital services", () => {
+  it("applies ON HST 13% for digital goods in Ontario", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "M5V 3A8",
+      itemCategory: "digital",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-ON");
+    expect(result.taxRateBasisPoints).toBe(1300);
+    expect(result.taxAmountStroops).toBe("130000");
+  });
+
+  it("applies BC GST-only 5% for digital services (BC PST waived for digital)", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "V6B 1A1",
+      itemCategory: "digital",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-BC");
+    // BC PST exempt for digital → only federal GST 5%
+    expect(result.taxRateBasisPoints).toBe(500);
+    expect(result.taxAmountStroops).toBe("50000");
+  });
+
+  it("applies QC GST+QST for digital services in Quebec", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "H3B 2Y3",
+      itemCategory: "digital",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-QC");
+    // QST applies to digital services
+    expect(result.taxRateBasisPoints).toBe(1497);
+  });
+
+  it("applies AB GST-only 5% for digital services in Alberta", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "T2P 1J9",
+      itemCategory: "digital",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-AB");
+    expect(result.taxRateBasisPoints).toBe(500);
+  });
+
+  it("applies SK GST+PST 11% for digital services in Saskatchewan", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "S4P 3Y2",
+      itemCategory: "digital",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-SK");
+    expect(result.taxRateBasisPoints).toBe(1100);
+  });
+
+  it("applies MB GST+PST 12% for digital services in Manitoba", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "R3C 4A5",
+      itemCategory: "digital",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-MB");
+    expect(result.taxRateBasisPoints).toBe(1200);
+  });
+});
+
+describe("calculateTax — Canada services", () => {
+  it("applies ON HST 13% for services in Ontario", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "M5V 3A8",
+      itemCategory: "service",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-ON");
+    expect(result.taxRateBasisPoints).toBe(1300);
+  });
+
+  it("applies BC GST+PST 12% for services in British Columbia", () => {
+    // Services in BC: PST applies to services differently, but for simplicity
+    // BC service is treated same as physical_goods (non-digital)
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "V6B 1A1",
+      itemCategory: "service",
+    }));
+    expect(result.taxJurisdiction).toBe("CA-BC");
+    expect(result.taxRateBasisPoints).toBe(1200); // full 5+7 for non-digital
+  });
+
+  it("applies AB GST-only 5% for services in Alberta", () => {
+    const result = calculateTax(params({
+      buyerCountry: "CA",
+      buyerPostalCode: "T2P 1J9",
+      itemCategory: "service",
+    }));
+    expect(result.taxRateBasisPoints).toBe(500);
+  });
+});
+
 
 describe("validateTaxCalculationParams", () => {
   const validBody = {

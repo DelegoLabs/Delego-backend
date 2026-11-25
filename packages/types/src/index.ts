@@ -3,6 +3,8 @@
  * All services and apps should import from this package.
  */
 
+export * from "./audit.js";
+export * from "./audit-chain.js";
 export * from "./assets.js";
 export * from "./user.js";
 export * from "./delegation.js";
@@ -13,12 +15,25 @@ export * from "./payment.js";
 export * from "./recovery.js";
 export * from "./multi-currency.js";
 export * from "./agent.js";
+export * from "./agent-confirmation.js";
+export * from "./llm.js";
 export * from "./api.js";
 export * from "./pact-contract.js";
 export * from "./performance.js";
 export * from "./chaos.js";
 export * from "./cicd.js";
-export * from "./security.js";
+export {
+  type PenTestSeverity,
+  type PenTestStatus,
+  type PenTestScope,
+  type PenTestFinding,
+  type PenTestSummary,
+  type PenTestReport,
+  type BugBountyProgram,
+  type EmergencyBroadcastSignal,
+} from "./security.js";
+export { type ContainerDigestVerification, type ContainerDigestVerificationResult } from "./container-digest.js";
+export * from "./carrier.js";
 export * from "./coverage.js";
 export * from "./integration-testing.js";
 export * from "./e2e-testing.js";
@@ -43,8 +58,27 @@ export * from "./human-task.js";
 export * from "./workflow-template.js";
 export * from "./cdc.js";
 export * from "./certificate.js";
+export * from "./databaseVacuum.js";
+export {
+  CERT_EXPIRY_WARNING_DAYS,
+  type CertExpiryStatus,
+  type CertStatus,
+  type MerchantDomainCertCheck,
+  type CertExpiryAlert,
+  type CertExpiryAlerter,
+} from "./certExpiry.js";
 export * from "./encryption.js";
 export * from "./pii-registry.js";
 export * from "./schemas.js";
+export * from "./merchant-profile.js";
 export * from "./storefront.js";
-export * from "./tax.js";
+export * from "./shipping.js";
+export * from "./merchantAnalytics.js";
+export * from "./storageRotation.js";
+export * from "./dlq.js";
+export * from "./storage.js";
+export * from "./feeEstimator.js";
+export * from "./inventory-alerts.js";
+export * from "./inventory.js";
+export * from "./discount.js";
+export * from "./cart.js";

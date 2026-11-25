@@ -7,15 +7,16 @@ import {
   json,
   route,
   startHttpServer,
-  createHealthRoutes,
+  tracedFetch,
+  initTelemetry,
   corsMiddleware,
   securityHeadersMiddleware,
   requireAuth,
 } from "@delegolabs/utils";
 import { Pool } from "pg";
 import { Redis } from "ioredis";
-import { getCacheClient } from "@delegolabs/cache";
-import { createOrchestratorHealthRegistry } from "./health.js";
+import { getCacheClient, acquireRedlock } from "@delegolabs/cache";
+import { createOrchestratorHealthRoutes } from "./health.js";
 import {
   createWorkflow,
   transitionWorkflow,
@@ -24,13 +25,19 @@ import {
 } from "../workflows/purchase/index.js";
 import {
   checkoutWorkflow,
+  createCheckoutWorkflowInput,
   createCheckoutSagaCoordinator,
   type CheckoutWorkflowInput,
 } from "../workflows/checkout/index.js";
+import { InsufficientStockError } from "./inventory/reservation.js";
 import { connectSagaDb, PostgresSagaStore, serializeSagaExecution } from "./saga/index.js";
 import { startOutboxRelay, type OutboxRelayHandle } from "./events/outboxRelay.js";
 import { PostgresServiceEventOutboxStore } from "./events/postgres-service-event-outbox.js";
 import { setServiceEventOutboxStore } from "./events/service-event-outbox.js";
+import {
+  createDisputeRaisedHandler,
+  DisputeRaisedStreamListener,
+} from "./eventHandlers/disputeRaised.js";
 import {
   DistributedLockManager,
   createLockRoutes,
@@ -41,6 +48,14 @@ import type { SagaCoordinator } from "./saga/index.js";
 import type { CheckoutContext } from "../workflows/checkout/index.js";
 import { PostgresTaskStore, tasksSequelize, TaskService, TaskEventBroker } from "./tasks/index.js";
 import { createTaskRoutes } from "./tasks/routes.js";
+import { DLQStore, DLQService, createDLQRoutes } from "./dlq/index.js";
+import { createMultiMerchantCheckoutRoutes } from "./routes/checkout.js";
+import type { ConnectionOptions } from "bullmq";
+import {
+  IdempotencyStore,
+  createCheckoutIdempotencyPreHandler,
+  type IdempotencyRedis,
+} from "./idempotency/index.js";
 
 const SERVICE_NAME = "orchestrator";
 const DEFAULT_PORT = 3010;
@@ -48,12 +63,16 @@ const MAX_REQUEST_BODY_BYTES = Number(process.env.MAX_REQUEST_BODY_BYTES ?? 1_04
 
 const logLevel = process.env.LOG_LEVEL ?? "info";
 const log = createLogger(SERVICE_NAME, logLevel);
+
+// Distributed tracing (Issue #307): enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+void initTelemetry(SERVICE_NAME).catch((err: unknown) =>
+  log.warn("Telemetry init failed", { error: err instanceof Error ? err.message : String(err) })
+);
 const port = Number(process.env.ORCHESTRATOR_PORT ?? DEFAULT_PORT);
 
 const sagaStore = new PostgresSagaStore();
 let lockManager: DistributedLockManager | null = null;
 let checkoutSagaCoordinator: SagaCoordinator<CheckoutContext> = createCheckoutSagaCoordinator(sagaStore);
-const orchestratorHealthRegistry = createOrchestratorHealthRegistry();
 
 // ─── #33 Transactional Outbox Relay ──────────────────────────────────────────
 // Backs service_event_outbox writes (see workflows/purchase/index.ts transitionWorkflow)
@@ -63,6 +82,22 @@ const orchestratorHealthRegistry = createOrchestratorHealthRegistry();
 const outboxPool = new Pool({ connectionString: process.env.DATABASE_URL });
 setServiceEventOutboxStore(new PostgresServiceEventOutboxStore(outboxPool));
 let outboxRelay: OutboxRelayHandle | null = null;
+let disputeRaisedListener: DisputeRaisedStreamListener | null = null;
+let disputeRaisedRedis: Redis | null = null;
+let closeDisputeRaisedHandler: (() => Promise<void>) | null = null;
+
+// ─── Checkout Idempotency ────────────────────────────────────────────────────
+// Collapses retried / double-submitted checkouts onto a single execution using
+// a Redis SET NX EX lease per request fingerprint; duplicates replay the
+// original response verbatim.
+const checkoutIdempotency = createCheckoutIdempotencyPreHandler({
+  store: new IdempotencyStore(
+    new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+    }) as unknown as IdempotencyRedis,
+  ),
+});
 
 // ─── Human Task Management ─────────────────────────────────────────────────
 // Durable store backed by human_tasks (database/migrations/027_human_tasks.sql),
@@ -71,6 +106,14 @@ let outboxRelay: OutboxRelayHandle | null = null;
 const taskStore = new PostgresTaskStore();
 let taskBroker: TaskEventBroker | null = null;
 const taskService = new TaskService({ store: taskStore });
+
+// ─── Dead Letter Queue (DLQ) Management ────────────────────────────────────
+// #310 Auto-replay & remediation worker for failed BullMQ jobs
+// Monitors failed jobs (e.g. temporary network partitions) and safely replays them
+// after circuit breaker resets to prevent retry storms.
+const dlqPool = new Pool({ connectionString: process.env.DATABASE_URL });
+const dlqStore = new DLQStore(dlqPool);
+let dlqService: DLQService | null = null;
 
 // ─── #64 Reconciliation Engine ───────────────────────────────────────────────
 
@@ -262,7 +305,7 @@ export async function recoverUnfinishedWorkflows(): Promise<WorkflowSnapshot[]> 
 async function fetchOnChainEscrowStatus(escrowId: string): Promise<"funded" | "released" | "refunded" | "not_found"> {
   const walletUrl = process.env.WALLET_SERVICE_URL ?? "http://localhost:3012";
   try {
-    const res = await fetch(`${walletUrl}/escrow/${encodeURIComponent(escrowId)}/status`);
+    const res = await tracedFetch(`${walletUrl}/escrow/${encodeURIComponent(escrowId)}/status`);
     if (!res.ok) return "not_found";
     const body = await res.json() as { data?: { status?: string } };
     const status = body.data?.status;
@@ -435,6 +478,40 @@ async function main(): Promise<void> {
     outboxRelay = startOutboxRelay({ redisClient, log });
   }
 
+  // Consume normalized Soroban dispute events and freeze settlement state.
+  if (process.env.ENABLE_DISPUTE_RAISED_LISTENER !== "false") {
+    let closeHandler: (() => Promise<void>) | undefined;
+    try {
+      const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+      const created = createDisputeRaisedHandler({ redisUrl, logger: log });
+      closeHandler = created.close;
+      const redisClient = new Redis(redisUrl, {
+        lazyConnect: true,
+        maxRetriesPerRequest: 3,
+      });
+      disputeRaisedRedis = redisClient;
+      const listener = new DisputeRaisedStreamListener({
+        redis: redisClient as never,
+        handler: created.handler,
+        logger: log,
+      });
+      await listener.start();
+      disputeRaisedListener = listener;
+      closeDisputeRaisedHandler = created.close;
+    } catch (err) {
+      if (closeHandler) {
+        await closeHandler().catch((closeErr) =>
+          log.warn("Failed to close dispute raised handler after startup error", {
+            error: closeErr instanceof Error ? closeErr.message : String(closeErr),
+          })
+        );
+      }
+      log.warn("Dispute raised listener unavailable", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // Real-time task inbox broker: publishes lifecycle events to Redis channels
   // (`human-task:*`) for live UI updates. Disabled when ENABLE_TASK_EVENTS=false or
   // when Redis is unavailable — the service still works, just without live events.
@@ -453,23 +530,43 @@ async function main(): Promise<void> {
     }
   }
 
+  // Initialize DLQ service with Redis connection for BullMQ
+  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+  const redisConnection: ConnectionOptions = {
+    host: new URL(redisUrl).hostname,
+    port: Number(new URL(redisUrl).port) || 6379,
+  };
+  dlqService = new DLQService(dlqStore, redisConnection, log);
+  log.info("DLQ service initialized");
+
   log.info("Starting orchestrator", { port });
   startHttpServer({
     port,
     serviceName: SERVICE_NAME,
     middleware: [corsMiddleware(), securityHeadersMiddleware(), requireAuth()],
     routes: [
-      ...createHealthRoutes({
-        registry: orchestratorHealthRegistry,
-        serviceName: SERVICE_NAME,
-        version: "0.0.1",
-        extraMetrics: () => lockManager?.metrics.toPrometheusText() ?? "",
-      }),
+      ...createOrchestratorHealthRoutes(
+        undefined,
+        () => lockManager?.metrics.toPrometheusText() ?? "",
+      ),
       ...(lockManager ? createLockRoutes(lockManager) : []),
 
       ...createTaskRoutes(taskService, taskStore),
 
+      ...(dlqService ? createDLQRoutes(dlqService) : []),
+
+      ...createMultiMerchantCheckoutRoutes(),
+
       route("POST", "/checkout", async (req, res) => {
+        const authenticatedUserId = (req as typeof req & { userId?: string }).userId;
+        if (!authenticatedUserId) {
+          json(res, 401, {
+            data: null,
+            error: { code: "UNAUTHORIZED", message: "Authentication required" },
+          });
+          return;
+        }
+
         let body: Record<string, unknown>;
         try {
           body = await readJsonBody(req);
@@ -484,7 +581,10 @@ async function main(): Promise<void> {
           return;
         }
 
-        const input = body as Partial<CheckoutWorkflowInput>;
+        const input = body as Partial<Pick<
+          CheckoutWorkflowInput,
+          "orderId" | "sourceAddress" | "buyerAddress" | "sellerAddress"
+        >>;
         if (
           typeof input.orderId !== "string" ||
           typeof input.sourceAddress !== "string" ||
@@ -501,17 +601,60 @@ async function main(): Promise<void> {
           return;
         }
 
+        const idempotency = await checkoutIdempotency(req, res, {
+          userId: authenticatedUserId,
+          walletAddress: input.buyerAddress,
+          items: body.items ?? body.inventoryItems ?? [],
+          nonce: typeof body.nonce === "string" ? body.nonce : input.orderId,
+        });
+        if (idempotency === "replied") return;
+
         try {
           const sagaId = `checkout:${input.orderId}`;
-          const result = await checkoutWorkflow(input as CheckoutWorkflowInput, checkoutSagaCoordinator, sagaId);
-          json(res, result.status === "completed" || result.status === "compensated" ? 200 : 502, {
-            data: serializeSagaExecution(result),
-            error:
-              result.status === "completed" || result.status === "compensated"
-                ? null
-                : { code: "CHECKOUT_SAGA_FAILED", message: result.error ?? "Checkout saga failed" },
+          const workflowInput = createCheckoutWorkflowInput(
+            {
+              orderId: input.orderId,
+              sourceAddress: input.sourceAddress,
+              buyerAddress: input.buyerAddress,
+              sellerAddress: input.sellerAddress,
+            },
+            authenticatedUserId,
+          );
+          const lock = await acquireRedlock(getCacheClient(), {
+            resource: `cart:${workflowInput.orderId}`,
+            ttlMs: 15_000,
+            retryCount: 0,
+            retryDelayMs: 50,
           });
+
+          if (!lock) {
+            json(res, 409, {
+              data: null,
+              error: { code: "CART_ALREADY_LOCKED", message: `Checkout already in progress for cart:${workflowInput.orderId}` },
+            });
+            return;
+          }
+
+          try {
+            const result = await checkoutWorkflow(workflowInput, checkoutSagaCoordinator, sagaId);
+            json(res, result.status === "completed" || result.status === "compensated" ? 200 : 502, {
+              data: serializeSagaExecution(result),
+              error:
+                result.status === "completed" || result.status === "compensated"
+                  ? null
+                  : { code: "CHECKOUT_SAGA_FAILED", message: result.error ?? "Checkout saga failed" },
+            });
+          } finally {
+            await lock.release();
+          }
         } catch (err) {
+          if (err instanceof InsufficientStockError) {
+            json(res, 409, {
+              data: null,
+              error: { code: "INSUFFICIENT_STOCK", message: err.message },
+            });
+            return;
+          }
           json(res, 502, {
             data: null,
             error: {
@@ -676,6 +819,26 @@ async function main(): Promise<void> {
       process.once(signal, () => clearInterval(slaTimer));
     }
   }
+
+  // ─── DLQ Auto-Replay Cron ──────────────────────────────────────────────
+  // Issue #310: Periodically auto-replays failed jobs with recoverable network errors
+  // Interval defaults to 5 minutes; set DLQ_AUTO_REPLAY_INTERVAL_MS=0 to disable
+  const dlqReplayIntervalMs = Number(process.env.DLQ_AUTO_REPLAY_INTERVAL_MS ?? 300_000);
+  if (dlqReplayIntervalMs > 0 && dlqService) {
+    await dlqService.autoReplayRecoverableJobs().catch((err) =>
+      log.warn("Initial DLQ auto-replay failed", { error: err instanceof Error ? err.message : String(err) })
+    );
+    const dlqTimer = setInterval(() => {
+      void dlqService?.autoReplayRecoverableJobs().catch((err) =>
+        log.warn("DLQ auto-replay failed", { error: err instanceof Error ? err.message : String(err) })
+      );
+    }, dlqReplayIntervalMs);
+    dlqTimer.unref();
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      process.once(signal, () => clearInterval(dlqTimer));
+    }
+    log.info("DLQ auto-replay cron started", { intervalMs: dlqReplayIntervalMs });
+  }
 }
 
 main().catch((err) => {
@@ -709,6 +872,37 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
     }
   }
 
+  if (disputeRaisedListener) {
+    try {
+      disputeRaisedListener.stop();
+    } catch (err) {
+      log.error("Error stopping dispute raised listener", { error: (err as Error).message });
+    }
+  }
+  if (disputeRaisedRedis) {
+    try {
+      disputeRaisedRedis.disconnect();
+    } catch (err) {
+      log.error("Error disconnecting dispute raised redis client", { error: (err as Error).message });
+    }
+    disputeRaisedRedis = null;
+  }
+  if (closeDisputeRaisedHandler) {
+    try {
+      await closeDisputeRaisedHandler();
+    } catch (err) {
+      log.error("Error closing dispute raised handler", { error: (err as Error).message });
+    }
+  }
+
+  if (dlqService) {
+    try {
+      await dlqService.close();
+    } catch (err) {
+      log.error("Error closing DLQ service", { error: (err as Error).message });
+    }
+  }
+
   process.exit(0);
 }
 
@@ -728,4 +922,5 @@ export { publishWorkflowEvent, createWorkflowCorrelationId } from "./workflow-ev
 export type { WorkflowEventEnvelope } from "./workflow-events.js";
 export { PurchaseWorkflowMachine } from "../state/index.js";
 export type { PurchaseState, PurchaseEvent } from "../state/index.js";
-
+export { handleDisputeRaised, DisputeRaisedEventHandler } from "./eventHandlers/disputeRaised.js";
+export type { DisputeRaisedPayload } from "./eventHandlers/disputeRaised.js";
