@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import { signWebhookPayload, signWebhookPayloadDual, WEBHOOK_SIGNATURE_HEADER } from "./hmac.js";
 import type { WebhookDeliveryTracker } from "./deliveryTracker.js";
 import type { WebhookRegistry } from "./registry.js";
-import type { Webhook, DeliveryStatus } from "./types.js";
+import type { Webhook } from "./types.js";
 import type { WebhookBullQueue, WebhookPayload } from "./bullQueue.js";
 import type { WebhookSecretRotationService } from "./secretRotation.js";
 

@@ -14,8 +14,9 @@ import { Queue, Worker, QueueEvents } from "bullmq";
 import { createLogger } from "@delegolabs/utils";
 import { signWebhookPayload, WEBHOOK_SIGNATURE_HEADER, type WebhookPayload } from "./hmac.js";
 import { WebhookRegistry } from "./registry.js";
-import type { Webhook } from "./types.js";
 import { validateWebhookUrl, postJsonWithPinnedIp } from "./ssrfGuard.js";
+
+export type { WebhookPayload } from "./hmac.js";
 
 const log = createLogger("notifications:webhooks:bullQueue", process.env.LOG_LEVEL ?? "info");
 
@@ -44,7 +45,6 @@ export class WebhookBullQueue {
         attempts: 5,
         backoff: {
           type: "custom",
-          getAttempts: () => 5,
         },
         removeOnComplete: true,
         removeOnFail: false,
@@ -73,6 +73,13 @@ export class WebhookBullQueue {
         connection: this.redisConnection,
         concurrency: Number(process.env.WEBHOOK_CONCURRENCY ?? 10),
         lockDuration: 30_000,
+        settings: {
+          backoffStrategy: (attemptsMade, type) => {
+            if (type !== "custom") return -1;
+            const delayIndex = Math.max(0, Math.min(attemptsMade - 1, RETRY_DELAYS_MS.length - 1));
+            return RETRY_DELAYS_MS[delayIndex];
+          },
+        },
       },
     );
 
@@ -81,6 +88,11 @@ export class WebhookBullQueue {
     });
 
     this.worker.on("failed", (job, error) => {
+      if (!job) {
+        log.error("Webhook job failed without job details", { error: error.message });
+        return;
+      }
+
       log.error("Webhook job failed", {
         jobId: job.id,
         attempt: job.attemptsMade,
@@ -146,8 +158,8 @@ export class WebhookBullQueue {
     payload: WebhookPayload,
     attempt: number,
   ): Promise<void> {
-    // Calculate delay based on attempt (0-indexed for RETRY_DELAYS_MS array)
-    const delayIndex = Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1);
+    // Calculate delay based on the 1-indexed attempt number.
+    const delayIndex = Math.max(0, Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1));
     const delayMs = RETRY_DELAYS_MS[delayIndex];
 
     await this.enqueue(webhookId, payload, delayMs);
