@@ -274,7 +274,7 @@ function handleConnection(ws: WebSocket, req: IncomingMessage) {
     }
   });
 
-  ws.on("close", () => {
+  ws.on("close", (_code: number, _reason: Buffer) => {
     log.info("WebSocket connection closed", {
       connectionId,
       userId: decoded.userId,
@@ -295,6 +295,36 @@ function handleConnection(ws: WebSocket, req: IncomingMessage) {
       userId: decoded.userId,
     });
   });
+}
+
+/**
+ * Closes all active WebSocket connections for a given user (e.g. on session
+ * revocation or password change). If `sessionId` is supplied only connections
+ * carrying that session are closed; otherwise every connection for the user
+ * is terminated.
+ *
+ * Returns the number of connections that were closed.
+ */
+export function revokeUserConnections(userId: string, sessionId?: string): number {
+  const toRevoke = [...connections.values()].filter(
+    (c) => c.userId === userId && (sessionId === undefined || c.connectionId === sessionId)
+  );
+
+  for (const conn of toRevoke) {
+    if (conn.heartbeatTimeout) {
+      clearTimeout(conn.heartbeatTimeout);
+    }
+    conn.ws.close(4001, "Session revoked");
+    connections.delete(conn.connectionId);
+  }
+
+  log.info("Revoked WebSocket connections for user", {
+    userId,
+    sessionId,
+    count: toRevoke.length,
+  });
+
+  return toRevoke.length;
 }
 
 export function initWebSocketServer(server: Server) {
