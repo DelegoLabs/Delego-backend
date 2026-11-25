@@ -5,16 +5,18 @@
   "description": "Delego monitoring/alerting module (on-call schedules, escalation policies, alert routing) served by the gateway",
   "type": "module",
   "scripts": {
-    "build": "echo 'TODO: add build'",
-    "typecheck": "echo 'TODO: add typecheck'",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "lint": "echo 'TODO: add eslint'",
-    "test": "echo 'TODO: add tests'"
+    "test": "vitest run"
   },
   "dependencies": {
     "@delegolabs/types": "workspace:*",
     "@delegolabs/utils": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.9"
   }
 }
