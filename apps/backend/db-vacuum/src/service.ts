@@ -1,4 +1,4 @@
-/**
+/*
  * DatabaseVacuumService — the worker body for issue #382.
  *
  * One pass does four things, in order:

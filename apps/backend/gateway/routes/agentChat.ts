@@ -79,6 +79,11 @@ const defaultStreamProvider: ChatServiceConfig["streamProvider"] = async functio
   return;
 };
 
+// Exported for testing: resets the configured stream provider to its default.
+export function resetAgentChatServiceForTests(): void {
+  configuredStreamProvider = defaultStreamProvider as NonNullable<ChatServiceConfig["streamProvider"]>;
+}
+
 let configuredStreamProvider: NonNullable<ChatServiceConfig["streamProvider"]> =
   defaultStreamProvider as NonNullable<ChatServiceConfig["streamProvider"]>;
 

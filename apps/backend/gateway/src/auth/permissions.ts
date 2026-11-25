@@ -1,4 +1,4 @@
-/**
+/*
  * Merchant-team fine-grained permissions (Issue #383).
  *
  * A merchant team member's JWT carries a `roles` claim and may also carry an

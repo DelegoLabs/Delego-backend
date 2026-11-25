@@ -1,6 +1,5 @@
 /**
  * @delegolabs/wallet — Entry point
- * TODO: Implement service logic
  */
 import { createLogger, initTelemetry } from "@delegolabs/utils";
 import { startHttpServer, corsMiddleware, securityHeadersMiddleware, requireAuth } from "@delegolabs/utils";
@@ -46,6 +45,7 @@ import { initDLQ } from "./queue/transactionDLQ.js";
 import { getRedisConnection } from "./queue/txQueue.js";
 import { balanceTracker } from "./assets/balances.js";
 import { closePathQuoteService } from "./pathPayments/quoteProxy/routes.js";
+import { createWalletShutdown } from "./shutdown.js";
 
 const server = startHttpServer({
   port,
@@ -129,69 +129,21 @@ try {
 
 // ─── Graceful Shutdown ─────────────────────────────────────────────────────
 
-async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
-  log.info("Received shutdown signal", { signal });
-
-  // Stop accepting new connections
-  server.close(() => {
-    log.info("HTTP server closed");
-  });
-
-  // Stop DLQ triage worker
-  try {
-    dlqTriageWorker?.stop();
-    log.info("DLQ triage worker stopped");
-  } catch (err) {
-    log.error("Error stopping DLQ triage worker", { error: (err as Error).message });
-  }
-
-  // Stop dynamic fee estimator polling
-  try {
-    if (dynamicFeeEstimator) {
-      dynamicFeeEstimator.stop();
-      log.info("Dynamic fee estimator stopped");
-    }
-  } catch (err) {
-    log.error("Error stopping dynamic fee estimator", { error: (err as Error).message });
-  }
-
-  domainReverificationCron?.stop();
-  closePathQuoteService();
-
-  // Drain batch flush timers
-  try {
-    stopBatchFlushTimers();
-    log.info("Batch flush timers stopped");
-  } catch (err) {
-    log.error("Error stopping batch flush timers", { error: (err as Error).message });
-  }
-
-  // Stop real-time balance trackers
-  try {
-    balanceTracker.stopAll();
-    log.info("Balance trackers stopped");
-  } catch (err) {
-    log.error("Error stopping balance trackers", { error: (err as Error).message });
-  }
-
-  // Close WebSocket server
-  try {
-    await stopWebSocketServer();
-    log.info("WebSocket server closed");
-  } catch (err) {
-    log.error("Error stopping WebSocket server", { error: (err as Error).message });
-  }
-
-  // Drain BullMQ queue and close Redis
-  try {
-    await closeQueue();
-    log.info("Transaction queue closed");
-  } catch (err) {
-    log.error("Error closing transaction queue", { error: (err as Error).message });
-  }
-
-  process.exit(0);
-}
+const gracefulShutdown = createWalletShutdown({
+  server,
+  stopWebSocketServer,
+  backgroundTasks: [
+    { name: "batch-flush-timers", stop: stopBatchFlushTimers },
+    { name: "dlq-triage-worker", stop: () => dlqTriageWorker?.stop() },
+    { name: "dynamic-fee-estimator", stop: () => dynamicFeeEstimator?.stop() },
+    { name: "merchant-domain-reverification", stop: () => domainReverificationCron?.stop() },
+    { name: "balance-trackers", stop: () => balanceTracker.stopAll() },
+  ],
+  closePathQuoteService,
+  closeQueue,
+  log,
+  exit: (code) => process.exit(code),
+});
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -199,7 +151,24 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
+// Issue #527 — Stellar Horizon/Soroban RPC failover switcher
+export {
+  RpcNodePool,
+  chooseBestHealthyNode,
+  latencyToWeight,
+  readRpcPoolConfig,
+} from "./rpcFailover.js";
+export type {
+  RpcNodeHealth,
+  RpcNodePoolOptions,
+  FailoverEvent,
+} from "./rpcFailover.js";
+
 // Export DLQ triage worker components for external use
 export { DlqTriageWorker } from "./queue/dlqTriageWorker.js";
 export { DlqSlackAlerter } from "./queue/dlqSlackAlerter.js";
 export { classifyErrorAndDecide, calculateExponentialBackoff } from "./queue/dlqClassificationEngine.js";
+
+// Export Stellar trustline pre-flight utilities (Issue #594)
+export * from "./stellar/trustlines.js";
+

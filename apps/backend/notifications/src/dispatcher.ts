@@ -22,7 +22,7 @@ const log = createLogger(
   "notifications:dispatcher",
   process.env.LOG_LEVEL ?? "info"
 );
-const redis = getDispatcherClient();
+export const redis = getDispatcherClient();
 
 const SUBSCRIPTIONS_NS = "push:subscriptions";
 

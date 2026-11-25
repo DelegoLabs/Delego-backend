@@ -9,12 +9,15 @@
     "test": "jest"
   },
   "dependencies": {
+    "@delegolabs/utils": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.52.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.53.0",
     "@opentelemetry/resources": "^1.26.0",
     "@opentelemetry/sdk-node": "^0.53.0",
-    "@opentelemetry/semantic-conventions": "^1.27.0"
+    "@opentelemetry/semantic-conventions": "^1.27.0",
+    "@stellar/stellar-sdk": "^16.0.0",
+    "pg": "^8.21.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

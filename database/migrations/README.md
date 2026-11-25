@@ -68,6 +68,8 @@ The incremental migrations are:
 | `047_merchant_revenue_analytics.sql` | Currency, platform-fee, and settlement columns plus revenue indexes for `payment_records` |
 | `048_merchant_domain_verification.sql` | SEP-0001 `stellar.toml` domain-verification columns, re-check index, and audit trail for merchants |
 | `049_column_encryption.sql` | Column-level encryption for PII at rest: data-encryption-key version registry and append-only key-access audit log (#68) |
+| `049_custom_domain_certificates.sql` | Merchant custom-domain CNAME verification queue and AES-256-GCM encrypted TLS certificate storage (#597) |
+| `049_review_moderation_audit.sql` | Append-only audit trail for administrative review appeal verdicts (#520) |
 | `050_purchase_proposals.sql` | Purchase proposals plus delegation spend/version tracking for atomic allowance limits (#265) |
 | `051_audit_chain.sql` | Cryptographic SHA-256 tamper-evident audit log chaining with append-only triggers (#358) |
 | `052_db_vacuum_run_log.sql` | Per-table vacuum run audit trail for the bloat monitoring worker (#382) |
@@ -81,6 +83,7 @@ The incremental migrations are:
 | `060_webhook_secret_rotation.sql` | Merchant webhook HMAC signing-secret rotation state and grace periods (#381) |
 | `061_product_variants.sql` | Product variants (sizes, colors, materials) with attribute and barcode indexes |
 | `062_soroban_contract_events.sql` | Durable, idempotent store for ingested Soroban contract events |
+| `064_order_dispute_fields.sql` | On-chain dispute references on orders: evidence hash, dispute ID, reason code, ledger sequence, and dispute timestamp |
 | `20261020_webhook_delivery_forensic_logs.sql` | Granular per-attempt webhook delivery forensic log (`webhook_delivery_logs`): payload SHA-256 hash, HTTP status, latency, response body sample, and error message, with a partial index over failed attempts (`http_status >= 400 OR http_status IS NULL`) |
 
 ### Passkey / WebAuthn configuration (#367)

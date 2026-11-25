@@ -42,6 +42,7 @@ import { registerFaucetRoutes } from "./faucet/routes.js";
 import { registerFeeEstimatorRoutes } from "./feeEstimator/routes.js";
 import { registerMerchantDomainRoutes } from "./merchantDomain/routes.js";
 import { registerPathQuoteRoutes } from "./pathPayments/quoteProxy/routes.js";
+import { createHorizonServer, isMockModeEnabled } from "../stellar/mockHorizon.js";
 
 const log = createLogger("wallet:routes", process.env.LOG_LEVEL ?? "info");
 
@@ -572,7 +573,7 @@ export function registerRoutes(
             });
           }
 
-          const server = new Horizon.Server(horizonUrl);
+          const server = isMockModeEnabled() ? createHorizonServer(horizonUrl) : new Horizon.Server(horizonUrl);
           let account;
           try {
             account = await retryWithBackoff(() => server.loadAccount(address));
@@ -609,7 +610,7 @@ export function registerRoutes(
           }
 
           const nativeBalanceLine = account.balances.find(
-            (b: any) => b.asset_type === "native",
+            (b) => b.asset_type === "native",
           );
           const nativeBalance = nativeBalanceLine
             ? xlmToStroops(nativeBalanceLine.balance)
@@ -745,9 +746,9 @@ export function registerRoutes(
           const networkPassphrase =
             network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 
-          const server = new Horizon.Server(horizonUrl);
+          const server = isMockModeEnabled() ? createHorizonServer(horizonUrl) : new Horizon.Server(horizonUrl);
 
-          let txResponse;
+          let txResponse: Horizon.ServerApi.CollectionPage<Horizon.ServerApi.TransactionRecord>;
           try {
             // Verify account exists before retrieving history
             await retryWithBackoff(() => server.loadAccount(address));
@@ -794,7 +795,7 @@ export function registerRoutes(
           }
 
           const transactions: TransactionEntry[] = txResponse.records.map(
-            (tx: any) => {
+            (tx) => {
               let operations: any[] = [];
               try {
                 const parsedTx = TransactionBuilder.fromXDR(

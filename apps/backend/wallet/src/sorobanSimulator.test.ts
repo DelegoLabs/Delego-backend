@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SorobanTransactionSimulator, readSorobanRpcConfig } from "./sorobanSimulator.js";
+import { ServiceMetricsRegistry } from "@delegolabs/utils";
 
 const { mockSimulateTransaction, mockServerCtor } = vi.hoisted(() => ({
   mockSimulateTransaction: vi.fn(),
@@ -107,6 +108,10 @@ describe("SorobanTransactionSimulator", () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   function makeServerInstance() {
     const instance = { simulateTransaction: mockSimulateTransaction };
     mockServerCtor.mockReturnValue(instance);
@@ -143,6 +148,33 @@ describe("SorobanTransactionSimulator", () => {
 
     const result = await simulator.simulateTransaction(fakeTx);
     expect(result).toEqual(mockResponse);
+  });
+
+  it("records contract invocation latency in the metrics histogram", async () => {
+    vi.stubEnv("SIM_CACHE_BYPASS", "true");
+    const server = makeServerInstance();
+    const metricsRegistry = new ServiceMetricsRegistry();
+    const simulator = new SorobanTransactionSimulator({
+      rpcUrl: "https://rpc.example.com",
+      timeoutMs: 5000,
+      maxRetries: 0,
+      metricsRegistry,
+    });
+
+    server.simulateTransaction.mockResolvedValue({ success: true });
+
+    await simulator.simulateTransaction({
+      operations: [{ contract: "contract-1", function: "transfer" }],
+    } as any);
+
+    const labels = {
+      contract: "contract-1",
+      function: "transfer",
+      success: "true",
+    };
+    const latency = metricsRegistry.histogram("contract_invocation_latency_ms");
+    expect(latency.count(labels)).toBe(1);
+    expect(latency.sum(labels)).toBeGreaterThanOrEqual(0);
   });
 
   it("simulateTransaction rejects on timeout error", async () => {

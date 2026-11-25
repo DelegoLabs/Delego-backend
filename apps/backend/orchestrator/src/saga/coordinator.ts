@@ -7,9 +7,9 @@ import {
   type SagaRecoveryDetail,
   type SagaRecoveryResult,
   type SagaStep,
-  type SagaStore,
   type SagaWorkflowType,
 } from "./types.js";
+import type { WorkflowStateStore } from "../../state/types.js";
 import type { DistributedLockManager } from "../locks/manager.js";
 import { lockKeyForStep, lockKeyForWorkflow } from "../locks/keys.js";
 
@@ -20,7 +20,7 @@ const DEFAULT_SAGA_TIMEOUT_MS = 5 * 60_000;
 export interface SagaCoordinatorOptions<TContext> {
   /** Saga steps in the order they should execute. Compensations run in reverse order. */
   steps: Array<SagaStep<TContext>>;
-  store: SagaStore;
+  store: WorkflowStateStore;
   log?: Logger;
   /** How long a step claim is honored before another runner may safely reclaim it. */
   claimLeaseMs?: number;
@@ -45,7 +45,7 @@ export interface RunOptions {
 export class SagaCoordinator<TContext extends object> {
   private readonly steps: Map<string, SagaStep<TContext>>;
   private readonly stepOrder: string[];
-  private readonly store: SagaStore;
+  private readonly store: WorkflowStateStore;
   private readonly log: Logger;
   private readonly claimLeaseMs: number;
   private readonly sagaTimeoutMs: number;

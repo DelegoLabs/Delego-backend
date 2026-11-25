@@ -22,8 +22,14 @@ export {
   type KeepAliveSocket,
   type PingPongSocket,
   type WebSocketStallMonitorHooks,
+  type StallReason,
+  type StallMonitorOptions,
 } from "./websocketMonitor.js";
-export { CORRELATION_ID_HEADER, correlationMiddleware, fetchWithCorrelation } from "./correlation.js";
+export {
+  CORRELATION_ID_HEADER,
+  correlationMiddleware,
+  fetchWithCorrelation,
+} from "./correlation.js";
 export { stroopsToDisplay, displayToStroops } from "./currency.js";
 export { addDecimalStrings, sumDecimalStrings } from "./decimalMath.js";
 export {
@@ -88,6 +94,21 @@ export * from "./compression/index.js";
 // Synthetic Monitoring
 export * from "./synthetic/index.js";
 
+export {
+  REDACTED_SECRET_PLACEHOLDER,
+  defaultQueryLogSanitizer,
+  createSanitizingQueryLogger,
+  type QueryLogSanitizer,
+} from "./logger/sqlSanitizer.js";
+export {
+  isPrivateOrReservedIp,
+  validateSsrfUrl,
+  createPinnedLookup,
+  dispatchWithSsrfProtection,
+  type SsrfValidationResult,
+  type SsrfRejectionReason,
+  type SsrfSafeDispatchResult,
+} from "./security/ssrfGuard.js";
 export * from "./pentest.js";
 export * from "./coverageGate.js";
 export * from "./integrationFixtures.js";
@@ -177,12 +198,31 @@ export {
   type RateLimitResult,
 } from "./rateLimit/slidingWindowRateLimiter.js";
 export {
+  DEFAULT_TIMESTAMP_TOLERANCE_SECONDS,
+  buildNonceCacheKey,
+  isTimestampFresh,
+  validateNonce,
+  type NonceCacheRedisClient,
+  type NonceValidationOptions,
+  type NonceValidationResult,
+  type NonceRejectionReason,
+} from "./security/nonceCache.js";
+export {
   RedisSessionStore,
   type SessionRedisClient,
   type Session,
   type SessionConfig,
   type CreateSessionInput,
 } from "./session/redisSessionStore.js";
+export {
+  parseScVal,
+  scValToBigInt,
+  scValToAddress,
+  scValParser,
+  ScValParseError,
+  type ParsedScVal,
+  type ScValParser,
+} from "./soroban/scvalParser.js";
 export {
   ServiceMetricsRegistry,
   type Counter,
@@ -214,7 +254,11 @@ export {
   type ValidationErrorList,
 } from "./securityEventDetection.js";
 export { requireAuth } from "./auth.js";
-export { requireServiceAuth, SERVICE_AUTH_HEADER, type ServiceAuthOptions } from "./serviceAuth.js";
+export {
+  requireServiceAuth,
+  SERVICE_AUTH_HEADER,
+  type ServiceAuthOptions,
+} from "./serviceAuth.js";
 export {
   generateApiKey,
   verifyApiKey,
@@ -242,6 +286,8 @@ export {
   buildDbSpanAttributes,
   buildErrorSpanAttributes,
   computeTraceMetrics,
+  tracedFetch,
+  initTelemetry,
   type SamplerType,
   type TraceExporterType,
   type Propagator,
@@ -273,6 +319,7 @@ export {
   LogChunkCompressionError,
   UnsupportedLogChunkCompressionError,
   DEFAULT_LOG_CHUNK_COMPRESSION_ALGORITHM,
+  SUPPORTED_LOG_COMPRESSION_ALGORITHMS,
   type LogChunkCompressionAlgorithm,
   type LogChunkCompressionOptions,
   type CompressedLogChunk,

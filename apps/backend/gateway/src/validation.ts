@@ -118,6 +118,12 @@ export interface ReviewModerationPayload {
   moderatorNotes?: string;
 }
 
+export interface AdminVerdictPayload {
+  appealId: string;
+  verdict: "remove_review" | "keep_review" | "warn_buyer";
+  adminNotes: string;
+}
+
 export interface DeliveryEvidencePayload {
   fileName: string;
   mimeType: string;
@@ -159,6 +165,19 @@ export const OAuthCallbackSchema: any = {
     state: { type: "string", minLength: 1 },
   },
   required: ["provider", "code", "state"],
+  additionalProperties: false,
+};
+
+export const RevokeAllSessionsSchema: any = {
+  type: "object",
+  properties: {
+    userId: { type: "string", minLength: 1, maxLength: 128 },
+    reason: {
+      type: "string",
+      enum: ["password_reset", "security_compromise", "user_requested"],
+    },
+  },
+  required: ["userId", "reason"],
   additionalProperties: false,
 };
 
@@ -377,6 +396,19 @@ export const ReviewModerationSchema: any = {
   minProperties: 1,
 };
 
+export const AdminVerdictSchema: any = {
+  type: "object",
+  properties: {
+    // appealId is sourced from the request path, not the body; accepted here
+    // for backwards compatibility but never required.
+    appealId: { type: "string", minLength: 1, maxLength: 128 },
+    verdict: { type: "string", enum: ["remove_review", "keep_review", "warn_buyer"] },
+    adminNotes: { type: "string", minLength: 1, maxLength: 5000 },
+  },
+  required: ["verdict", "adminNotes"],
+  additionalProperties: false,
+};
+
 export const DeliveryEvidenceSchema: any = {
   type: "object",
   properties: {
@@ -385,5 +417,15 @@ export const DeliveryEvidenceSchema: any = {
     fileSizeBytes: { type: "integer", minimum: 1, maximum: 10485760 }, // 10MB max
   },
   required: ["fileName", "mimeType", "fileSizeBytes"],
+  additionalProperties: false,
+};
+
+export const RevokeAllSessionsSchema: any = {
+  type: "object",
+  properties: {
+    userId: { type: "string", minLength: 1 },
+    reason: { type: "string", enum: ["password_reset", "security_compromise", "user_requested"] },
+  },
+  required: ["userId", "reason"],
   additionalProperties: false,
 };

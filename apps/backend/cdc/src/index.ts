@@ -43,6 +43,10 @@ import {
   SorobanLedgerRpcClient,
   type LedgerEvent,
 } from "./sorobanEvents/index.js";
+import {
+  createContractUpgradeListener,
+  ContractUpgradeListener,
+} from "./eventHandlers/index.js";
 
 /** Redis stream the Soroban events are fanned out to after commit. */
 const SOROBAN_EVENT_STREAM = "soroban:events";
@@ -160,6 +164,7 @@ async function main(): Promise<void> {
   // the Soroban event listener.
   // ---------------------------------------------------------------------------
   let sorobanWorker: ResumableSorobanIngestionWorker | undefined;
+  let upgradeListener: ContractUpgradeListener | undefined;
 
   const sorobanRpcUrl = process.env.SOROBAN_RPC_URL;
   const sorobanContractIds = process.env.SOROBAN_CONTRACT_IDS
@@ -222,6 +227,59 @@ async function main(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       });
     });
+
+    // ---------------------------------------------------------------------------
+    // Issue #603 — Contract Upgrade Event Listener for Governance Security
+    // ---------------------------------------------------------------------------
+    const upgradeListenerEnabled = process.env.CONTRACT_UPGRADE_LISTENER_ENABLED !== "false";
+
+    if (upgradeListenerEnabled && sorobanContractIds.length > 0) {
+      log.info("Starting Contract Upgrade Event Listener (Issue #603)", {
+        contracts: sorobanContractIds,
+      });
+
+      const upgradeListenerRedis = new Redis(env.redisUrl ?? "redis://localhost:6379");
+
+      // Load initial approved hashes from environment if provided
+      let initialApprovedHashes: Array<{
+        contractAddress: string;
+        wasmHash: string;
+        approvedBy: string;
+        approvedAt: string;
+        description?: string;
+        governanceProposalId?: string;
+      }> = [];
+
+      if (process.env.CONTRACT_APPROVED_WASM_HASHES) {
+        try {
+          initialApprovedHashes = JSON.parse(process.env.CONTRACT_APPROVED_WASM_HASHES);
+          log.info("Loaded initial approved WASM hashes from environment", { count: initialApprovedHashes.length });
+        } catch (err) {
+          log.error("Failed to parse CONTRACT_APPROVED_WASM_HASHES", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      upgradeListener = await createContractUpgradeListener({
+        redis: upgradeListenerRedis,
+        pgPool: pool,
+        monitoredContracts: sorobanContractIds,
+        initialApprovedHashes,
+        pagerDutyChannelId: process.env.PAGERDUTY_CHANNEL_ID ?? "pagerduty-critical",
+        telegramChannelId: process.env.TELEGRAM_CHANNEL_ID ?? "telegram-security",
+        pollIntervalMs: optionalPositiveInt(process.env.CONTRACT_UPGRADE_POLL_INTERVAL_MS, "CONTRACT_UPGRADE_POLL_INTERVAL_MS"),
+        logger: log,
+      });
+
+      await upgradeListener.start();
+    } else if (upgradeListenerEnabled) {
+      log.info(
+        "Contract Upgrade Listener disabled — requires SOROBAN_CONTRACT_IDS to be set"
+      );
+    } else {
+      log.info("Contract Upgrade Listener disabled via CONTRACT_UPGRADE_LISTENER_ENABLED=false");
+    }
   } else {
     log.info(
       "Soroban event listener disabled — set SOROBAN_RPC_URL and SOROBAN_CONTRACT_IDS to enable"
@@ -240,6 +298,7 @@ async function main(): Promise<void> {
       }
     }
     await sorobanWorker?.stop();
+    upgradeListener?.stop();
     await pipeline?.stop();
     await connector.close();
     await pool.end();

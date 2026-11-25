@@ -15,7 +15,11 @@ import {
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 import { createLogger } from "@delegolabs/utils";
-import type { AuditLogChainEntry, MerklePublisherConfig, MerkleRootResult } from "@delegolabs/types";
+import type {
+  AuditLogChainEntry,
+  MerklePublisherConfig,
+  MerkleRootResult,
+} from "@delegolabs/types";
 import { computeMerkleRoot } from "./auditChain.js";
 
 const log = createLogger("audit:stellar", process.env.LOG_LEVEL ?? "info");

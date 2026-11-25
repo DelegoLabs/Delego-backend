@@ -21,8 +21,14 @@ import { Readable, type Transform } from "node:stream";
 import { performance } from "node:perf_hooks";
 import zlib from "node:zlib";
 
-export type LogChunkCompressionAlgorithm = "gzip" | "zstd";
+/** Supported log chunk compression algorithms */
+export const SUPPORTED_LOG_COMPRESSION_ALGORITHMS = ["gzip", "zstd"] as const;
 
+/** Log chunk compression algorithm type */
+export type LogChunkCompressionAlgorithm =
+  (typeof SUPPORTED_LOG_COMPRESSION_ALGORITHMS)[number];
+
+/** Default compression algorithm (gzip) */
 export const DEFAULT_LOG_CHUNK_COMPRESSION_ALGORITHM: LogChunkCompressionAlgorithm =
   "gzip";
 

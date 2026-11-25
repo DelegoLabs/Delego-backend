@@ -12,6 +12,11 @@ import { ReconciliationRecord } from "./models/ReconciliationRecord.js";
 import { ReconciliationReport } from "./models/ReconciliationReport.js";
 import { AuditLog } from "./models/AuditLog.js";
 import { ExchangeRateCache } from "./models/ExchangeRateCache.js";
+import { FxRateSnapshot } from "./models/FxRateSnapshot.js";
+import { OrphanScannerCheckpoint } from "./models/OrphanScannerCheckpoint.js";
+import { OrphanedTransactionQuarantine } from "./models/OrphanedTransactionQuarantine.js";
+import { startFxSnapshotWorker, stopFxSnapshotWorker } from "./fxWorker.js";
+import { startOrphanScannerWorker, stopOrphanScannerWorker } from "./orphanScanner.js";
 
 const SERVICE_NAME = "reconciliation";
 const DEFAULT_PORT = 3014;
@@ -27,6 +32,9 @@ ReconciliationRecord;
 ReconciliationReport;
 AuditLog;
 ExchangeRateCache;
+FxRateSnapshot;
+OrphanScannerCheckpoint;
+OrphanedTransactionQuarantine;
 
 log.info("Starting reconciliation service", { port, nodeEnv });
 
@@ -39,6 +47,8 @@ connectDb()
       serviceName: SERVICE_NAME,
       routes: registerReconciliationRoutes(),
     });
+    startFxSnapshotWorker();
+    startOrphanScannerWorker();
   })
   .catch((err) => {
     log.error("Failed to connect to database", err instanceof Error ? { error: err.message } : { error: String(err) });
@@ -48,6 +58,8 @@ connectDb()
 // Graceful shutdown
 process.on("SIGTERM", async () => {
   log.info("Received SIGTERM, shutting down gracefully");
+  stopFxSnapshotWorker();
+  stopOrphanScannerWorker();
   await sequelize.close();
   process.exit(0);
 });

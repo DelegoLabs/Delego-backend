@@ -7,23 +7,26 @@ import { sentryConfig } from "./instrument.js";
 import { createLogger, initTelemetry, startHttpServer, corsMiddleware, securityHeadersMiddleware, ServiceMetricsRegistry } from "@delegolabs/utils";
 import { registerRoutes } from "../routes/index.js";
 import { bodyLimitMiddleware } from "../routes/api-v1.js";
+import { courierWebhookBodyCapture } from "../routes/webhookBody.js";
 import { rateLimitMiddleware } from "../middleware/rateLimit.js";
 import { idempotencyMiddleware } from "../middleware/idempotency.js";
 import { requestIdMiddleware } from "../middleware/requestId.js";
 import { compressionMiddleware } from "../middleware/compression.js";
 import { openApiValidationMiddleware } from "../middleware/openApiValidation.js";
 import { requestResponseLoggingMiddleware } from "./logging/middleware.js";
+import { startLogPruning } from "./logging/logStore.js";
 import { raspMiddleware } from "../middleware/rasp.js";
 import { versionNegotiationMiddleware } from "./middleware/versioning.js";
 import { metricsMiddleware } from "./metrics.js";
 import { killSwitchMiddleware } from "../middleware/killSwitch.js";
 import { getEmergencyKillSwitchService } from "./emergency/killSwitch.js";
+import { startSessionRevocationListener } from "./auth/sessionRevocation.js";
 import { registerGracefulShutdown } from "./shutdown.js";
 import { startMetricsSampling, adaptiveRateLimitingMiddleware } from "./rateLimit/adaptive.js";
-import { initializeDbMetrics } from "./db.js";
-import { logger } from "./logger.js";
+import { sequelize, initializeDbMetrics } from "./db.js";
+import { withSentryMiddleware, withSentryRoutes } from "./observability/sentryRequest.js";
+import { startBulkCatalogImportWorker } from "./catalog/bulkImport/queue.js";
 import { validateRequest } from "./middleware/validateRequest.js";
-import { withSentryMiddleware, withSentryRoutes, type Middleware } from "./observability/sentryRequest.js";
 
 const SERVICE_NAME = "gateway";
 const DEFAULT_PORT = 3000;
@@ -47,11 +50,18 @@ if (sentryConfig) {
 
 const port = Number(process.env.GATEWAY_PORT ?? DEFAULT_PORT);
 
-logger.info({ port, nodeEnv, logLevel }, "Starting gateway");
+log.info({ port, nodeEnv, logLevel }, "Starting gateway");
 
 // Start emergency kill-switch subscriber
 getEmergencyKillSwitchService().start().catch((err) => {
   log.warn("Failed to initialize emergency kill-switch service", { error: err.message });
+});
+
+// Keep per-user JWT revocation cutoffs in sync across gateway replicas.
+startSessionRevocationListener().catch((err) => {
+  log.warn("Failed to initialize session revocation listener", {
+    error: err instanceof Error ? err.message : String(err),
+  });
 });
 
 // Initialize database query latency metrics (Issue #387)
@@ -59,6 +69,15 @@ const metricsRegistry = new ServiceMetricsRegistry();
 initializeDbMetrics(metricsRegistry);
 
 startMetricsSampling();
+startLogPruning();
+
+// Bulk CSV catalog imports run in-process; disable on API-only replicas with
+// ENABLE_CATALOG_IMPORT_WORKER=false and run a dedicated worker deployment.
+const catalogImportWorker =
+  process.env.ENABLE_CATALOG_IMPORT_WORKER !== "false" ? startBulkCatalogImportWorker() : null;
+process.once("SIGTERM", () => {
+  void catalogImportWorker?.close();
+});
 
 const server = startHttpServer({
   port,
@@ -75,6 +94,11 @@ const server = startHttpServer({
     // Version negotiation must run before auth and rate-limiting so that
     // sunset versions get 410 Gone before any further processing.
     versionNegotiationMiddleware(),
+    // Version negotiation must run before auth and rate-limiting so that
+    // sunset versions get 410 Gone before any further processing.
+    versionNegotiationMiddleware(),
+    // Buffers courier webhook bodies before any middleware drains the stream (Issue #577).
+    courierWebhookBodyCapture(),
     bodyLimitMiddleware(),
     // OpenAPI request validation - validates path, query, and body parameters
     validateRequest(),

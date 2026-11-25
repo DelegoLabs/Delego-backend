@@ -29,6 +29,16 @@ import { registerOracleRoutes } from "./oracle/routes.js";
 import { ContractInvocationError } from "../escrow/errors.js";
 import { settleOrder, refundOrder } from "../settlement/index.js";
 import { getEscrowFundingLockManager } from "./escrowCoordinator/escrowFundingLock.js";
+import { cancelOrder, OrderAlreadyShippedError, OrderNotCancellableError } from "./orders/cancelOrder.js";
+import {
+  createPartialRefundProposal,
+  counterPartialRefundProposal,
+  signPartialRefundProposal,
+  expirePartialRefundProposals,
+  ArithmeticImbalanceError,
+  ProposalNotFoundError,
+  ProposalNotOpenError,
+} from "./disputes/partialRefundNegotiation.js";
 import {
   acquireLock,
   releaseLock,
@@ -503,6 +513,40 @@ export function registerRoutes(): Route[] {
       }
     }),
 
+    // Issue #503 — Pre-shipment order cancellation with escrow refund.
+    route("POST", "/api/v1/orders/:orderId/cancel", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { buyerAddress, reason } = body;
+
+        if (typeof buyerAddress !== "string" || !buyerAddress) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "buyerAddress is required" });
+          return;
+        }
+        if (typeof reason !== "string" || !reason) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "reason is required" });
+          return;
+        }
+
+        const result = await cancelOrder({ orderId: params.orderId, buyerAddress, reason });
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof OrderAlreadyShippedError) {
+          json(res, 409, { data: null, error: { code: "ORDER_ALREADY_SHIPPED", message: err.message } });
+          return;
+        }
+        if (err instanceof OrderNotCancellableError) {
+          json(res, 409, { data: null, error: { code: "ORDER_NOT_CANCELLABLE", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "ORDER_CANCEL_FAILED", err);
+      }
+    }),
+
     route("POST", "/api/v1/orders/:orderId/refund", async (req, res, params) => {
       try {
         const body = await readJsonBody(req);
@@ -817,6 +861,120 @@ export function registerRoutes(): Route[] {
         }
         if (sendDisputeError(res, err)) return;
         sendOperationError(res, "DISPUTE_AUTO_MEDIATION_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #504 — Partial Refund Dispute Settlement Negotiation ──────────
+
+    route("POST", "/api/v1/orders/:orderId/partial-refund-proposals", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { escrowId, totalOrderStroops, proposerRole, buyerRefundStroops, merchantPayoutStroops, signature, expiresAt } = body;
+
+        if (!escrowId || !totalOrderStroops || !proposerRole || !buyerRefundStroops || !merchantPayoutStroops || !signature) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "escrowId, totalOrderStroops, proposerRole, buyerRefundStroops, merchantPayoutStroops, and signature are required" });
+          return;
+        }
+
+        const proposal = await createPartialRefundProposal({
+          orderId: params.orderId,
+          escrowId: String(escrowId),
+          totalOrderStroops: String(totalOrderStroops),
+          proposerRole: proposerRole as "buyer" | "merchant",
+          buyerRefundStroops: String(buyerRefundStroops),
+          merchantPayoutStroops: String(merchantPayoutStroops),
+          signature: String(signature),
+          expiresAt: typeof expiresAt === "string" ? expiresAt : undefined,
+        });
+        json(res, 201, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof ArithmeticImbalanceError) {
+          json(res, 400, { data: null, error: { code: "ARITHMETIC_IMBALANCE", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_CREATE_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/partial-refund-proposals/:proposalId/counter", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { counterRole, buyerRefundStroops, merchantPayoutStroops, signature } = body;
+
+        if (!counterRole || !buyerRefundStroops || !merchantPayoutStroops || !signature) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "counterRole, buyerRefundStroops, merchantPayoutStroops, and signature are required" });
+          return;
+        }
+
+        const proposal = await counterPartialRefundProposal(
+          params.proposalId,
+          counterRole as "buyer" | "merchant",
+          { buyerRefundStroops: String(buyerRefundStroops), merchantPayoutStroops: String(merchantPayoutStroops), signature: String(signature) }
+        );
+        json(res, 200, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof ArithmeticImbalanceError) {
+          json(res, 400, { data: null, error: { code: "ARITHMETIC_IMBALANCE", message: err.message } });
+          return;
+        }
+        if (err instanceof ProposalNotFoundError) {
+          json(res, 404, { data: null, error: { code: "PROPOSAL_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof ProposalNotOpenError) {
+          json(res, 409, { data: null, error: { code: "PROPOSAL_NOT_OPEN", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_COUNTER_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/partial-refund-proposals/:proposalId/sign", async (req, res, params) => {
+      try {
+        const body = await readJsonBody(req);
+        const { role, signature } = body;
+
+        if (!role || !signature) {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "role and signature are required" });
+          return;
+        }
+
+        const proposal = await signPartialRefundProposal(params.proposalId, {
+          role: role as "buyer" | "merchant",
+          signature: String(signature),
+        });
+        json(res, 200, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof ProposalNotFoundError) {
+          json(res, 404, { data: null, error: { code: "PROPOSAL_NOT_FOUND", message: err.message } });
+          return;
+        }
+        if (err instanceof ProposalNotOpenError) {
+          json(res, 409, { data: null, error: { code: "PROPOSAL_NOT_OPEN", message: err.message } });
+          return;
+        }
+        if (err instanceof Error && err.message === "Invalid JSON body") {
+          sendValidationError(res, { code: "VALIDATION_ERROR", message: "Invalid JSON body" });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_SIGN_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/orders/:orderId/partial-refund-proposals/expire", async (_req, res, params) => {
+      try {
+        const count = await expirePartialRefundProposals(params.orderId);
+        json(res, 200, { data: { expiredCount: count }, error: null });
+      } catch (err) {
+        sendOperationError(res, "PROPOSAL_EXPIRE_FAILED", err);
       }
     }),
 
@@ -1605,6 +1763,158 @@ export function registerRoutes(): Route[] {
     // Circuit breaker stats + cache hit/miss/fallback metrics in one snapshot.
     route("GET", "/exchange-rates/health", async (_req, res) => {
       json(res, 200, { data: getExchangeRateHealth(), error: null });
+    }),
+
+    // ─── Issue #521 — Public Product Review Feed ─────────────────────────────
+
+    route("GET", "/api/v1/reviews", async (req, res) => {
+      try {
+        const { getReviewFeed, validateReviewFeedQuery } = await import("./reviews/reviewFeed.js");
+        const qs = Object.fromEntries(
+          new URL(req.url ?? "/", "http://localhost").searchParams.entries()
+        );
+        const query = validateReviewFeedQuery(qs);
+        const page = await getReviewFeed(query);
+        json(res, 200, { data: page, error: null });
+      } catch (err) {
+        sendOperationError(res, "REVIEW_FEED_FAILED", err);
+      }
+    }),
+
+    route("POST", "/api/v1/reviews/:id/helpful", async (req, res, params) => {
+      try {
+        const { voteHelpful } = await import("./reviews/reviewFeed.js");
+        const body = await readJsonBody(req);
+        const voterIp = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+          ?? (req.socket.remoteAddress ?? null);
+        const voterWallet = typeof body.voterWallet === "string" ? body.voterWallet : null;
+        const result = await voteHelpful(params.id, voterIp, voterWallet);
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("not found")) {
+          json(res, 404, { data: null, error: { code: "REVIEW_NOT_FOUND", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "REVIEW_HELPFUL_VOTE_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #531 — Multi-Merchant Price Comparison ────────────────────────
+
+    route("GET", "/api/v1/catalog/compare", async (req, res) => {
+      try {
+        const { searchAndRankOffers, validateSearchQuery } = await import("./catalog/multiMerchantSearch.js");
+        const qs = Object.fromEntries(
+          new URL(req.url ?? "/", "http://localhost").searchParams.entries()
+        );
+        const query = validateSearchQuery(qs);
+        const offers = await searchAndRankOffers(query);
+        json(res, 200, { data: offers, error: null });
+      } catch (err) {
+        if (err instanceof Error && (err.message.includes("required") || err.message.includes("invalid"))) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "CATALOG_COMPARE_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #534 — Purchase Proposal Generation ───────────────────────────
+
+    route("POST", "/api/v1/agent/proposals", async (req, res) => {
+      try {
+        const {
+          createPurchaseProposal,
+          validateCreateProposalInput,
+        } = await import("./proposals/purchaseProposal.js");
+        const body = await readJsonBody(req);
+        const input = validateCreateProposalInput(body);
+        const proposal = await createPurchaseProposal(input);
+        json(res, 201, { data: proposal, error: null });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        if (err instanceof Error && err.message.includes("required")) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "PROPOSAL_CREATE_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #532 — Buyer Memory Vector Search ──────────────────────────────
+
+    route("POST", "/api/v1/agent/memories", async (req, res) => {
+      try {
+        const {
+          upsertMemoryWithEmbedding,
+          validateUpsertMemoryInput,
+        } = await import("../../../../agents/buyer-agent/src/memory/embeddingService.js");
+        const { Pool: PgPool } = await import("pg");
+        const db = new PgPool({
+          connectionString:
+            process.env.DATABASE_URL ?? "postgresql://delego:delego@localhost:5432/delego",
+        });
+        const body = await readJsonBody(req);
+        const input = validateUpsertMemoryInput(body);
+        const memory = await upsertMemoryWithEmbedding(db, input);
+        json(res, 201, { data: memory, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("required")) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "MEMORY_UPSERT_FAILED", err);
+      }
+    }),
+
+    route("GET", "/api/v1/agent/memories/search", async (req, res) => {
+      try {
+        const {
+          searchMemories,
+          validateMemorySearchInput,
+        } = await import("../../../../agents/buyer-agent/src/memory/embeddingService.js");
+        const { Pool: PgPool } = await import("pg");
+        const db = new PgPool({
+          connectionString:
+            process.env.DATABASE_URL ?? "postgresql://delego:delego@localhost:5432/delego",
+        });
+        const qs = Object.fromEntries(
+          new URL(req.url ?? "/", "http://localhost").searchParams.entries()
+        );
+        const input = validateMemorySearchInput(qs);
+        const memories = await searchMemories(db, input);
+        json(res, 200, { data: memories, error: null });
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("required")) {
+          json(res, 400, { data: null, error: { code: "VALIDATION_ERROR", message: err.message } });
+          return;
+        }
+        sendOperationError(res, "MEMORY_SEARCH_FAILED", err);
+      }
+    }),
+
+    // ─── Issue #505 — Sales Tax & VAT Calculation ────────────────────────────
+
+    route("POST", "/api/v1/payments/tax/calculate", async (req, res) => {
+      try {
+        const body = await readJsonBody(req);
+        const validation = validateTaxCalculationParams(body);
+        if (!validation.ok) {
+          sendValidationError(res, validation.error);
+          return;
+        }
+        const result = calculateTax(validation.value);
+        json(res, 200, { data: result, error: null });
+      } catch (err) {
+        if (err instanceof PayloadTooLargeError) {
+          sendPayloadTooLargeError(res, err);
+          return;
+        }
+        sendOperationError(res, "TAX_CALCULATION_FAILED", err);
+      }
     }),
   ];
 }

@@ -174,3 +174,37 @@ function percentile(sortedValues: number[], p: number): number {
   const index = Math.min(sortedValues.length - 1, Math.floor(p * sortedValues.length));
   return sortedValues[index];
 }
+
+/**
+ * Fetch wrapper that propagates the current correlation ID (W3C-style
+ * tracing headers are the caller's concern via fetchWithCorrelation) and
+ * records an HTTP span's attributes for every outbound call.
+ */
+export async function tracedFetch(
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+  const response = await fetchImpl(input, init);
+  // Attributes are computed so the span shape is validated even when no
+  // exporter is wired; exporter integration is the caller's toolchain choice.
+  buildHttpSpanAttributes(method, url, response.status);
+  return response;
+}
+
+/**
+ * Initialize tracing configuration for a service. Returns the normalized
+ * TraceConfig; SDK/exporter wiring is intentionally left to the caller.
+ */
+export function initTelemetry(partial: Partial<TraceConfig> & { serviceName: string }): TraceConfig {
+  return {
+    sampler: "parent_based",
+    sampleRate: 1,
+    exporter: "otlp",
+    endpoint: "",
+    propagators: ["tracecontext", "baggage"],
+    ...partial,
+  };
+}

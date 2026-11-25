@@ -9,8 +9,36 @@ import { encodeCursor, decodeCursor } from "../../src/base64Cursor.js";
 import { readJsonBody, InvalidJsonError, BodyTooLargeError } from "../../src/request.js";
 import { badRequest, notFound, unauthorized, forbidden, sendApiError } from "../../src/errors.js";
 import { Merchant, Product } from "../../src/models/index.js";
+import { enqueueRestockNotification } from "../../../notifications/src/restock/queue.js";
+import { getRedisClient } from "../../src/rateLimit/redisClient.js";
+import {
+  fetchProductStockLevelFromDb,
+  getProductStockLevel,
+} from "../../src/routes/products.js";
 
 const log = createLogger("gateway:catalog", process.env.LOG_LEVEL ?? "info");
+
+/**
+ * Kick off waitlist notifications when stock crosses from 0 to >0. Never
+ * fails the caller's request: a missed enqueue is logged, not surfaced.
+ */
+export async function triggerRestockIfReplenished(
+  productId: string,
+  previousStock: number,
+  currentStock: number,
+): Promise<void> {
+  try {
+    const enqueued = await enqueueRestockNotification(productId, previousStock, currentStock);
+    if (enqueued) {
+      log.info("Restock waitlist notification enqueued", { productId, previousStock, currentStock });
+    }
+  } catch (err) {
+    log.error("Failed to enqueue restock waitlist notification", {
+      productId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 function formatProductResponse(product: Product): Record<string, unknown> {
   return {
@@ -288,6 +316,7 @@ export async function updateProductHandler(
     }
 
     const { product } = ownership;
+    const previousStock = product.stockQuantity;
     const updateFields: Partial<Product> = {};
     if (body.sku !== undefined) updateFields.sku = body.sku;
     if (body.title !== undefined) updateFields.title = body.title;
@@ -313,6 +342,8 @@ export async function updateProductHandler(
     }
 
     log.info("Product updated", { productId, userId: auth.userId });
+    // Fire-and-forget: the merchant's update must not wait on the queue.
+    void triggerRestockIfReplenished(productId, previousStock, product.stockQuantity);
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
@@ -382,11 +413,46 @@ export async function deleteProductHandler(
   }
 }
 
+export async function getProductStockLevelHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>,
+): Promise<void> {
+  const productId = params.productId;
+  if (!productId) {
+    badRequest(res, "productId path parameter is required", req);
+    return;
+  }
+
+  try {
+    const stockLevel = await getProductStockLevel(productId, {
+      redis: getRedisClient(),
+      lookupProductStock: fetchProductStockLevelFromDb,
+    });
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: stockLevel, error: null }));
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("not found")) {
+      notFound(res, "Product not found", req);
+      return;
+    }
+
+    log.error("Failed to fetch product stock level", {
+      error: err instanceof Error ? err.message : String(err),
+      productId,
+    });
+    sendApiError(res, 500, "PRODUCT_STOCK_FETCH_FAILED",
+      err instanceof Error ? err.message : "Failed to fetch product stock level", req);
+  }
+}
+
 export function registerCatalogRoutes(): Route[] {
   return [
     route("POST", "/api/v1/merchants/:merchantId/products", createProductHandler),
     route("GET", "/api/v1/merchants/:merchantId/products", listProductsHandler),
     route("GET", "/api/v1/products/:productId", getProductHandler),
+    route("GET", "/api/v1/products/:productId/stock-level", getProductStockLevelHandler),
     route("PUT", "/api/v1/products/:productId", updateProductHandler),
     route("DELETE", "/api/v1/products/:productId", deleteProductHandler),
   ];

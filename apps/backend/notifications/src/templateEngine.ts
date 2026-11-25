@@ -144,7 +144,7 @@ export function renderTemplate(request: TemplateRenderRequest): TemplateRenderRe
   }
 
   // Interpolate variables
-  html = interpolate(html, request.variables);
+  html = interpolate(html, request.variables, true);
   text = interpolate(text, request.variables);
   subject = interpolate(subject, request.variables);
 
@@ -181,12 +181,25 @@ function processLoops(template: string, variables: Record<string, unknown>): str
   });
 }
 
-function interpolate(template: string, data: Record<string, unknown>): string {
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function interpolate(
+  template: string,
+  data: Record<string, unknown>,
+  escape = false
+): string {
   return template.replace(PLACEHOLDER_RE, (_match, key: string) => {
     const value = data[key];
     if (value === undefined) return `{{${key}}}`;
-    if (typeof value === "object") return JSON.stringify(value);
-    return String(value);
+    const stringValue = typeof value === "object" ? JSON.stringify(value) : String(value);
+    return escape ? escapeHtml(stringValue) : stringValue;
   });
 }
 

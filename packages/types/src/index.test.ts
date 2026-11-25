@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
+import { MerchantProfileUpdateSchema } from "@delegolabs/types";
 import type {
   User,
   Delegation,
@@ -8,9 +9,25 @@ import type {
   AgentDefinition,
   ApiResponse,
   HealthCheckResponse,
+  LLMMessage,
+  EmergencyBroadcastSignal,
 } from "@delegolabs/types";
 
 describe("@delegolabs/types", () => {
+  it("exports the merchant profile schema used by the gateway", () => {
+    expect(MerchantProfileUpdateSchema.parse({ displayName: "Acme" })).toEqual({
+      displayName: "Acme",
+    });
+    expect(MerchantProfileUpdateSchema.safeParse({}).success).toBe(false);
+    expect(MerchantProfileUpdateSchema.safeParse({ isVerified: true }).success).toBe(false);
+  });
+
+  it("exports the canonical agent chat and emergency broadcast types", () => {
+    expectTypeOf<LLMMessage>().toEqualTypeOf<import("./llm.js").LLMMessage>();
+    expectTypeOf<EmergencyBroadcastSignal>()
+      .toEqualTypeOf<import("./security.js").EmergencyBroadcastSignal>();
+  });
+
   it("exports User interface", () => {
     const user: User = {
       id: "u1",

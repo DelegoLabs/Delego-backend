@@ -20,6 +20,7 @@ import { RefreshToken } from "../models/RefreshToken.js";
 import { User } from "../models/User.js";
 import { getSigningKeyStore } from "./tokenKeys.js";
 import { isTokenRevoked, revokeToken } from "./tokenBlacklist.js";
+import { isUserSessionRevoked } from "./sessionRevocation.js";
 import type {
   IntrospectionResult,
   JWKSKey,
@@ -283,6 +284,9 @@ export async function verifyAccessToken(
   }
   if (opts.checkRevoked !== false && (await isTokenRevoked(claims.jti))) {
     throw new Error("Token has been revoked");
+  }
+  if (await isUserSessionRevoked(claims.userId, claims.iat)) {
+    throw new Error("User sessions have been revoked");
   }
   return claims;
 }

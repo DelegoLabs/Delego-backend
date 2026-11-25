@@ -85,7 +85,7 @@ export interface SagaRecord<TContext = Record<string, unknown>> {
   updatedAt: Date;
 }
 
-/** Thrown by SagaStore.save() when `record.version` no longer matches the persisted version. */
+/** Thrown by WorkflowStateStore.save() when `record.version` no longer matches the persisted version. */
 export class SagaConcurrencyError extends Error {
   constructor(sagaId: string) {
     super(`Saga ${sagaId} was modified by another runner — aborting to avoid duplicate step execution`);
@@ -119,34 +119,8 @@ export interface SagaRecoveryResult {
   details: SagaRecoveryDetail[];
 }
 
-/**
- * Persistence boundary for saga progress. Implementations must make save() safe to call
- * repeatedly with the same record (upsert keyed on optimistic `version`), since a crash can
- * interrupt execution between a step completing and the saga advancing to the next one.
- */
-export interface SagaStore {
-  /** Inserts a new saga record. Returns the existing record if sagaId already exists (idempotent start). */
-  create(record: SagaRecord): Promise<SagaRecord>;
-  /** @deprecated use {@link create}; retained for the #347 timeout processor's existing callers. */
-  createIfNotExists(record: SagaRecord): Promise<SagaRecord>;
-  get(sagaId: string): Promise<SagaRecord | null>;
-  /**
-   * Persists record and returns the stored copy with `version` incremented. Throws
-   * SagaConcurrencyError if `record.version` doesn't match the persisted version, which is how
-   * callers detect that another runner already claimed this step.
-   */
-  save(record: SagaRecord): Promise<SagaRecord>;
-  /** Sagas left in "running" or "compensating" — used to resume after an orchestrator crash. */
-  listIncomplete(): Promise<SagaRecord[]>;
-  /** Sagas whose lease/expiry deadline has passed and must be auto-recovered or compensated. */
-  listTimedOut(): Promise<SagaRecord[]>;
-  /** Appends an immutable transition event to the saga audit trail. */
-  appendEvent(event: SagaEvent): Promise<void>;
-  /** Returns the full ordered audit trail for a saga. */
-  getEvents(sagaId: string): Promise<SagaEvent[]>;
-  /** Looks up a saga by its correlation id (distributed tracing). */
-  findByCorrelationId(correlationId: string): Promise<SagaRecord | null>;
-}
+/** Backwards-compatible name for the unified workflow checkpoint store. */
+export type SagaStore = import("../../state/types.js").WorkflowStateStore;
 
 export function serializeSagaExecution(record: SagaRecord): SagaExecution {
   return {

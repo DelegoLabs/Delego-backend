@@ -12,8 +12,17 @@ import {
   oauthAuthorizeHandler,
   introspectHandler,
   revokeHandler,
+  revokeAllSessionsHandler,
   jwksHandler,
 } from "./auth.js";
+import {
+  createErasureRequestHandler,
+  confirmErasureHandler,
+  getErasureStatusHandler,
+  getErasureCertificateHandler,
+  deleteAccountHandler,
+} from "./erasure.js";
+import { stellarFeePredictionHandler } from "./stellar.js";
 import {
   beginRegistrationHandler,
   completeRegistrationHandler,
@@ -115,12 +124,20 @@ import { registerStorageRoutes } from "./storage.js";
 import { registerDisputeRoutes } from "./disputes.js";
 import { searchProductsHandler, embeddingCacheMetricsHandler } from "../src/search/routes.js";
 import { registerMerchantRoutes } from "../src/merchant/routes.js";
+import { registerMerchantWebhookRoutes } from "../src/merchant/webhooks.js";
 import { registerCatalogRoutes } from "../src/catalog/routes.js";
+import { registerProductRoutes } from "../src/routes/products.js";
 import { registerVariantRoutes } from "../src/catalog/variants.js";
 import { registerReviewRoutes } from "../src/catalog/reviews.js";
 import { registerDeliveryEvidenceRoutes } from "../src/catalog/deliveryEvidence.js";
+import { registerWaitlistRoutes } from "../src/waitlist/routes.js";
+import { registerBulkCatalogImportRoutes } from "../src/catalog/bulkImport/routes.js";
 import { registerAgentChatRoutes } from "./agentChat.js";
+import { registerWebhookRoutes } from "./webhooks.js";
+import { registerDiscountRoutes } from "./discounts.js";
+import { registerCartRoutes } from "./cart.js";
 import { registerMetricsRoutes } from "../src/metrics.js";
+import { registerOracleRateRoutes } from "../src/oracle/routes.js";
 import {
   dbSlaStatusHandler,
   dbSlowQueriesHandler,
@@ -142,6 +159,7 @@ export function registerRoutes(): Route[] {
     // JWT management (Issue #77)
     route("POST", "/api/v1/auth/introspect", introspectHandler),
     route("POST", "/api/v1/auth/revoke", revokeHandler),
+    route("POST", "/api/v1/auth/revoke-all-sessions", revokeAllSessionsHandler),
     route("GET", "/api/v1/auth/.well-known/jwks.json", jwksHandler),
     route("GET", "/.well-known/jwks.json", jwksHandler),
     route("GET", "/api/v1/auth/oauth/authorize", oauthAuthorizeHandler),
@@ -160,6 +178,8 @@ export function registerRoutes(): Route[] {
     route("PATCH", "/api/v1/delegations/:id", updateDelegationHandler),
     route("DELETE", "/api/v1/delegations/:id", revokeDelegationHandler),
     route("GET", "/api/v1/wallets/:walletId", getWalletHandler),
+    // Stellar fee prediction endpoint
+    route("GET", "/api/v1/stellar/fee-prediction", stellarFeePredictionHandler),
     // Payment method vault routes
     ...registerPaymentRoutes(),
     // Account recovery routes
@@ -246,6 +266,13 @@ export function registerRoutes(): Route[] {
     // Admin — audit log query API (#66)
     route("GET", "/api/v1/admin/audit-log", auditLogQueryHandler),
     route("GET", "/api/v1/admin/audit-log/verify", auditLogVerifyHandler),
+    // GDPR Account Erasure routes
+    route("POST", "/api/v1/user/account/erasure-request", createErasureRequestHandler),
+    route("POST", "/api/v1/user/account/confirm-erasure", confirmErasureHandler),
+    route("GET", "/api/v1/user/account/erasure-status/:requestId", getErasureStatusHandler),
+    route("GET", "/api/v1/user/account/erasure-certificate/:certificateHash", getErasureCertificateHandler),
+    // Direct account deletion endpoint
+    route("DELETE", "/api/v1/user/account", deleteAccountHandler),
     // Emergency Kill-Switch Broadcast API (#375)
     route("POST", "/api/v1/admin/emergency/broadcast", emergencyBroadcastHandler),
     route("GET", "/api/v1/admin/emergency/status", emergencyStatusHandler),
@@ -258,6 +285,8 @@ export function registerRoutes(): Route[] {
     route("GET", "/api/v1/search/embedding-cache/metrics", embeddingCacheMetricsHandler),
     // Issue #299 — Delivery Oracle Health Check & Heartbeat Monitor
     route("GET", "/health/oracle", oracleHealthHandler),
+    // Issue #528 — Fiat currency conversion oracle cache
+    ...registerOracleRateRoutes(),
     // Workflow template system
     route("GET", "/api/v1/templates/catalog", catalogHandler),
     route("GET", "/api/v1/templates/categories", categoriesHandler),
@@ -293,15 +322,29 @@ export function registerRoutes(): Route[] {
     ...registerDisputeRoutes(),
     // Merchants - registration & store management
     ...registerMerchantRoutes(),
+    // Merchant webhooks - outbound webhook management & delivery inspection
+    ...registerMerchantWebhookRoutes(),
     // Catalog - product CRUD with cursor pagination
     ...registerCatalogRoutes(),
+    // Product stock-level cache-aside endpoint
+    ...registerProductRoutes(),
     // Product variants - variable products (sizes, colors, materials)
     ...registerVariantRoutes(),
     // Reviews with buyer verification
     ...registerReviewRoutes(),
     // Delivery evidence with IPFS/Arweave upload
     ...registerDeliveryEvidenceRoutes(),
+    // Restock waitlist subscriptions
+    ...registerWaitlistRoutes(),
+    // Bulk CSV catalog import jobs
+    ...registerBulkCatalogImportRoutes(),
     // Agent Chat - SSE streaming for agent conversations
     ...registerAgentChatRoutes(),
+    // Courier webhooks - FedEx/DHL/UPS normalizer (Issue #577)
+    ...registerWebhookRoutes(),
+    // Merchant Discounts - promotion campaigns
+    ...registerDiscountRoutes(),
+    // Cart sync - multi-device cart merge (Issue #574)
+    ...registerCartRoutes(),
   ];
 }

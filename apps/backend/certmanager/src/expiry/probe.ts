@@ -9,6 +9,10 @@ import { type TcpSocketConnectOpts, type Socket } from "node:net";
 import type { CertStatus } from "@delegolabs/types";
 import { CERT_EXPIRY_WARNING_DAYS } from "@delegolabs/types";
 
+const DEFAULT_WARNING_DAYS = Number.isFinite(CERT_EXPIRY_WARNING_DAYS)
+  ? CERT_EXPIRY_WARNING_DAYS
+  : 14;
+
 export const DEFAULT_TLS_PORT = 443;
 export const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 
@@ -137,7 +141,7 @@ export function buildCertStatus(
   domain: string,
   validTo: Date,
   now: Date = new Date(),
-  warningDays: number = CERT_EXPIRY_WARNING_DAYS,
+  warningDays: number = DEFAULT_WARNING_DAYS,
 ): CertStatus {
   const msPerDay = 24 * 60 * 60 * 1000;
   const daysRemaining = Math.floor((validTo.getTime() - now.getTime()) / msPerDay);

@@ -15,14 +15,23 @@ export {
   getCacheClient,
   clusterConfigFromEnv,
   sentinelConfigFromEnv,
+  sentinelReconnectConfigFromEnv,
   isSentinelEnabled,
   defaultRetryStrategy,
   disconnectCacheClient,
   getClusterFailoverClient,
   getClusterHealthMonitor,
+  getSentinelReconnectManager,
   _setCacheClientForTesting,
   _resetCacheClientForTesting,
 } from "./client.js";
+
+export {
+  DEFAULT_SENTINEL_RECONNECT_CONFIG,
+  SentinelReconnectManager,
+  sentinelReconnectDelay,
+  type SentinelReconnectConfig,
+} from "./sentinelReconnect.js";
 
 export {
   parseNodeList,
@@ -84,3 +93,20 @@ export {
   type RedisLockPayload,
   type RedisLockRenewResult,
 } from "./lock.js";
+export {
+  SentinelFailoverHealthBridge,
+  SentinelReadonlyError,
+  type RedisClusterHealthReport,
+  type SentinelRedisClient,
+  type SentinelFailoverHealthBridgeOptions,
+} from "./sentinelFailover.js";
+
+export {
+  acquireRedlock,
+  releaseRedlock,
+  extendRedlock,
+  lockKeyForResource,
+  withCartCheckoutLock,
+  type RedlockOptions,
+  type LockHandle,
+} from "./redlock.js";

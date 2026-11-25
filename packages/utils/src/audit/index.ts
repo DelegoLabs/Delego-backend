@@ -10,8 +10,17 @@ export {
   configureAuditLogTransport,
   createCefSyslogTransport,
   formatCef,
+  formatCefEvent,
+  createSecurityEventSyslogTlsTransport,
+  createSecurityEventSyslogUdpTransport,
+  configureSecurityEventTransport,
+  dispatchSecurityEvent,
+  isHighSeverityCefEvent,
   type AuditLogTransport,
   type CefSyslogOptions,
+  type CefEvent,
+  type CefSyslogUdpOptions,
+  type SecurityEventTransport,
 } from "./cefExporter.js";
 
 export {
@@ -24,6 +33,16 @@ export {
 } from "./auditChain.js";
 
 export { StellarMerklePublisher, createStellarPublisherFromEnv } from "./stellarPublisher.js";
+
+export {
+  DEFAULT_BATCH_SIZE as MERKLE_BATCH_DEFAULT_SIZE,
+  buildMerkleTree,
+  generateMerkleProof,
+  verifyMerkleProof,
+  batchItems,
+  type MerkleTree,
+  type MerkleProofStep,
+} from "./merkleTree.js";
 
 export {
   verifyStoredChain,
