@@ -28,10 +28,12 @@ import { defaultWebhookRegistry } from "../../webhooks/registry.js";
 import { defaultWebhookDeliveryTracker } from "../../webhooks/deliveryTracker.js";
 import { postJsonWithPinnedIp, validateWebhookUrl } from "../../webhooks/ssrfGuard.js";
 import { redisConnectionFromUrl } from "../restock/queue.js";
+import { createHash } from "node:crypto";
 
 const log = createLogger("notifications:low-stock:worker", process.env.LOG_LEVEL ?? "info");
 
 const WEBHOOK_TIMEOUT_MS = 10_000;
+type UUID = `${string}-${string}-${string}-${string}-${string}`;
 
 export interface MerchantContact {
   email: string | null;
@@ -42,7 +44,7 @@ export interface LowStockJobDeps {
   dispatchWebhook(
     eventType: string,
     payload: Record<string, unknown>,
-    eventId: string,
+    eventId: UUID,
   ): Promise<unknown>;
   getMerchantContact(merchantId: string): Promise<MerchantContact | null>;
   sendEmail(message: EmailMessage): Promise<void>;
@@ -65,8 +67,19 @@ function escapeHtml(value: string): string {
 }
 
 /** Stable per alert so a retried job reuses the same webhook event id. */
-export function lowStockEventId(payload: LowStockAlertPayload): string {
-  return `low-stock-${payload.merchantId}-${payload.productId}-${payload.triggeredAt}-${payload.sku || ''}`;
+/** Stable UUID per alert so retries reuse the same webhook event id. */
+export function lowStockEventId(payload: LowStockAlertPayload): UUID {
+  const hex = createHash("sha256")
+    .update(`${payload.merchantId}-${payload.productId}-${payload.triggeredAt}-${payload.sku || ""}`)
+    .digest("hex")
+    .slice(0, 32);
+
+  const chars = hex.split("");
+  chars[12] = "5";
+  chars[16] = ((parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+
+  const id = chars.join("");
+  return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
 }
 
 export function buildLowStockEmail(
