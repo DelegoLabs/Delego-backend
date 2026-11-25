@@ -95,6 +95,21 @@ export interface SubnetVelocityRedisClient {
   del(key: string): Promise<number>;
 }
 
+type SubnetVelocityRedisMulti = ReturnType<SubnetVelocityRedisClient["multi"]>;
+
+function isSubnetVelocityRedisMulti(value: unknown): value is SubnetVelocityRedisMulti {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.zadd === "function" &&
+    typeof candidate.zremrangebyscore === "function" &&
+    typeof candidate.expire === "function" &&
+    typeof candidate.exec === "function"
+  );
+}
+
 export class SubnetVelocityFilter {
   private readonly redis: SubnetVelocityRedisClient;
   private readonly config: SubnetVelocityConfig;
@@ -135,12 +150,14 @@ export class SubnetVelocityFilter {
     const windowStart = now - WINDOW_MS;
     const member = `${now}:${randomUUID()}`;
 
-    await this.redis
-      .multi()
-      .zadd(key, now, member)
-      .zremrangebyscore(key, 0, windowStart)
-      .expire(key, Math.ceil(WINDOW_MS / 1000) * 2)
-      .exec();
+    const pipeline = this.redis.multi();
+    const afterZadd = pipeline.zadd(key, now, member);
+    const step2 = isSubnetVelocityRedisMulti(afterZadd) ? afterZadd : pipeline;
+    const afterZrem = step2.zremrangebyscore(key, 0, windowStart);
+    const step3 = isSubnetVelocityRedisMulti(afterZrem) ? afterZrem : step2;
+    const afterExpire = step3.expire(key, Math.ceil(WINDOW_MS / 1000) * 2);
+    const finalPipeline = isSubnetVelocityRedisMulti(afterExpire) ? afterExpire : step3;
+    await finalPipeline.exec();
 
     const currentCount = await this.redis.zcount(key, windowStart, now);
 
