@@ -23,6 +23,7 @@ import {
   PostgresDomainCertificateVault,
   PostgresDomainVerificationJobSource,
   type DomainCertificateVault,
+  type DomainVerificationJob,
   type DomainVerificationJobSource,
 } from "./store/domainCertificateStore.js";
 
@@ -268,7 +269,7 @@ export class DomainVerificationWorker {
 
   /** Processes one batch of pending domain verification jobs. */
   async runCycle(): Promise<DomainVerificationCycleSummary> {
-    const jobs = await this.jobSource.listPending(this.batchSize);
+    const jobs: DomainVerificationJob[] = await this.jobSource.listPending(this.batchSize);
     const summary: DomainVerificationCycleSummary = {
       checked: 0,
       verified: 0,

@@ -282,18 +282,24 @@ describe("DomainVerificationWorker.runCycle", () => {
       }
     }
 
-    const jobSource = new InMemoryDomainVerificationJobSource([makeJob()]);
+    const jobSource = new InMemoryDomainVerificationJobSource([
+      makeJob({ merchantId: "merchant_error", customDomain: "failed.merchant.com" }),
+    ]);
     const worker = makeWorker({
       jobSource,
       acmeClient: new FailingAcmeClient(),
-      resolver: new StaticResolver({ "shop.merchant.com": ["edge.delego.io"] }),
+      resolver: new StaticResolver({ "failed.merchant.com": ["edge.delego.io"] }),
     });
 
     const summary = await worker.runCycle();
 
     expect(summary.failed).toBe(1);
     expect(summary.provisioned).toBe(0);
-    expect(summary.errors[0].error).toMatch(/rate limited/);
+    expect(summary.errors[0]).toMatchObject({
+      merchantId: "merchant_error",
+      domain: "failed.merchant.com",
+      error: "ACME rate limited",
+    });
     expect((await jobSource.listPending(10))[0].lastError).toMatch(/rate limited/);
   });
 });

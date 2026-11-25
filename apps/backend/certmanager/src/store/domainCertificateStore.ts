@@ -16,6 +16,9 @@ import type {
  */
 
 export interface DomainVerificationJob extends DomainVerificationJobData {
+  merchantId: string;
+  customDomain: string;
+  targetCname: string;
   attempts: number;
   lastCheckedAt?: string;
   lastError?: string;
