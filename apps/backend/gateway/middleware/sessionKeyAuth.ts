@@ -1,14 +1,12 @@
 /**
- * Session Key Authentication Middleware (Issue #TBD)
+ * Session Key Authentication Middleware (Issue #788)
  *
  * Validates cryptographic signatures from autonomous buyer agents using
  * delegated ephemeral Ed25519 keys. This middleware:
  * 
  * 1. Verifies Ed25519 signature of request payload against sessionPublicKey
- * 2. Confirms session key is active and unexpired (TODO: database check)
- * 3. Verifies spending allowance limits (TODO: Redis check)
- * 
- * This file implements step 1: Ed25519 signature verification (1% complete).
+ * 2. Confirms session key is active and unexpired in PostgreSQL.
+ * 3. Enforces per-session spending limits and nonce replay protection in Redis.
  */
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
@@ -194,4 +192,183 @@ export function parseSessionKeyAuthHeader(authHeader: string | undefined): Sessi
   } catch {
     return null;
   }
+}
+
+
+/** PostgreSQL row required to authorize a delegated session key. */
+export interface SessionKeyAuthRecord {
+  revoked: boolean;
+  expires_at: Date | string;
+  spending_limit_stroops: string;
+  spent_amount_stroops: string;
+  max_per_call_stroops: string;
+}
+
+export interface SessionKeyAuthDatabase {
+  query<T = SessionKeyAuthRecord>(
+    sql: string,
+    values: unknown[]
+  ): Promise<{ rows: T[] }>;
+}
+
+export interface SessionKeyAuthRedis {
+  set(key: string, value: string, ...args: Array<string | number>): Promise<string | null>;
+  eval(script: string, numberOfKeys: number, ...args: Array<string | number>): Promise<number>;
+}
+
+export interface SessionKeyAuthDependencies {
+  database: SessionKeyAuthDatabase;
+  redis: SessionKeyAuthRedis;
+  /** Current time in milliseconds; injectable for deterministic tests. */
+  now?: () => number;
+  timestampToleranceMs?: number;
+  nonceTtlSeconds?: number;
+}
+
+export interface SessionKeyAuthRequest {
+  payload: string;
+  requestedAmountStroops: string;
+  authHeader: string | undefined;
+}
+
+export type SessionKeyAuthFailure =
+  | "MISSING_OR_INVALID_HEADER"
+  | "INVALID_SIGNATURE"
+  | "STALE_TIMESTAMP"
+  | "SESSION_KEY_NOT_FOUND"
+  | "SESSION_KEY_REVOKED"
+  | "SESSION_KEY_EXPIRED"
+  | "INVALID_AMOUNT"
+  | "PER_CALL_ALLOWANCE_EXCEEDED"
+  | "SESSION_ALLOWANCE_EXCEEDED"
+  | "NONCE_REPLAYED";
+
+export type SessionKeyAuthResult =
+  | { authorized: true; session: SessionKeyAuthRecord; header: SessionKeyAuthHeader }
+  | { authorized: false; reason: SessionKeyAuthFailure };
+
+/**
+ * Atomically reserves an amount against a session's Redis allowance.
+ *
+ * The Lua script uses decimal-string arithmetic rather than Lua numbers:
+ * Stellar stroops can exceed IEEE-754's exact integer range.
+ */
+export const RESERVE_SESSION_ALLOWANCE_SCRIPT = `
+local function norm(value)
+  value = string.gsub(value, "^0+", "")
+  if value == "" then return "0" end
+  return value
+end
+local function greater(a, b)
+  a = norm(a); b = norm(b)
+  if string.len(a) ~= string.len(b) then
+    return string.len(a) > string.len(b)
+  end
+  return a > b
+end
+local function add(a, b)
+  a = norm(a); b = norm(b)
+  local i = string.len(a)
+  local j = string.len(b)
+  local carry = 0
+  local out = ""
+  while i > 0 or j > 0 or carry > 0 do
+    local da = i > 0 and tonumber(string.sub(a, i, i)) or 0
+    local db = j > 0 and tonumber(string.sub(b, j, j)) or 0
+    local sum = da + db + carry
+    out = tostring(sum % 10) .. out
+    carry = math.floor(sum / 10)
+    i = i - 1; j = j - 1
+  end
+  return norm(out)
+end
+local current = redis.call("GET", KEYS[1])
+if not current then current = ARGV[1] end
+local nextValue = add(current, ARGV[2])
+if greater(nextValue, ARGV[3]) then return -1 end
+redis.call("SET", KEYS[1], nextValue, "EX", ARGV[4])
+return 1
+`;
+
+/**
+ * Authenticates a signed session-key request and enforces its persisted
+ * status, per-call/total allowance, and one-time nonce.
+ *
+ * The caller must pass the exact raw payload that was signed and the
+ * requested amount in stroops. Signature verification deliberately runs
+ * before database/Redis lookups so unauthenticated callers cannot probe
+ * session state.
+ */
+export async function authenticateSessionKeyRequest(
+  request: SessionKeyAuthRequest,
+  dependencies: SessionKeyAuthDependencies
+): Promise<SessionKeyAuthResult> {
+  const header = parseSessionKeyAuthHeader(request.authHeader);
+  if (!header) return { authorized: false, reason: "MISSING_OR_INVALID_HEADER" };
+
+  if (!verifyEd25519Signature(request.payload, header.signature, header.sessionPublicKey).valid) {
+    return { authorized: false, reason: "INVALID_SIGNATURE" };
+  }
+
+  const now = (dependencies.now ?? Date.now)();
+  const tolerance = dependencies.timestampToleranceMs ?? 5 * 60 * 1000;
+  if (!Number.isFinite(header.timestamp) || Math.abs(now - header.timestamp) > tolerance) {
+    return { authorized: false, reason: "STALE_TIMESTAMP" };
+  }
+
+  const amount = request.requestedAmountStroops;
+  if (!/^[0-9]+$/.test(amount) || /^0+$/.test(amount)) {
+    return { authorized: false, reason: "INVALID_AMOUNT" };
+  }
+
+  const result = await dependencies.database.query<SessionKeyAuthRecord>(
+    `SELECT revoked, expires_at, spending_limit_stroops,
+            spent_amount_stroops, max_per_call_stroops
+       FROM session_keys
+      WHERE session_public_key = $1
+      LIMIT 1`,
+    [header.sessionPublicKey]
+  );
+  const session = result.rows[0];
+  if (!session) return { authorized: false, reason: "SESSION_KEY_NOT_FOUND" };
+  if (session.revoked) return { authorized: false, reason: "SESSION_KEY_REVOKED" };
+
+  const expiresAt = new Date(session.expires_at).getTime();
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+    return { authorized: false, reason: "SESSION_KEY_EXPIRED" };
+  }
+
+  if (
+    !/^[0-9]+$/.test(session.spending_limit_stroops) ||
+    !/^[0-9]+$/.test(session.spent_amount_stroops) ||
+    !/^[0-9]+$/.test(session.max_per_call_stroops)
+  ) {
+    return { authorized: false, reason: "INVALID_AMOUNT" };
+  }
+  if (BigInt(amount) > BigInt(session.max_per_call_stroops)) {
+    return { authorized: false, reason: "PER_CALL_ALLOWANCE_EXCEEDED" };
+  }
+
+  // Claim the nonce only after the signature and persisted session checks.
+  // The namespace includes the public key so separate sessions cannot collide.
+  const nonceTtl = dependencies.nonceTtlSeconds ?? 600;
+  const nonceKey = `session-key:nonce:${header.sessionPublicKey}:${header.nonce}`;
+  const claimed = await dependencies.redis.set(nonceKey, "1", "EX", nonceTtl, "NX");
+  if (claimed !== "OK") return { authorized: false, reason: "NONCE_REPLAYED" };
+
+  const remainingTtl = Math.max(1, Math.ceil((expiresAt - now) / 1000));
+  const allowanceResult = await dependencies.redis.eval(
+    RESERVE_SESSION_ALLOWANCE_SCRIPT,
+    1,
+    `session-key:allowance:${header.sessionPublicKey}`,
+    session.spent_amount_stroops,
+    amount,
+    session.spending_limit_stroops,
+    remainingTtl
+  );
+  if (allowanceResult !== 1) {
+    return { authorized: false, reason: "SESSION_ALLOWANCE_EXCEEDED" };
+  }
+
+  return { authorized: true, session, header };
 }

@@ -3,11 +3,11 @@
  * Tests Ed25519 signature verification (1% of the feature)
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   verifyEd25519Signature,
   hashPayload,
-  parseSessionKeyAuthHeader,
+  parseSessionKeyAuthHeader,\n  authenticateSessionKeyRequest,\n  RESERVE_SESSION_ALLOWANCE_SCRIPT,
   type SessionKeyAuthHeader,
 } from "./sessionKeyAuth.js";
 import { generateKeyPairSync, sign } from "node:crypto";
@@ -202,5 +202,131 @@ describe("Session Key Authentication", () => {
 
       expect(parsed).toBeNull();
     });
+  });
+});
+
+
+describe("authenticateSessionKeyRequest", () => {
+  const now = 1_800_000_000_000;
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPublicKey = publicKey.export({ type: "spki", format: "der" }).subarray(-32);
+  const sessionPublicKey = rawPublicKey.toString("hex");
+  const payload = JSON.stringify({ action: "transfer", amount: "100" });
+
+  function authHeader(nonce = "nonce-1", timestamp = now): string {
+    const signature = sign(null, Buffer.from(payload), privateKey);
+    const auth: SessionKeyAuthHeader = {
+      sessionPublicKey,
+      delegatorAddress: "GDELEGATOR",
+      signature: signature.toString("hex"),
+      timestamp,
+      nonce,
+    };
+    return `SessionKey ${Buffer.from(JSON.stringify(auth)).toString("base64")}`;
+  }
+
+  function dependencies(overrides: {
+    row?: Record<string, unknown> | null;
+    nonceResult?: string | null;
+    allowanceResult?: number;
+  } = {}) {
+    const row = overrides.row === undefined ? {
+      revoked: false,
+      expires_at: new Date(now + 60_000).toISOString(),
+      spending_limit_stroops: "1000",
+      spent_amount_stroops: "100",
+      max_per_call_stroops: "1000",
+    } : overrides.row;
+    return {
+      database: {
+        query: vi.fn().mockResolvedValue({ rows: row ? [row] : [] }),
+      },
+      redis: {
+        set: vi.fn().mockResolvedValue(overrides.nonceResult === undefined ? "OK" : overrides.nonceResult),
+        eval: vi.fn().mockResolvedValue(overrides.allowanceResult ?? 1),
+      },
+      now: () => now,
+    } as any;
+  }
+
+  it("rejects a session key that is expired in the database", async () => {
+    const deps = dependencies({
+      row: {
+        revoked: false,
+        expires_at: new Date(now - 1).toISOString(),
+        spending_limit_stroops: "1000",
+        spent_amount_stroops: "100",
+        max_per_call_stroops: "500",
+      },
+    });
+    const result = await authenticateSessionKeyRequest(
+      { payload, requestedAmountStroops: "100", authHeader: authHeader() },
+      deps
+    );
+    expect(result).toEqual({ authorized: false, reason: "SESSION_KEY_EXPIRED" });
+    expect(deps.redis.set).not.toHaveBeenCalled();
+  });
+
+  it("rejects a revoked session key", async () => {
+    const deps = dependencies({
+      row: {
+        revoked: true,
+        expires_at: new Date(now + 60_000).toISOString(),
+        spending_limit_stroops: "1000",
+        spent_amount_stroops: "100",
+        max_per_call_stroops: "500",
+      },
+    });
+    const result = await authenticateSessionKeyRequest(
+      { payload, requestedAmountStroops: "100", authHeader: authHeader() },
+      deps
+    );
+    expect(result).toEqual({ authorized: false, reason: "SESSION_KEY_REVOKED" });
+    expect(deps.redis.set).not.toHaveBeenCalled();
+  });
+
+  it("rejects a spend that exceeds the session allowance", async () => {
+    const deps = dependencies({ allowanceResult: -1 });
+    const result = await authenticateSessionKeyRequest(
+      { payload, requestedAmountStroops: "901", authHeader: authHeader() },
+      deps
+    );
+    expect(result).toEqual({ authorized: false, reason: "SESSION_ALLOWANCE_EXCEEDED" });
+    expect(deps.redis.eval).toHaveBeenCalled();
+  });
+
+  it("rejects a replayed nonce", async () => {
+    const deps = dependencies({ nonceResult: null });
+    const result = await authenticateSessionKeyRequest(
+      { payload, requestedAmountStroops: "100", authHeader: authHeader("already-used") },
+      deps
+    );
+    expect(result).toEqual({ authorized: false, reason: "NONCE_REPLAYED" });
+    expect(deps.redis.eval).not.toHaveBeenCalled();
+  });
+
+  it("authorizes a valid request and reserves its allowance atomically", async () => {
+    const deps = dependencies();
+    const result = await authenticateSessionKeyRequest(
+      { payload, requestedAmountStroops: "100", authHeader: authHeader("fresh") },
+      deps
+    );
+    expect(result.authorized).toBe(true);
+    expect(deps.redis.set).toHaveBeenCalledWith(
+      `session-key:nonce:${sessionPublicKey}:fresh`,
+      "1",
+      "EX",
+      600,
+      "NX"
+    );
+    expect(deps.redis.eval).toHaveBeenCalledWith(
+      RESERVE_SESSION_ALLOWANCE_SCRIPT,
+      1,
+      `session-key:allowance:${sessionPublicKey}`,
+      "100",
+      "100",
+      "1000",
+      60
+    );
   });
 });
